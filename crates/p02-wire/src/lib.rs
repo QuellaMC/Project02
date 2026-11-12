@@ -44,7 +44,7 @@ pub use event::{
 };
 pub use health::{
     CharacterState, CharacterSummary, ConfigHealth, ConnectorPresence, Health, MaintenanceFailure,
-    PackageReport, PackagesHealth, RosterState, StartOutcome, StartRefusal,
+    PackageReport, PackagesHealth, PersonAccount, RosterState, StartOutcome, StartRefusal,
 };
 pub use packages::{
     AddCharacterOutcome, AddCharacterRefusal, CharacterFeature, CharacterInstalled,
@@ -56,8 +56,9 @@ pub use pairing::{
     PairingRequestBody, PairingSubject, PairingSubjectBody,
 };
 pub use phone::{
-    AppSource, AppView, LiveReading, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal,
-    PhoneRing, Screen, ScreenItem, ScreenOutcome, ScreenRefusal, ScreenRow, ScreenTile,
+    AppAccount, AppSource, AppView, LiveReading, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome,
+    PhoneRefusal, PhoneRing, Screen, ScreenCell, ScreenItem, ScreenOutcome, ScreenRange,
+    ScreenRefusal, ScreenRow, ScreenTile,
 };
 pub use protocol::{PROTOCOL_VERSION, ProtocolVersion};
 pub use refusal::{ErrorBody, Refusal};

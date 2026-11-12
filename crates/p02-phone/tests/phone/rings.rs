@@ -4,7 +4,7 @@
 use p02_phone::{App, Phone, SetRing};
 use serde_json::{Value, json};
 
-use crate::support::{Files, actions, app, at, input, millis, now};
+use crate::support::{Files, actions, app, at, millis, now, took};
 
 /// An app named `name`, which says it wakes her when it `wakes`, that sets
 /// and cancels rings on request, and hears them with `rang` when it is
@@ -61,8 +61,7 @@ fn timers() -> App {
 
 /// What `phone`'s `app` answers when asked to set `ring`.
 fn ring(phone: &Phone, files: &mut Files, app: &str, ring: &Value) -> Result<Value, String> {
-    phone
-        .act(files, app, "ring", &input(ring), &now())
+    took(phone, files, app, "ring", ring, &now())
         .map(|acted| acted.answer)
         .map_err(|refused| refused.to_string())
 }
@@ -97,16 +96,16 @@ fn an_app_sets_replaces_cancels_and_lists_its_rings() {
 
     for id in ["run", "nothing"] {
         assert_eq!(
-            phone
-                .act(
-                    &mut files,
-                    "alarms",
-                    "cancel",
-                    &input(&json!({"id": id})),
-                    &now()
-                )
-                .unwrap()
-                .answer,
+            took(
+                &phone,
+                &mut files,
+                "alarms",
+                "cancel",
+                &json!({"id": id}),
+                &now()
+            )
+            .unwrap()
+            .answer,
             json!([sooner_tea]),
             "{id}"
         );
@@ -140,15 +139,15 @@ fn an_app_sets_replaces_cancels_and_lists_its_rings() {
     let full = json!({"id": "full", "at": six, "title": "T".repeat(40), "body": "b".repeat(120)});
 
     assert!(ring(&phone, &mut files, "alarms", &full).is_ok());
-    phone
-        .act(
-            &mut files,
-            "alarms",
-            "cancel",
-            &input(&json!({"id": "full"})),
-            &now(),
-        )
-        .unwrap();
+    took(
+        &phone,
+        &mut files,
+        "alarms",
+        "cancel",
+        &json!({"id": "full"}),
+        &now(),
+    )
+    .unwrap();
 
     assert_eq!(
         files.documents["apps/alarms.json"],
@@ -178,16 +177,16 @@ fn an_app_that_does_not_say_it_wakes_her_sets_no_ring_and_cancels_and_lists_as_a
         )
     );
     assert_eq!(
-        phone
-            .act(
-                &mut files,
-                "notes",
-                "cancel",
-                &input(&json!({"id": "tea"})),
-                &now()
-            )
-            .unwrap()
-            .answer,
+        took(
+            &phone,
+            &mut files,
+            "notes",
+            "cancel",
+            &json!({"id": "tea"}),
+            &now()
+        )
+        .unwrap()
+        .answer,
         json!([])
     );
     assert_eq!(phone.rings(&files).unwrap(), []);

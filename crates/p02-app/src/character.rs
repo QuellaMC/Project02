@@ -1240,8 +1240,8 @@ async fn take_turn(
 /// switch her on before anything is written for her, her package's
 /// settings merged into her overlay, her model, or what she needs for one,
 /// and her host built with `broker` to ask the person, her settings for
-/// its own plugin to read and change, through `daemon`, and the App Store's
-/// catalog for her phone to read.
+/// its own plugin to read and change, through `daemon`, the App Store's
+/// catalog for her phone to read, and the internet her apps reach.
 fn assemble(
     world: &Arc<World>,
     id: &Identifier,
@@ -1286,6 +1286,7 @@ fn assemble(
                 broker,
                 Arc::new(CharacterConfig::new(Arc::clone(world), daemon, id.clone())),
                 Arc::clone(&world.catalog),
+                Arc::clone(&world.internet),
             ),
             |builder, (plugin, values)| {
                 builder.plugin(plugin.manifest().clone(), values.clone(), plugin.factory())

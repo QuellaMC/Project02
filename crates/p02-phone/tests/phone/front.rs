@@ -8,7 +8,7 @@ use p02_phone::{Did, Front, Phone, PhoneState};
 use p02_shared::Identifier;
 use serde_json::json;
 
-use crate::support::{Files, app, at, input, view};
+use crate::support::{Files, app, at, took, view};
 
 /// When she opened Notes.
 const OPENED: &str = "2026-03-07T17:00:00.000Z";
@@ -78,15 +78,15 @@ fn her_open_and_her_action_say_what_she_has_in_front_and_did_and_nothing_else_do
         in_notes("all", "Opened Notes", OPENED)
     );
 
-    phone
-        .act(
-            &mut files,
-            "notes",
-            "star",
-            &input(&json!({})),
-            &at(STARRED),
-        )
-        .unwrap();
+    took(
+        &phone,
+        &mut files,
+        "notes",
+        "star",
+        &json!({}),
+        &at(STARRED),
+    )
+    .unwrap();
 
     let written = files.writes;
 
@@ -94,9 +94,7 @@ fn her_open_and_her_action_say_what_she_has_in_front_and_did_and_nothing_else_do
     phone
         .open(&mut files, "notes", Some("trash"), &later)
         .unwrap_err();
-    phone
-        .act(&mut files, "notes", "tear", &input(&json!({})), &later)
-        .unwrap_err();
+    took(&phone, &mut files, "notes", "tear", &json!({}), &later).unwrap_err();
 
     assert_eq!(files.writes, written);
     assert_eq!(
@@ -126,15 +124,15 @@ fn a_call_stands_when_what_she_has_in_front_cannot_be_kept() {
 
     assert!(opened.unkept.is_some());
 
-    let starred = phone
-        .act(
-            &mut files,
-            "notes",
-            "star",
-            &input(&json!({})),
-            &at(STARRED),
-        )
-        .unwrap();
+    let starred = took(
+        &phone,
+        &mut files,
+        "notes",
+        "star",
+        &json!({}),
+        &at(STARRED),
+    )
+    .unwrap();
 
     assert!(starred.unkept.is_some());
     assert_eq!(

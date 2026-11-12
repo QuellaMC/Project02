@@ -40,6 +40,12 @@ export type AnswerBody = { decision: Answer, };
 export type AnswerOutcome = { "status": "answered" } | { "status": "expired" } | { "status": "unknown" };
 
 /**
+ * An account of the person's that an app uses: the id her phone knows it
+ * by, its name, and whether the person gave her phone its key.
+ */
+export type AppAccount = { id: Identifier, name: string, hasKey: boolean, };
+
+/**
  * What came of giving her an app, from the App Store or from a file: the
  * app as her phone now lists it, and the version of it that it replaced,
  * when it replaced one; or why it was not given.
@@ -335,7 +341,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 12, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 13, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -343,7 +349,12 @@ config: ConfigHealth,
 /**
  * The packages discovery could not publish, which the roster lacks.
  */
-packages: PackagesHealth, characters: ReadonlyArray<CharacterSummary>, connectors: ReadonlyArray<ConnectorPresence>, };
+packages: PackagesHealth, characters: ReadonlyArray<CharacterSummary>, connectors: ReadonlyArray<ConnectorPresence>, 
+/**
+ * The person's accounts her phone knows, which the home's settings
+ * hold the keys of.
+ */
+accounts: ReadonlyArray<PersonAccount>, };
 
 /**
  * The person's line into one conversation, with the two stamps its client
@@ -356,7 +367,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 12, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 13, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -543,11 +554,19 @@ deadlineAt: number,
 turn?: TurnIdentity, };
 
 /**
+ * An account of the person's at a service her apps may use: the id her
+ * phone knows it by, its name, whether the person gave her phone its key,
+ * and where a key comes from, in a sentence.
+ */
+export type PersonAccount = { id: Identifier, name: string, hasKey: boolean, keyFrom: string, };
+
+/**
  * An app on her phone as her window draws it and her settings show it:
  * the line she knows it by, its version and where it came from; its icon
  * and the tint of its tile, names of the page's own set, which falls back
  * for one it does not know; whether it says it wakes her, and whether the
- * person lets it; its views, in its order; and the view it opens on.
+ * person lets it; what it may do, and the person's account it uses; its
+ * views, in its order; and the view it opens on.
  */
 export type PhoneApp = { id: Identifier, name: string, summary: string, version: string, source: AppSource, icon: string, tint: string, 
 /**
@@ -558,7 +577,15 @@ wakes: boolean,
  * Whether the person lets it wake her: yes unless they said it may
  * not.
  */
-mayWake: boolean, views: ReadonlyArray<AppView>, opensOn: Identifier, };
+mayWake: boolean, 
+/**
+ * What it may do, a line each, as the App Store says it.
+ */
+itMay: ReadonlyArray<string>, 
+/**
+ * The account of the person's it uses, when it uses one.
+ */
+account?: AppAccount, views: ReadonlyArray<AppView>, opensOn: Identifier, };
 
 /**
  * What she last did on her phone: the app, a few words in the past tense,
@@ -733,6 +760,11 @@ export type Screen = { items: ReadonlyArray<ScreenItem>,
 page?: string, };
 
 /**
+ * A cell of a strip: a small label over its value.
+ */
+export type ScreenCell = { label: string, value: string, };
+
+/**
  * A piece of a screen.
  */
 export type ScreenItem = { "kind": "list", header?: string, rows: ReadonlyArray<ScreenRow>, } | { "kind": "readout", 
@@ -751,13 +783,32 @@ live?: LiveReading, } | { "kind": "text", text: string, } | { "kind": "app",
 /**
  * The app's own id, which she passes to an action.
  */
-id: string, tile: ScreenTile, name: string, subtitle: string, status: string, };
+id: string, tile: ScreenTile, name: string, subtitle: string, status: string, } | { "kind": "glance", title: string, 
+/**
+ * The reading, very large.
+ */
+text: string, 
+/**
+ * A line saying how it is.
+ */
+caption?: string, 
+/**
+ * A quieter line under the caption.
+ */
+detail?: string, } | { "kind": "strip", cells: ReadonlyArray<ScreenCell>, } | { "kind": "ranges", rows: ReadonlyArray<ScreenRange>, } | { "kind": "field", text: string, icon?: string, } | { "kind": "note", text: string, };
 
 /**
  * One view of an app on her phone, as a person looking around it sees it:
  * its screen, or why there is none. Looking changes nothing of hers.
  */
 export type ScreenOutcome = { "status": "ok", screen: Screen, } | { "status": "refused", reason: ScreenRefusal, message: string, } | { "status": "failed", message: string, };
+
+/**
+ * A row of ranges: its label, the words of its low and of its high, and
+ * between them a bar from `from` to `to`, whole numbers from 0 to 100 on
+ * the scale its rows share, `from` no greater than `to`.
+ */
+export type ScreenRange = { label: string, low: string, high: string, from: number, to: number, };
 
 export type ScreenRefusal = "unknown_character" | "no_phone" | "unknown_app" | "unknown_view" | "app_failed";
 
@@ -792,7 +843,12 @@ value?: string,
 /**
  * A switch, shown on or off.
  */
-switch?: boolean, };
+switch?: boolean, 
+/**
+ * The address of the page the row is about, `https://` or `http://`
+ * and 2,048 characters at most: its title is drawn as a link.
+ */
+url?: string, };
 
 /**
  * An app's tile as a screen draws it: its icon and its tint, names of the

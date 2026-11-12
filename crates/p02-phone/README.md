@@ -14,10 +14,12 @@ the blocking pool.
   `name`, a one-line `summary`, its own
   `version`, three numbers with dots, the `icon` and the `tint` of its
   tile, names of the page's own set, which falls back for one it does not
-  know, whether it `wakes` her, its `views`, each with an `icon` too, the
-  view it `opensOn`, and its `actions`, each with a `description`, what her
-  window says she `did` in one line of the past tense, the `view` shown
-  after it and the JSON Schema its `input` is held to, as a tool's is.
+  know, whether it `wakes` her, the hosts it `reaches` and the `account` of
+  the person's it uses, both optional, its `views`, each with an `icon`
+  too, the view it `opensOn`, and its `actions`, each with a
+  `description`, what her window says she `did` in one line of the past
+  tense, the `view` shown after it and the JSON Schema its `input` is held
+  to, as a tool's is.
   Beside it, `screen(view)`, a function per action taking its input, and
   `rang(ring)` if the app hears its rings. Making an app runs the module
   once, on an empty phone that only reads, and checks what it exports, so
@@ -26,7 +28,20 @@ the blocking pool.
   else it throws is the app failing.
 - **What an app asks for.** Keeping its own data is every app's. Only an
   app that says it `wakes` her sets a ring: another's `phone.rings.set`
-  throws, and cancelling and listing stay harmless.
+  throws, and cancelling and listing stay harmless. Only an app that names
+  the hosts it `reaches`, 4 at most, each once, each a DNS name in
+  lowercase of two labels at least and not an address in numbers, with no
+  scheme, port or path, reaches the internet, at those hosts alone. Its
+  `account` is one the phone knows, at one of those hosts. `it_may` says
+  what an app may do, a line each, from what it asks for, for the App
+  Store and for the person: "Keep its own data", "Wake her when something
+  is due", "Reach the internet at api.tavily.com" (two hosts joined by
+  "and", more by commas and "and") and "Use your Tavily account".
+- **The accounts** are the phone's own short list, each at one host, so a
+  key the person gives for one only ever goes there, and each with one
+  sentence on where the person gets a key; an app names the one it uses
+  and never says where its key goes. Today: Tavily (`tavily`, at
+  `api.tavily.com`, "Get a free key at tavily.com.").
 - **A script reaches** the language and `phone`, nothing else:
   `storage.get`, `set` and `remove`, a JSON value under each key;
   `rings.set({id, at, title, body})`, `rings.cancel(id)` and `rings.list()`,
@@ -39,7 +54,35 @@ the blocking pool.
   each call is given. A clock time the clocks skip comes as much later as
   they jumped, and one they pass twice comes the first time, as jiff, the
   phone's time library, answers them. A screen only reads, and is held to
-  the pieces and fields the wire's screen knows.
+  the pieces and fields the wire's screen knows and to their rules: a
+  list's row has a title or a time, and its `url` is an `https://` or
+  `http://` address of 2,048 characters at most; a strip has 2 to 8 cells;
+  ranges have 1 to 10 rows, each a bar `from` no greater than its `to`, and
+  neither past 100. A screen that breaks one is refused, saying which.
+- **`net.fetch({url, method, headers, body})`**, in an action alone: in a
+  screen, in `rang` and as the app is made it throws a `TypeError`, so
+  looking at her phone never reaches the internet. The `url` is an
+  `https://` address of 2,048 characters at most at a host the app
+  reaches, with no user, password, port or fragment; the `method` is
+  `GET`, the default, or `POST`; the `headers` are text under the names
+  `accept` and `content-type` alone, in any case; the `body` is text of
+  64 KiB at most, with `POST` only. A request that breaks a rule throws a
+  `TypeError`, the app failing. It answers `{status, body}`, any status,
+  the body as text; a request with no answer throws a plain `Error` whose
+  message is its caller's sentence, which the script catches, or lets
+  through as its refusal. A request at its account's host is for that
+  account, and its caller sends the key with it; the script never holds a
+  key.
+- **An action that fetches** has its requests made by its caller, since
+  the phone makes none: `Phone::act` is handed the exchanges of the
+  action's runs so far, each a request and what came of it, and runs it
+  from what the app keeps, its n-th fetch answered by the n-th exchange. A fetch none
+  answers yet ends the run there, which no script catches and which keeps
+  nothing, and the call asks for that request; its caller makes it, with
+  no lease held, and takes the action again at the same moment. A fifth
+  request, or one other than asked at that place before, fails the call,
+  caught or not: an action asks for the same requests on every run. Each
+  run has the limits of a call.
 - **Each call runs fresh**: its own QuickJS runtime and context, dropped when
   it returns, under limits of 1 second for the whole call, 16 MiB of memory
   and 256 KiB of stack. The time limit holds after an `await` too, and a
@@ -73,9 +116,11 @@ the blocking pool.
   it by name, then the App Store, each character her own. An installed app
   is its one file, kept as text in `apps/<app-id>.txt`, and
   `installed.json` lists each with what her phone shows of it without
-  running it: its id, name, summary, version, icon, tint, whether it wakes
-  her, its views and the view it opens on, and where it came from, the
-  catalog or a file.
+  running it: its id, name, summary, version, icon, tint, what it asks
+  for, whether it wakes her, the hosts it reaches and its account, none of
+  the last two in a list written before an app could reach the internet,
+  its views and the view it opens on, and where it came from, the catalog
+  or a file.
   Installing makes the app first, so a broken one is refused and writes
   nothing; an id the phone comes with is refused; an id already installed
   is replaced, whatever its version or source, keeping what it keeps, and
@@ -95,24 +140,31 @@ the blocking pool.
 - **The apps we publish** to the App Store's catalog are kept here too, in
   `catalog/`, and tested in the engine as the Clock is, though no phone
   comes with them: today Reminders, `catalog/reminders.js`, things to do on
-  a day and time, once or repeating. Publishing version `V` of one copies
+  a day and time, once or repeating; Weather, `catalog/weather.js`, a
+  place's weather now and over the hours and days ahead, read from
+  Open-Meteo, which needs no key, and kept, so its screen shows the last
+  reading and when it was read; and Web Search, `catalog/search.js`, the
+  web searched through Tavily on the person's account, whose key its
+  requests carry and it never holds, and what came up kept, so its screen
+  shows the last search. Publishing version `V` of one copies
   its file to `apps/<id>/V.js` in the catalog's repository and adds its
   entry there with the file's SHA-256. A published version's file never
   changes: a change is a new version.
 - **The catalog** is one document, `project02.catalog.v1`, listing at most
   100 apps, each by what the store shows of it without fetching it: its id,
-  name, summary, icon, tint, version and whether it wakes her, under the
-  names and rules of a manifest, one line on what `changes` in this
-  version, and the `sha256` of its one file. An entry that breaks a rule
-  is passed over. An app's text is taken only as the file of that SHA-256,
-  making an app, of the id and the version listed. How an app of the
-  catalog stands on her phone is one rule, `CatalogApp::status`, which
-  everything that reads the catalog takes: not on it; on it in an older
-  version than the catalog's, versions ordered as their three numbers,
-  which the catalog's updates; or on it in the catalog's version or a
-  newer one, which nothing of the catalog's replaces. Reaching the catalog
-  is the caller's; what goes wrong is said in plain words naming no
-  address.
+  name, summary, icon, tint, version and what it asks for, whether it
+  wakes her, the hosts it reaches and its account, under the names and
+  rules of a manifest, one line on what `changes` in this version, and the
+  `sha256` of its one file. An entry that breaks a rule is passed over. An
+  app's text is taken only as the file of that SHA-256, making an app, of
+  the id and the version listed, that asks for what its entry says. How
+  an app of the catalog stands on her phone is one rule,
+  `CatalogApp::status`, which everything that reads the catalog takes:
+  not on it; on it in an older version than the catalog's, versions
+  ordered as their three numbers, which the catalog's updates; or on it in
+  the catalog's version or a newer one, which nothing of the catalog's
+  replaces. Reaching the catalog is the caller's; what goes wrong is said
+  in plain words naming no address.
 - **The App Store** is the phone's own app, written here with no script,
   since it needs what no app is given. Its id is taken as a bundled app's
   is: nothing installs over it or removes it, and it sets no ring. In
@@ -124,8 +176,7 @@ the blocking pool.
   it), read from her phone whenever the screen is made. `show_app {app}`
   answers what the app is and may do and opens its page, a screen whose
   `page` is the app's id, where the list's names none: its header, its
-  summary, what it may do ("Keep its own data", and "Wake her when
-  something is due" for one that wakes her, the lines `it_may` makes for
-  the person too), and under "What's New" its version with what changed.
+  summary, what it may do, the lines `it_may` makes for the person too,
+  and under "What's New" its version with what changed.
   Opened again, it shows its list; before it read anything, a line says
   so.

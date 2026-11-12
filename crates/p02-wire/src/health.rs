@@ -25,6 +25,9 @@ pub struct Health {
     pub packages: PackagesHealth,
     pub characters: Vec<CharacterSummary>,
     pub connectors: Vec<ConnectorPresence>,
+    /// The person's accounts her phone knows, which the home's settings
+    /// hold the keys of.
+    pub accounts: Vec<PersonAccount>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
@@ -51,6 +54,18 @@ pub struct ConnectorPresence {
     pub id: Identifier,
     pub connected: bool,
     pub bots: Vec<ConnectorBot>,
+}
+
+/// An account of the person's at a service her apps may use: the id her
+/// phone knows it by, its name, whether the person gave her phone its key,
+/// and where a key comes from, in a sentence.
+#[derive(Clone, Debug, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonAccount {
+    pub id: Identifier,
+    pub name: String,
+    pub has_key: bool,
+    pub key_from: String,
 }
 
 /// One installed character, as health reports her.

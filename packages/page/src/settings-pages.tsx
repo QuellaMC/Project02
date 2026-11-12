@@ -1,8 +1,8 @@
 /**
  * The window's pages of the home: the person, the AI model, a plugin's
- * account, Advanced, and what the app knows of one plugin. Each draws
- * the home's view; a view the daemon refuses takes the page's place with
- * the daemon's sentence.
+ * account, an account her apps use, Advanced, and what the app knows of
+ * one plugin. Each draws the home's view; a view the daemon refuses takes
+ * the page's place with the daemon's sentence.
  */
 import type {ReactNode} from 'react';
 
@@ -10,7 +10,9 @@ import type {
   ConfigTarget,
   RuntimeConfigSectionNamespace,
 } from '@project02/wire/contract';
+import {accountKeyRow, herApp} from './her-apps.ts';
 import {
+  BackButton,
   Cell,
   Face,
   Group,
@@ -49,6 +51,7 @@ import {
   type OkView,
   type Row,
 } from './settings.ts';
+import type {SettingsPage} from './store.ts';
 
 /** The home's view, or the daemon's sentence in place of a page it cannot be read for. */
 function HomeView({
@@ -254,6 +257,70 @@ export function ConnectionPage({
             </>
           )
         }
+      </HomeView>
+    </>
+  );
+}
+
+/**
+ * An account of the person's that her apps use, set up once for everyone,
+ * as health says it: its tile, its name, the one field of its key, pasted
+ * and never shown back, and where a key comes from. Opened from an app of
+ * hers, its Back returns to that app.
+ */
+export function AccountPage({
+  ctx,
+  page,
+}: {
+  readonly ctx: Ctx;
+  readonly page: Extract<SettingsPage, {kind: 'account'}>;
+}) {
+  const {state, settings, session} = ctx;
+  const account = state.health?.accounts.find(
+    known => known.id === page.accountId,
+  );
+
+  if (account === undefined) {
+    return null;
+  }
+
+  const {from} = page;
+  const row = accountKeyRow(account.id);
+  const header = (
+    <PageHeader
+      art={<Tile icon="key" tint="graphite" size="page" />}
+      title={account.name}
+      subtitle="An account her apps can use."
+    />
+  );
+
+  return (
+    <>
+      {from === undefined ? (
+        header
+      ) : (
+        <div className="sub-header">
+          <BackButton
+            label={
+              herApp(settings, from.characterId, from.appId)?.name ?? from.appId
+            }
+            onClick={() => {
+              session.goTo({kind: 'app', ...from});
+            }}
+          />
+          {header}
+        </div>
+      )}
+      <HomeView ctx={ctx}>
+        {view => {
+          const field = fieldAt(view, row.place);
+
+          return field === undefined ? null : (
+            <Group footer={account.keyFrom}>
+              <FieldRow ctx={ctx} row={row} field={field} />
+            </Group>
+          );
+        }}
       </HomeView>
     </>
   );

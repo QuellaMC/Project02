@@ -81,8 +81,10 @@ impl Gateway {
                 test_provider: Some(Arc::clone(&model) as Arc<dyn RoleModelAdapter>),
                 durations,
                 plugins,
-                // An App Store nothing serves: no test of these reads it.
+                // An App Store and an internet nothing serves: no test of
+                // these reaches either.
                 app_catalog: BaseUrl::parse("http://127.0.0.1:9").unwrap(),
+                app_internet: Some(BaseUrl::parse("http://127.0.0.1:9").unwrap()),
             },
         )
         .await

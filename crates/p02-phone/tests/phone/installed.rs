@@ -4,7 +4,7 @@
 use p02_phone::{Phone, Source};
 use serde_json::{Value, json};
 
-use crate::support::{Files, actions, input, manifest, millis, now, text};
+use crate::support::{Files, actions, manifest, millis, now, text, took};
 
 const SCREEN: &str = "export function screen() { return { items: [] }; }";
 
@@ -56,9 +56,7 @@ fn on_phone(files: &Files) -> Vec<String> {
 }
 
 fn act(files: &mut Files, action: &str, given: &Value) {
-    phone()
-        .act(files, "notes", action, &input(given), &now())
-        .unwrap();
+    took(phone(), files, "notes", action, given, &now()).unwrap();
 }
 
 #[test]

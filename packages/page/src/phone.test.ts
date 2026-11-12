@@ -52,6 +52,7 @@ const clock: PhoneApp = {
   tint: 'graphite',
   wakes: true,
   mayWake: true,
+  itMay: ['Keep its own data', 'Wake her when something is due'],
   views: [
     {id: 'world', title: 'World Clock', icon: 'globe'},
     {id: 'alarms', title: 'Alarms', icon: 'alarm'},
@@ -69,12 +70,13 @@ const now = Date.parse('2026-11-11T09:00:00.000Z');
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 12,
+    protocolVersion: 13,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
     characters,
     connectors: [],
+    accounts: [],
   };
 }
 
@@ -84,7 +86,7 @@ function ready(
   ...confirmations: readonly PendingConfirmation[]
 ): GatewayReady {
   return {
-    protocolVersion: 12,
+    protocolVersion: 13,
     health: said,
     confirmations,
     pairings: [],
@@ -152,6 +154,7 @@ const store: PhoneApp = {
   tint: 'blue',
   wakes: false,
   mayWake: true,
+  itMay: ['Keep its own data'],
   views: [{id: 'apps', title: 'App Store', icon: 'bag'}],
   opensOn: 'apps',
 };
@@ -179,6 +182,7 @@ function askFor(
           tint: 'orange',
           version: '1.0.0',
           wakes: true,
+          reachesInternet: false,
         },
         source: 'catalog',
       },

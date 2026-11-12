@@ -50,9 +50,11 @@ pub enum PhoneRefusal {
 /// the line she knows it by, its version and where it came from; its icon
 /// and the tint of its tile, names of the page's own set, which falls back
 /// for one it does not know; whether it says it wakes her, and whether the
-/// person lets it; its views, in its order; and the view it opens on.
+/// person lets it; what it may do, and the person's account it uses; its
+/// views, in its order; and the view it opens on.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub struct PhoneApp {
     pub id: Identifier,
     pub name: String,
@@ -66,8 +68,23 @@ pub struct PhoneApp {
     /// Whether the person lets it wake her: yes unless they said it may
     /// not.
     pub may_wake: bool,
+    /// What it may do, a line each, as the App Store says it.
+    pub it_may: Vec<String>,
+    /// The account of the person's it uses, when it uses one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account: Option<AppAccount>,
     pub views: Vec<AppView>,
     pub opens_on: Identifier,
+}
+
+/// An account of the person's that an app uses: the id her phone knows it
+/// by, its name, and whether the person gave her phone its key.
+#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AppAccount {
+    pub id: Identifier,
+    pub name: String,
+    pub has_key: bool,
 }
 
 /// Where an app on her phone came from: it comes with her phone, it is the
@@ -213,6 +230,37 @@ pub enum ScreenItem {
         subtitle: String,
         status: String,
     },
+    /// A thing at a glance: its title, one very large reading, a line
+    /// saying how it is and a quieter line under that, as a place's weather
+    /// heads its screen.
+    Glance {
+        title: String,
+        /// The reading, very large.
+        text: String,
+        /// A line saying how it is.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        caption: Option<String>,
+        /// A quieter line under the caption.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        detail: Option<String>,
+    },
+    /// 2 to 8 small readings side by side on one card, in equal columns, as
+    /// the hours ahead.
+    Strip { cells: Vec<ScreenCell> },
+    /// 1 to 10 rows on one card, each a bar between its low and its high on
+    /// a scale the rows share, as the days ahead.
+    Ranges { rows: Vec<ScreenRange> },
+    /// What was typed into a box, such as a search's words, with an icon at
+    /// its start when it names one: a name of the page's own set, which
+    /// falls back for one it does not know.
+    Field {
+        text: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        icon: Option<String>,
+    },
+    /// A small quiet line under what it follows: a credit, or what
+    /// something costs.
+    Note { text: String },
 }
 
 /// A row of a list: a title, a time or both.
@@ -243,6 +291,31 @@ pub struct ScreenRow {
     /// A switch, shown on or off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub switch: Option<bool>,
+    /// The address of the page the row is about, `https://` or `http://`
+    /// and 2,048 characters at most: its title is drawn as a link.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+/// A cell of a strip: a small label over its value.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenCell {
+    pub label: String,
+    pub value: String,
+}
+
+/// A row of ranges: its label, the words of its low and of its high, and
+/// between them a bar from `from` to `to`, whole numbers from 0 to 100 on
+/// the scale its rows share, `from` no greater than `to`.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenRange {
+    pub label: String,
+    pub low: String,
+    pub high: String,
+    pub from: u32,
+    pub to: u32,
 }
 
 /// An app's tile as a screen draws it: its icon and its tint, names of the

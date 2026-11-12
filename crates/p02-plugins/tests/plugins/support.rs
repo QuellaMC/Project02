@@ -18,9 +18,9 @@ use p02_core::{
     TraceId, VisibleText,
 };
 use p02_plugins::{
-    AppCatalog, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer, FieldChange,
-    FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings, ProposedToolCall,
-    ReadConfigError, ToolCallReport, Turn, list,
+    AppCatalog, AppInternet, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
+    FieldChange, FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings,
+    ProposedToolCall, ReadConfigError, ToolCallReport, Turn, list,
 };
 use p02_shared::{BaseUrl, Identifier};
 use p02_wire::ActivationStatus;
@@ -214,10 +214,16 @@ impl ConfigControl for NoSettings {
     }
 }
 
-/// A host's builder over `storage`, with nobody to ask, no settings and an
-/// App Store nothing serves.
+/// A host's builder over `storage`, with nobody to ask, no settings, and an
+/// App Store and an internet nothing serves.
 pub(crate) fn builder(storage: Arc<dyn CharacterStorage>) -> PluginHostBuilder {
-    PluginHost::builder(storage, Arc::new(Nobody), Arc::new(NoSettings), nowhere())
+    PluginHost::builder(
+        storage,
+        Arc::new(Nobody),
+        Arc::new(NoSettings),
+        nowhere(),
+        offline(),
+    )
 }
 
 /// An App Store nothing serves: no test of these reads it.
@@ -225,6 +231,13 @@ pub(crate) fn nowhere() -> Arc<AppCatalog> {
     Arc::new(AppCatalog::new(
         BaseUrl::parse("http://127.0.0.1:9").unwrap(),
     ))
+}
+
+/// An internet nothing serves: no app of these tests reaches it.
+pub(crate) fn offline() -> Arc<AppInternet> {
+    Arc::new(AppInternet::new(Some(
+        BaseUrl::parse("http://127.0.0.1:9").unwrap(),
+    )))
 }
 
 /// A host of the given plugins over a fresh storage.

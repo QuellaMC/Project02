@@ -17,8 +17,8 @@ use p02_contracts::{
 };
 use p02_core::{ClientStamp, ConversationId, SpeakerName};
 use p02_plugins::{
-    AppCatalog, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer, FieldChange,
-    FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError,
+    AppCatalog, AppInternet, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
+    FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError,
 };
 use p02_runtime::{Character, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{BaseUrl, DanglingLinks, Identifier, canonical_path};
@@ -111,10 +111,14 @@ impl World {
                     Arc::new(self.data()),
                     Arc::new(Nobody),
                     Arc::new(NoSettings),
-                    // An App Store nothing serves: no test of these reads it.
+                    // An App Store and an internet nothing serves: no test of
+                    // these reaches either.
                     Arc::new(AppCatalog::new(
                         BaseUrl::parse("http://127.0.0.1:9").unwrap(),
                     )),
+                    Arc::new(AppInternet::new(Some(
+                        BaseUrl::parse("http://127.0.0.1:9").unwrap(),
+                    ))),
                 ),
                 |builder, toy| {
                     let plugin: Arc<dyn RuntimePlugin> = Arc::clone(toy) as _;

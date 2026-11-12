@@ -13,6 +13,7 @@ use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
 use crate::app::App;
+use crate::asks::Asks;
 use crate::error::CatalogError;
 use crate::installed::Listed;
 use crate::manifest::{is_blank, is_lowercase, is_one_line, numbers};
@@ -29,9 +30,10 @@ pub struct Catalog {
     apps: Vec<CatalogApp>,
 }
 
-/// An app as the catalog lists it: what the store shows of it, under the
-/// names and rules of an app's manifest, one line on what changed in this
-/// version, and the SHA-256 of its one file, in hex.
+/// An app as the catalog lists it: what the store shows of it, what it
+/// asks of her phone included, under the names and rules of an app's
+/// manifest, one line on what changed in this version, and the SHA-256 of
+/// its one file, in hex.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CatalogApp {
     id: Identifier,
@@ -41,7 +43,8 @@ pub struct CatalogApp {
     tint: String,
     version: String,
     changes: String,
-    wakes: bool,
+    #[serde(flatten)]
+    asks: Asks,
     sha256: String,
 }
 
@@ -99,6 +102,7 @@ impl CatalogApp {
             && !is_blank(&app.tint)
             && numbers(&app.version).is_some()
             && is_one_line(&app.changes)
+            && app.asks.check().is_ok()
             && digest(&app.sha256).is_some();
 
         kept.then_some(app)
@@ -140,10 +144,17 @@ impl CatalogApp {
         &self.changes
     }
 
+    /// What the app asks of her phone, which the store shows before it
+    /// fetches the app.
+    #[must_use]
+    pub fn asks(&self) -> &Asks {
+        &self.asks
+    }
+
     /// Whether the app says it wakes her.
     #[must_use]
     pub fn wakes(&self) -> bool {
-        self.wakes
+        self.asks.wakes
     }
 
     /// How this app stands on her phone, whose apps are `on_phone`: not on
@@ -166,8 +177,9 @@ impl CatalogApp {
 impl Phone {
     /// The app `text` makes, once it is what the catalog lists as `app`:
     /// the file of the SHA-256 listed, making an app as any app's text
-    /// must, of the id and the version listed. It is made once, as every
-    /// app her phone runs is.
+    /// must, of the id and the version listed, asking of her phone what
+    /// the catalog says it asks. It is made once, as every app her phone
+    /// runs is.
     ///
     /// # Errors
     ///
@@ -196,6 +208,12 @@ impl Phone {
                 app.id,
                 app.version
             )));
+        }
+
+        if *made.asks() != app.asks {
+            return Err(not_the_app(
+                "its file asks of her phone other than the catalog lists".to_owned(),
+            ));
         }
 
         Ok(made)

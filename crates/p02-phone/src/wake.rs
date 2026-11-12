@@ -89,7 +89,7 @@ impl Phone {
             .find(|app| app.id.as_str() == id)
             .ok_or_else(|| PhoneError::NoApp(id.to_owned()))?;
 
-        if !app.wakes {
+        if !app.asks.wakes {
             return Err(PhoneError::CannotWake(app.name));
         }
 

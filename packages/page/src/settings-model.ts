@@ -679,20 +679,23 @@ export type Sidebar = {
 };
 
 /**
- * The sidebar: the person by their name; each character, off when she is
- * switched off; AI Model by the service it thinks with, or Set Up;
- * Telegram on or off; each plugin set up once for everyone by its first
- * choice, or on, or Set Up while a character has it switched on before it
- * is set up; and a dot wherever a section has an error, on its entry, on
+ * The sidebar: the person by their name; each character health lists, off
+ * when she is switched off; AI Model by the service it thinks with, or Set
+ * Up; Telegram on or off; each plugin set up once for everyone by its
+ * first choice, or on, or Set Up while a character has it switched on
+ * before it is set up; each account of the person's her apps use, on, once
+ * health says its key is set, and none before, since the app that needs it
+ * leads to it; and a dot wherever a section has an error, on its entry, on
  * her row for a section of hers, or on Advanced for a plugin with no entry
  * of its own.
  */
 export function sidebarOf(
   settings: Settings,
-  characters: readonly CharacterSummary[],
+  health: GatewayHealth | undefined,
   found: Findings,
   advanced: boolean,
 ): Sidebar {
+  const characters = health?.characters ?? [];
   const view = viewOf(settings, home);
   const wrong = (target: ConfigTarget, key?: string): boolean =>
     [...found.sections.keys()].some(said =>
@@ -738,6 +741,16 @@ export function sidebarOf(
           dot: entry.dot || wrong(home, sectionKey('plugins', section.id)),
         };
       }),
+      ...(health?.accounts ?? [])
+        .filter(account => account.hasKey)
+        .map(account => ({
+          page: {kind: 'account', accountId: account.id} as const,
+          label: account.name,
+          icon: 'key' as const,
+          tint: 'graphite' as const,
+          value: 'On',
+          dot: false,
+        })),
     ],
     advanced: {
       page: {kind: 'advanced'},
@@ -860,6 +873,14 @@ export function parentOf(page: SettingsPage): SettingsPage | undefined {
         : {kind: 'character', characterId: page.target.characterId};
     case 'plugin':
       return {kind: 'advanced'};
+    case 'account':
+      return page.from === undefined
+        ? undefined
+        : {
+            kind: 'app',
+            characterId: page.from.characterId,
+            appId: page.from.appId,
+          };
     default:
       return undefined;
   }

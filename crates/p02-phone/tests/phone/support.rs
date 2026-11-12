@@ -9,7 +9,7 @@ use std::time::Duration;
 use jiff::tz::TimeZone;
 use p02_contracts::{LeasedFiles, StoreError};
 use p02_core::Timestamp;
-use p02_phone::{App, Now};
+use p02_phone::{Acted, Acting, App, Now, Phone, PhoneError};
 use serde_json::{Map, Value, json};
 
 /// Far past every limit a call runs under.
@@ -158,6 +158,24 @@ pub(crate) fn app(fields: &Value, script: &str) -> App {
 
 pub(crate) fn input(value: &Value) -> Map<String, Value> {
     value.as_object().unwrap().clone()
+}
+
+/// What `phone`'s `app` did of `action` on `given` at `now`, an action
+/// that reaches nothing: [`Phone::act`] on no exchanges.
+pub(crate) fn took(
+    phone: &Phone,
+    files: &mut dyn LeasedFiles,
+    app: &str,
+    action: &str,
+    given: &Value,
+    now: &Now,
+) -> Result<Acted, PhoneError> {
+    phone
+        .act(files, app, action, &input(given), &[], now)
+        .map(|acting| match acting {
+            Acting::Acted(acted) => acted,
+            Acting::Asks(fetch) => panic!("{app} asks for {}", fetch.url()),
+        })
 }
 
 /// What `work` returns, on a thread of its own: a limit that broke fails

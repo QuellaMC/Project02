@@ -90,7 +90,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 12,
+  "protocolVersion": 13,
   "token": "…",
   "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -329,9 +329,13 @@
               and package diagnostics, the roster with each character's state,
               whether she comes with the app (<code>builtIn</code>: she can be
               switched off, never removed) and her last maintenance failure,
-              and <code>connectors</code>: for
+              <code>connectors</code>: for
               each built-in connector, whether a process of it is on the stream,
-              and the bots it last said it runs.
+              and the bots it last said it runs, and <code>accounts</code>:
+              each account of the person's her phone knows, by its
+              <code>id</code> and <code>name</code>, whether the home's
+              settings hold its key, <code>hasKey</code>, and
+              <code>keyFrom</code>, one sentence on where a key comes from.
             </td>
           </tr>
           <tr>
@@ -741,7 +745,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":12,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":13,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -928,8 +932,9 @@ data: {…}</code></pre>
               it, or the moment a
               connector's process came onto the stream, left it, or said its
               bots stand otherwise than the daemon held: the roster as config
-              now says it, the connectors on the stream with their bots, and the
-              config and package problems as they stand, the shape
+              now says it, the connectors on the stream with their bots, the
+              accounts her phone knows with whether each one's key is set, and
+              the config and package problems as they stand, the shape
               <code>GET /api/health</code> returns. Every surface hears it, not
               only the one that wrote, and one showing config reads its view
               again on it, so two windows on one screen stay in step; what the
@@ -1118,9 +1123,12 @@ data: {…}</code></pre>
         <code>tint</code> of its tile — names of the page's own set, which
         falls back for one it does not know — whether it says it
         <code>wakes</code> her and whether the person lets it,
-        <code>mayWake</code>, its <code>views</code>, each an
-        <code>id</code>, a <code>title</code> and an <code>icon</code>, and
-        the view it <code>opensOn</code>.
+        <code>mayWake</code>, what it may do, its <code>itMay</code> lines,
+        the <code>account</code> of the person's it uses, when it uses one,
+        by its <code>id</code> and <code>name</code> with whether the home's
+        settings hold its key, <code>hasKey</code>, its <code>views</code>,
+        each an <code>id</code>, a <code>title</code> and an
+        <code>icon</code>, and the view it <code>opensOn</code>.
         <code>front</code> is the app she has in front, by its
         <code>appId</code> and <code>viewId</code>, with that view's
         <code>screen</code>, or, when the app fails to show it, the
@@ -1148,8 +1156,11 @@ data: {…}</code></pre>
         row a <code>title</code>, a clock reading as <code>time</code> or
         both, with an optional <code>tile</code> at its start, an app's
         <code>{icon, tint}</code>, <code>caption</code> above,
-        <code>subtitle</code> below, <code>value</code> at its end and
-        <code>switch</code> drawn on or off; an <code>app</code> is an app's
+        <code>subtitle</code> below, <code>value</code> at its end,
+        <code>switch</code> drawn on or off, and <code>url</code>, the
+        address of the page the row is about, <code>https://</code> or
+        <code>http://</code> and 2,048 characters at most, whose title a
+        client draws as a link; an <code>app</code> is an app's
         header, its <code>tile</code> and <code>name</code> with a
         <code>subtitle</code> under them and its <code>status</code>, by the
         app's <code>id</code>; a <code>readout</code> is one
@@ -1159,8 +1170,22 @@ data: {…}</code></pre>
         <code>{counts: "down", to, of}</code>, in milliseconds since the
         epoch, which a client counts from without asking again; a
         <code>text</code> is plain words, a quiet line when it is all the
-        screen shows and a paragraph among other pieces. Any view is read on
-        request with
+        screen shows and a paragraph among other pieces; a
+        <code>glance</code> is a thing at a glance, its <code>title</code>,
+        one very large reading as <code>text</code>, and, optionally, a
+        <code>caption</code> saying how it is and a quieter
+        <code>detail</code> under that; a <code>strip</code> is 2 to 8
+        <code>cells</code> side by side on one card, each a small
+        <code>label</code> over its <code>value</code>; <code>ranges</code>
+        are 1 to 10 <code>rows</code> on one card, each a
+        <code>label</code>, the words of its <code>low</code> and its
+        <code>high</code>, and between them a bar <code>from</code> one
+        whole number <code>to</code> another, from 0 to 100 on the scale the
+        rows share; a <code>field</code> is what was typed into a box, its
+        <code>text</code> with an optional <code>icon</code> at its start, a
+        name of the page's own set; a <code>note</code> is a small quiet
+        line of <code>text</code> under what it follows, a credit or what
+        something costs. Any view is read on request with
         <code>GET /api/characters/:id/phone/apps/:app/views/:view</code>,
         which puts nothing in front of her.
       </p>
@@ -1186,6 +1211,36 @@ data: {…}</code></pre>
         and her note says so beside its name; allowed again, a ring whose
         time passed rings, late. Nothing tells her the rings of an app that
         does not say it wakes her either.
+      </p>
+
+      <p>
+        An app reaches the internet only at the hosts its manifest names and
+        only while she takes one of its actions: the daemon makes each
+        request, with her phone's store not held, and hands the app what came
+        of it, so a look at her phone, hers or the person's, never reaches
+        it. A request at the host of an account of the person's carries the
+        key the home's settings hold for it, <code>tavilyApiKey</code> among
+        the phone's, a secret no read shows back and no app holds; with none
+        set the request is not made, and the app is told so. What an app may
+        do, its <code>itMay</code> lines, says the hosts it reaches and the
+        account it uses. Whether a key is set is said where a client reads
+        the account, in health's <code>accounts</code> and in an app's
+        <code>account</code>, by the rule her phone takes a key by, and a
+        change of a key goes out as <code>health_changed</code>, as any
+        change of the settings does.
+      </p>
+
+      <p>
+        Her ask to install an app of the App Store is a confirmation whose
+        <code>preview</code> is
+        <code>{kind: "phone_app_install", app, source: "catalog", replaces}</code>:
+        the <code>app</code> by its <code>id</code>, <code>name</code>,
+        <code>summary</code>, <code>icon</code>, <code>tint</code> and
+        <code>version</code>, whether it <code>wakes</code> her, whether it
+        <code>reachesInternet</code>, and the name of the
+        <code>account</code> of the person's it uses there, when it uses one;
+        <code>replaces</code> is the version on her phone it updates, when
+        there is one. The web page words its card from these.
       </p>
 
       <p>

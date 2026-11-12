@@ -1,6 +1,6 @@
 //! The `phone` a script reaches, the one thing it has beside the language:
-//! its own app's storage and rings, and the time, all from the call it
-//! runs in.
+//! its own app's storage and rings, the time, all from the call it runs
+//! in, and, in an action, the internet through the call's caller.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -14,6 +14,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::data::{Kept, Ring};
+use crate::net::{Asked, End, FETCH, Net, OFFLINE};
 use crate::time::{self, Now};
 
 const GET: &str = "phone.storage.get takes a key, which is text";
@@ -49,13 +50,15 @@ pub(crate) enum Access {
 }
 
 /// What one call's `phone` works on: a copy of what its app keeps, which
-/// the call's caller saves or drops, the moment of the call, and whether
-/// the call may change the copy.
+/// the call's caller saves or drops, the moment of the call, whether the
+/// call may change the copy, and, for a run of an action, what it reaches
+/// the internet with; any other call reaches nothing.
 #[derive(Debug)]
 pub(crate) struct Host {
     kept: RefCell<Kept>,
     now: Now,
     access: Access,
+    net: Option<Net>,
 }
 
 /// A function of `phone`, given the arguments it was called with.
@@ -89,17 +92,29 @@ struct NextArgument {
 }
 
 impl Host {
-    pub(crate) fn new(kept: Kept, now: Now, access: Access) -> Rc<Self> {
+    pub(crate) fn new(kept: Kept, now: Now, access: Access, net: Option<Net>) -> Rc<Self> {
         Rc::new(Self {
             kept: RefCell::new(kept),
             now,
             access,
+            net,
         })
     }
 
     /// What the call leaves its app keeping.
     pub(crate) fn kept(&self) -> Kept {
         self.kept.borrow().clone()
+    }
+
+    /// Whether the run ended at a fetch: from then on, it stops at once.
+    pub(crate) fn ended(&self) -> bool {
+        self.net.as_ref().is_some_and(Net::ended)
+    }
+
+    /// How the run ended at a fetch, taken once it is over; none when it
+    /// did not.
+    pub(crate) fn end(&self) -> Option<End> {
+        self.net.as_ref().and_then(Net::end)
     }
 
     /// Puts `phone` among the context's globals.
@@ -140,6 +155,7 @@ impl Host {
                 ],
             )?,
         )?;
+        phone.set("net", self.object(ctx, &[("fetch", Self::fetch)])?)?;
         ctx.globals().set("phone", phone)
     }
 
@@ -311,6 +327,31 @@ impl Host {
         to_script(ctx, &next.as_millisecond())
     }
 
+    /// `phone.net.fetch`, in an action alone: the answer of the exchange at
+    /// its place, or the sentence of its failure thrown as a plain `Error`.
+    /// A request no exchange answers yet, a fifth, or one other than asked
+    /// there before ends the run where it is, and so does any fetch after.
+    fn fetch<'js>(&self, ctx: &Ctx<'js>, arguments: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let Some(net) = &self.net else {
+            return Err(Exception::throw_type(ctx, OFFLINE));
+        };
+
+        if net.ended() {
+            return Err(stopped(ctx));
+        }
+
+        let asked: Asked = argument(ctx, arguments.first(), FETCH)?;
+        let fetch = net
+            .request(asked)
+            .map_err(|refusal| Exception::throw_type(ctx, refusal))?;
+
+        match net.answer(fetch) {
+            Some(Ok(fetched)) => to_script(ctx, fetched),
+            Some(Err(failure)) => Err(Exception::throw_message(ctx, failure)),
+            None => Err(stopped(ctx)),
+        }
+    }
+
     /// Refuses `function` when the call only reads.
     fn writes(&self, ctx: &Ctx<'_>, function: &str) -> rquickjs::Result<()> {
         match self.access {
@@ -321,6 +362,14 @@ impl Host {
             )),
         }
     }
+}
+
+/// Stops a run its host ended, here, with what no script catches: the
+/// engine stops a run whose host ended at its next check, as it stops one
+/// out of time, so a loop that nothing else ends is stopped at once.
+fn stopped(ctx: &Ctx<'_>) -> rquickjs::Error {
+    ctx.eval::<(), _>("for (;;) {}")
+        .expect_err("a loop that nothing ends is ended by the stop")
 }
 
 /// Whether `text` is one line of `limit` characters at most.

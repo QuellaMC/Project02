@@ -6,6 +6,8 @@
 //! phone says so on the stream, and has her actor, while she runs, read its
 //! rings again, as after a turn of hers.
 
+use std::sync::Arc;
+
 use p02_phone::{CatalogApp, CatalogError, Installed, OnPhone, PhoneError, Source, it_may};
 use p02_plugins::{Installable, NotInstallable, installable};
 use p02_shared::{Identifier, sentence};
@@ -15,7 +17,7 @@ use p02_wire::{
 };
 
 use crate::daemon::{Daemon, blocking};
-use crate::phone::{HerPhone, Unread, drawn, unread};
+use crate::phone::{HerPhone, Unread, drawn, keyed, unread};
 
 /// What is said of a file the person picked that is not text.
 const NOT_TEXT: &str = "This file is not text, so it holds no app.";
@@ -114,7 +116,7 @@ impl Daemon {
                 tint: app.tint().to_owned(),
                 version: app.version().to_owned(),
                 wakes: app.wakes(),
-                it_may: said(app.wakes()),
+                it_may: it_may(app.asks()),
                 replaces: on_phone
                     .app(app.id().as_str())
                     .map(|on_phone| on_phone.version.clone()),
@@ -191,7 +193,11 @@ impl Daemon {
     /// Installs on her phone the app `text` makes, which came from
     /// `source`, as her phone installs any.
     async fn give(&self, her: HerPhone, text: String, source: Source) -> AppInstallOutcome {
+        let world = Arc::clone(self.world());
+
         self.change_her(her, move |her| {
+            let keyed = keyed(&world);
+
             her.with(|phone, files| {
                 // What the person said of her apps, which installing keeps.
                 let before = phone
@@ -200,7 +206,7 @@ impl Daemon {
 
                 match phone.install(files, &text, source) {
                     Ok(Installed { app, replaced }) => Ok(AppInstallOutcome::Ok {
-                        app: drawn(&app, &before),
+                        app: Box::new(drawn(&app, &before, &keyed)),
                         replaced,
                     }),
                     Err(PhoneError::Store(error)) => Err(Unread::Failed(unread(&error))),
@@ -300,15 +306,9 @@ fn store_app(app: &CatalogApp, on_phone: &OnPhone) -> StoreApp {
         version: app.version().to_owned(),
         changes: app.changes().to_owned(),
         wakes: app.wakes(),
-        it_may: said(app.wakes()),
+        it_may: it_may(app.asks()),
         status: app.status(&on_phone.apps),
     }
-}
-
-/// What an app that does or does not wake her may do, a line each, as the
-/// App Store says it.
-fn said(wakes: bool) -> Vec<String> {
-    it_may(wakes).into_iter().map(str::to_owned).collect()
 }
 
 /// Why her phone refused an app given to her.

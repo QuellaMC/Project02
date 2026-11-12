@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::app::App;
+use crate::asks::Asks;
 use crate::data::Kept;
 use crate::error::PhoneError;
 use crate::front::PhoneState;
@@ -32,8 +33,8 @@ pub enum Source {
 }
 
 /// An app on her phone as her phone lists it, without running it: what
-/// its manifest says to name and draw it by, its version, whether it wakes
-/// her, and where it came from.
+/// its manifest says to name and draw it by, its version, what it asks of
+/// her phone, and where it came from.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Listed {
@@ -43,7 +44,11 @@ pub struct Listed {
     pub version: String,
     pub icon: String,
     pub tint: String,
-    pub wakes: bool,
+    /// Whether it wakes her, the hosts it reaches and the person's account
+    /// it uses there: neither of the last two in a list written before an
+    /// app could reach the internet.
+    #[serde(flatten)]
+    pub asks: Asks,
     pub views: Vec<View>,
     pub opens_on: Identifier,
     /// Where it came from; none for an app the phone comes with.
@@ -85,7 +90,7 @@ impl Listed {
             version: app.version().to_owned(),
             icon: app.icon().to_owned(),
             tint: app.tint().to_owned(),
-            wakes: app.wakes(),
+            asks: app.asks().clone(),
             views: app.views().to_vec(),
             opens_on: app.opens_on().clone(),
             source,

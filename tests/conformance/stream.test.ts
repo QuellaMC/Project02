@@ -59,7 +59,7 @@ it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, th
   const events = await openEvents(daemon);
 
   expect(dataOf(await events.next(() => true))).toEqual({
-    protocolVersion: 12,
+    protocolVersion: 13,
     health: await wire.health(),
     confirmations: await wire.pending(),
     pairings: await wire.pendingPairings(),

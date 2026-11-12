@@ -11,6 +11,7 @@ use p02_wire::{Screen, ScreenItem, ScreenRow, ScreenTile, StoreAppStatus};
 use serde_json::{Map, Value, json};
 
 use crate::app::App;
+use crate::asks::it_may;
 use crate::catalog::{Catalog, CatalogApp};
 use crate::data::Kept;
 use crate::installed::Listed;
@@ -171,25 +172,11 @@ pub(crate) fn show(
             "summary": app.summary(),
             "version": app.version(),
             "changes": app.changes(),
-            "itMay": it_may(app.wakes()),
+            "itMay": it_may(app.asks()),
             "status": words(app.status(on_phone)),
         }),
         after,
     ))
-}
-
-/// What an app may do, a line each, as the App Store says it and the
-/// person is told it, from what the app asks for: keeping its own data is
-/// every app's, and waking her the one's that says it does.
-#[must_use]
-pub fn it_may(wakes: bool) -> Vec<&'static str> {
-    let mut may = vec!["Keep its own data"];
-
-    if wakes {
-        may.push("Wake her when something is due");
-    }
-
-    may
 }
 
 /// The apps of the catalog the store last read, none before it read one;
@@ -216,10 +203,10 @@ fn page(app: &CatalogApp, status: StoreAppStatus) -> Vec<ScreenItem> {
         },
         ScreenItem::List {
             header: Some("It may".to_owned()),
-            rows: it_may(app.wakes())
+            rows: it_may(app.asks())
                 .into_iter()
                 .map(|line| ScreenRow {
-                    title: Some(line.to_owned()),
+                    title: Some(line),
                     ..ScreenRow::default()
                 })
                 .collect(),

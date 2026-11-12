@@ -8,14 +8,15 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use p02_characters::discover;
+use p02_config::Resolution;
 use p02_contracts::{CharacterStorage, FileStoreBackend, LeasedFiles, StoreError};
-use p02_phone::{Listed, Now, OnPhone, Phone, PhoneError, Source};
-use p02_plugins::PHONE_PLUGIN;
+use p02_phone::{Account, Listed, Now, OnPhone, Phone, PhoneError, Source, it_may};
+use p02_plugins::{PHONE_PLUGIN, keyed_accounts};
 use p02_shared::{Identifier, error_chain, error_sentence, sentence};
 use p02_store::CharacterData;
 use p02_wire::{
-    AppSource, AppView, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing,
-    Screen, ScreenOutcome, ScreenRefusal,
+    AppAccount, AppSource, AppView, Namespace, PersonAccount, PhoneApp, PhoneDid, PhoneFront,
+    PhoneOutcome, PhoneRefusal, PhoneRing, Screen, ScreenOutcome, ScreenRefusal,
 };
 
 use crate::daemon::{Daemon, World, blocking};
@@ -55,7 +56,9 @@ impl Daemon {
 
         blocking(move || {
             HerPhone::of(&world, &character).and_then(|her| {
-                her.with(|phone, files| shown(phone, files, &Now::system(), ringing))
+                let keyed = keyed(&world);
+
+                her.with(|phone, files| shown(phone, files, &Now::system(), ringing, &keyed))
             })
         })
         .await
@@ -158,12 +161,14 @@ pub(crate) fn lease(store: &dyn FileStoreBackend) -> Result<Box<dyn LeasedFiles 
     store.lease(Instant::now() + LEASE)
 }
 
-/// Her phone as `files` keep it at `now`, with `ringing` what rings on it.
+/// Her phone as `files` keep it at `now`, with `ringing` what rings on it
+/// and `keyed` the accounts whose key the person gave her phone.
 fn shown(
     phone: &Phone,
     files: &dyn LeasedFiles,
     now: &Now,
     ringing: Vec<PhoneRing>,
+    keyed: &[&Account],
 ) -> Result<PhoneOutcome, Unread> {
     let on_phone = phone
         .apps(files)
@@ -194,7 +199,7 @@ fn shown(
         apps: on_phone
             .apps
             .iter()
-            .map(|app| drawn(app, &on_phone))
+            .map(|app| drawn(app, &on_phone, keyed))
             .collect(),
         front,
         did: state.did.map(|did| PhoneDid {
@@ -227,8 +232,9 @@ fn looked(looked: Result<Screen, PhoneError>) -> Result<ScreenOutcome, Unread> {
 }
 
 /// `app`, on her phone as `on_phone` has it, as her window draws it and
-/// her settings show it.
-pub(crate) fn drawn(app: &Listed, on_phone: &OnPhone) -> PhoneApp {
+/// her settings show it, `keyed` the accounts whose key the person gave her
+/// phone.
+pub(crate) fn drawn(app: &Listed, on_phone: &OnPhone, keyed: &[&Account]) -> PhoneApp {
     PhoneApp {
         id: app.id.clone(),
         name: app.name.clone(),
@@ -241,8 +247,14 @@ pub(crate) fn drawn(app: &Listed, on_phone: &OnPhone) -> PhoneApp {
         },
         icon: app.icon.clone(),
         tint: app.tint.clone(),
-        wakes: app.wakes,
+        wakes: app.asks.wakes(),
         may_wake: on_phone.may_wake(app),
+        it_may: it_may(&app.asks),
+        account: app.asks.account().map(|account| AppAccount {
+            id: account_id(account),
+            name: account.name().to_owned(),
+            has_key: keyed.contains(&account),
+        }),
         views: app
             .views
             .iter()
@@ -254,6 +266,38 @@ pub(crate) fn drawn(app: &Listed, on_phone: &OnPhone) -> PhoneApp {
             .collect(),
         opens_on: app.opens_on.clone(),
     }
+}
+
+/// The accounts her phone knows, as health says them: each with whether
+/// the person gave her phone its key, and where a key comes from.
+pub(crate) fn accounts(world: &World) -> Vec<PersonAccount> {
+    let keyed = keyed(world);
+
+    Account::all()
+        .iter()
+        .map(|account| PersonAccount {
+            id: account_id(account),
+            name: account.name().to_owned(),
+            has_key: keyed.contains(&account),
+            key_from: account.key_from().to_owned(),
+        })
+        .collect()
+}
+
+/// The accounts whose key the person gave her phone, as the home's
+/// settings, which alone hold a key, give it to every character's phone:
+/// none while they cannot be read. It waits on the disk.
+pub(crate) fn keyed(world: &World) -> Vec<&'static Account> {
+    Resolution::home(&world.home, &world.sections)
+        .map(|home| {
+            keyed_accounts(|field| home.section_value(Namespace::Plugins, PHONE_PLUGIN, field))
+        })
+        .unwrap_or_default()
+}
+
+/// The id of `account`, one of the phone's own, as a client is told it.
+fn account_id(account: &Account) -> Identifier {
+    Identifier::new(account.id()).expect("the phone's accounts have ids")
 }
 
 /// Why her phone could not be read, in a sentence: `error` and its causes.

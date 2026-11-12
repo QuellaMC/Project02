@@ -5,12 +5,17 @@
 //! phone is the apps it comes with, the App Store among them, and those
 //! installed on it, which this plugin's store keeps with what each app
 //! keeps, read and written under the lease of the hook that calls it. Her
-//! opening the App Store reads its catalog anew, before the lease.
+//! opening the App Store reads its catalog anew, before the lease, and an
+//! action that reaches the internet has each of its requests made between
+//! its runs, with no lease held, the person's key sent with one for an
+//! account of theirs.
 
 mod catalog;
 mod install;
+mod internet;
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use async_trait::async_trait;
 use p02_contracts::{
@@ -20,7 +25,8 @@ use p02_contracts::{
 };
 use p02_core::SpeakerName;
 use p02_phone::{
-    Acted, Action, Catalog, Listed, Now, OnPhone, Opened, Phone, PhoneError, STORE, View,
+    Account, Acted, Acting, Action, Catalog, Exchange, Fetch, Fetched, Listed, Now, OnPhone,
+    Opened, Phone, PhoneError, STORE, View,
 };
 use p02_shared::{Identifier, error_chain, sentence};
 use serde::Deserialize;
@@ -28,6 +34,8 @@ use serde_json::{Map, Value, json};
 
 pub use self::catalog::AppCatalog;
 pub use self::install::{Installable, NotInstallable, installable};
+pub use self::internet::AppInternet;
+use self::internet::{Key, REQUESTS};
 use crate::host::Factory;
 use crate::package::{FilesError, admitted, leased, rejected, tool};
 
@@ -50,20 +58,24 @@ const USE_DESCRIPTION: &str = "Take one of an app's actions on your phone, with 
 const APP: &str = "The app's id, in quotes beside its name among your apps.";
 
 /// The list's factory of the phone, which a host builds itself, handing it
-/// the App Store's catalog: built anywhere else, it is refused.
+/// the App Store's catalog and the internet her apps reach: built anywhere
+/// else, it is refused.
 pub(crate) fn create(_input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> {
     Err(PluginError::new(format!(
-        "{PHONE_PLUGIN} is built by the plugin host, which hands it the App Store's catalog"
+        "{PHONE_PLUGIN} is built by the plugin host, which hands it the App Store's catalog and \
+         the internet her apps reach"
     )))
 }
 
 /// How a host builds the phone: the phone every character has, with the
 /// apps installed on hers, reading the App Store's catalog through
-/// `catalog`, and offering the tool to ask to install an app while her
-/// settings do.
-pub(crate) fn factory(catalog: Arc<AppCatalog>) -> Box<Factory> {
+/// `catalog`, making her apps' requests through `internet` with the keys
+/// the home's settings give, and offering the tool to ask to install an
+/// app while her settings do.
+pub(crate) fn factory(catalog: Arc<AppCatalog>, internet: Arc<AppInternet>) -> Box<Factory> {
     Box::new(move |input: &FactoryInput<'_>| {
         let phone = Phone::bundled().map_err(|error| PluginError::new(error_chain(error)))?;
+        let keys = keys(|field| input.config().value(field));
         let mut tools = vec![
             tool(
                 OPEN,
@@ -112,15 +124,54 @@ pub(crate) fn factory(catalog: Arc<AppCatalog>) -> Box<Factory> {
         Ok(Arc::new(PhonePlugin {
             phone,
             catalog: Arc::clone(&catalog),
+            internet: Arc::clone(&internet),
+            keys,
             tools,
         }) as Arc<dyn RuntimePlugin>)
     })
+}
+
+/// The field of the home's settings that holds the person's key for
+/// `account`.
+fn key_field(account: &Account) -> String {
+    format!("{}ApiKey", account.id())
+}
+
+/// The person's key for each account the phone's settings, which
+/// `value_of` reads by field name, hold one for: its text, trimmed, when a
+/// header can carry it.
+fn keys<'v>(value_of: impl Fn(&str) -> Option<&'v Value>) -> Vec<(&'static Account, Key)> {
+    Account::all()
+        .iter()
+        .filter_map(|account| {
+            let text = value_of(&key_field(account))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty())?;
+
+            Some((account, Key::new(text)?))
+        })
+        .collect()
+}
+
+/// The accounts whose key the person gave her phone, among the phone's
+/// settings `value_of` reads by field name, as her phone takes a key: what
+/// a client is told of an account says what her phone then does.
+#[must_use]
+pub fn keyed_accounts<'v>(value_of: impl Fn(&str) -> Option<&'v Value>) -> Vec<&'static Account> {
+    keys(value_of)
+        .into_iter()
+        .map(|(account, _)| account)
+        .collect()
 }
 
 #[derive(Debug)]
 struct PhonePlugin {
     phone: &'static Phone,
     catalog: Arc<AppCatalog>,
+    internet: Arc<AppInternet>,
+    /// The person's key for each account they gave one for.
+    keys: Vec<(&'static Account, Key)>,
     tools: Vec<ProvidedTool>,
 }
 
@@ -131,19 +182,27 @@ struct Answered {
     unkept: Option<String>,
 }
 
+/// Where a call stands after a run on her phone: answered, or an action
+/// asking for one more request before it runs again.
+enum Step {
+    Answered(Answered),
+    Asks(Fetch),
+}
+
 /// A call of one of the tools, its input as the tool's contract admits it.
+#[derive(Clone)]
 enum Request {
     Open(Opening),
     Use(Using),
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Opening {
     app: String,
     view: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 struct Using {
     app: String,
     action: String,
@@ -207,6 +266,10 @@ impl RuntimePlugin for PhonePlugin {
         })
     }
 
+    /// Answers a call of her phone: a run of it under a lease of her
+    /// phone's store, and, while an action asks for a request, that request
+    /// made with no lease held, every one of the call within one budget,
+    /// and the action run again at the same moment with what came of it.
     async fn handle_tool_call(
         &self,
         call: &ToolCall,
@@ -226,15 +289,36 @@ impl RuntimePlugin for PhonePlugin {
             }
             _ => None,
         };
-        let (phone, summary) = (self.phone, request.summary());
-        let answered = leased(store(context)?, move |files| {
-            match request.answer(phone, files, read.as_ref()) {
-                Ok(answered) => Ok(Ok(answered)),
-                Err(PhoneError::Store(error)) => Err(FilesError::Store(error)),
-                Err(refusal) => Ok(Err(refused(phone, files, request.app(), &refusal))),
+        let person = context.turn()?.person.clone();
+        let (phone, summary, now) = (self.phone, request.summary(), Now::system());
+        let until = Instant::now() + REQUESTS;
+        let mut exchanges = Vec::new();
+        let answered = loop {
+            let (request, read, made, now) = (
+                request.clone(),
+                read.clone(),
+                exchanges.clone(),
+                now.clone(),
+            );
+            let ran = leased(store(context)?, move |files| {
+                match request.answer(phone, files, read.as_ref(), &made, &now) {
+                    Ok(step) => Ok(Ok(step)),
+                    Err(PhoneError::Store(error)) => Err(FilesError::Store(error)),
+                    Err(refusal) => Ok(Err(refused(phone, files, request.app(), &refusal))),
+                }
+            })
+            .await?;
+
+            match ran {
+                Ok(Step::Answered(answered)) => break Ok(answered),
+                Ok(Step::Asks(fetch)) => {
+                    let fetched = self.fetched(&fetch, until, person.as_ref()).await;
+
+                    exchanges.push(Exchange { fetch, fetched });
+                }
+                Err(refused) => break Err(refused),
             }
-        })
-        .await?;
+        };
 
         Ok(match answered {
             Ok(Answered { output, unkept }) => ToolCallOutcome::Accepted {
@@ -273,6 +357,37 @@ impl RuntimePlugin for PhonePlugin {
     }
 }
 
+impl PhonePlugin {
+    /// What came of `fetch`, made by `until`: with the person's key when it
+    /// is for an account of theirs, and not made when they gave none for it,
+    /// which is said naming `person` as her notes do.
+    async fn fetched(
+        &self,
+        fetch: &Fetch,
+        until: Instant,
+        person: Option<&SpeakerName>,
+    ) -> Result<Fetched, String> {
+        let key = match fetch.account() {
+            None => None,
+            Some(account) => match self.keys.iter().find(|(keyed, _)| *keyed == account) {
+                Some((_, key)) => Some(key),
+                None => {
+                    return Err(format!(
+                        "This needs {} {} account, and its key is not in Settings yet.",
+                        person.map_or_else(
+                            || "their".to_owned(),
+                            |person| format!("{}'s", person.as_str())
+                        ),
+                        account.name()
+                    ));
+                }
+            },
+        };
+
+        self.internet.fetch(fetch, key, until).await
+    }
+}
+
 impl Request {
     fn of(call: &ToolCall) -> Result<Self, PluginError> {
         match call.tool_name().as_str() {
@@ -301,16 +416,19 @@ impl Request {
         }
     }
 
-    /// What her phone answers the call now, as she reads it, and why what
-    /// she has in front could not be kept, when it could not. An open of
-    /// the App Store keeps `read`, the catalog read for it, first.
+    /// What a run of the call on her phone comes to at `now`: her phone's
+    /// answer, as she reads it, with why what she has in front could not be
+    /// kept, when it could not; or, for an action, the one more request it
+    /// asks for after `exchanges`. An open of the App Store keeps `read`,
+    /// the catalog read for it, first.
     fn answer(
         &self,
         phone: &Phone,
         files: &mut LeasedStore<'_>,
         read: Option<&Catalog>,
-    ) -> Result<Answered, PhoneError> {
-        let now = Now::system();
+        exchanges: &[Exchange],
+        now: &Now,
+    ) -> Result<Step, PhoneError> {
         let unkept = |unkept: Option<StoreError>| unkept.as_ref().map(|error| error_chain(error));
 
         match self {
@@ -319,23 +437,26 @@ impl Request {
                     phone.keep_catalog(files, catalog)?;
                 }
 
-                phone
-                    .open(files, app, view.as_deref(), &now)
-                    .map(|opened| Answered {
+                phone.open(files, app, view.as_deref(), now).map(|opened| {
+                    Step::Answered(Answered {
                         output: shown(&opened),
                         unkept: unkept(opened.unkept),
                     })
-            }
-            Self::Use(Using { app, action, input }) => {
-                phone.act(files, app, action, input, &now).map(|mut acted| {
-                    let unkept = unkept(acted.unkept.take());
-
-                    Answered {
-                        output: used(acted),
-                        unkept,
-                    }
                 })
             }
+            Self::Use(Using { app, action, input }) => phone
+                .act(files, app, action, input, exchanges, now)
+                .map(|acting| match acting {
+                    Acting::Acted(mut acted) => {
+                        let unkept = unkept(acted.unkept.take());
+
+                        Step::Answered(Answered {
+                            output: used(acted),
+                            unkept,
+                        })
+                    }
+                    Acting::Asks(fetch) => Step::Asks(fetch),
+                }),
         }
     }
 }
@@ -357,7 +478,7 @@ fn named(name: &str, id: &Identifier) -> String {
 /// the line she knows it by.
 fn noted(app: &Listed, on_phone: &OnPhone, person: Option<&SpeakerName>) -> String {
     let id = &app.id;
-    let named = if app.wakes && !on_phone.may_wake(app) {
+    let named = if app.asks.wakes() && !on_phone.may_wake(app) {
         format!(
             "{} (\"{id}\", which {} said may not wake you)",
             app.name,
@@ -466,7 +587,38 @@ fn listed(what: &str, names: impl Iterator<Item = impl ToString>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use p02_contracts::ConfigScope;
+
     use super::*;
+
+    /// Her phone sends a key only from the field of its account, so each
+    /// account the phone knows has one, set for the whole home, never shown
+    /// back, and never the model's to change.
+    #[test]
+    fn each_account_the_phone_knows_has_its_key_among_the_homes_secrets() {
+        let (manifest, ..) = crate::list::plugins()
+            .unwrap()
+            .iter()
+            .find(|(manifest, ..)| manifest.id().as_str() == PHONE_PLUGIN)
+            .unwrap();
+
+        for account in Account::all() {
+            let field = manifest.config().field(&key_field(account)).unwrap();
+
+            assert!(field.secret(), "{}", account.id());
+            assert_eq!(
+                field.scope(),
+                Some(ConfigScope::GlobalOnly),
+                "{}",
+                account.id()
+            );
+            assert!(!field.agent_mutable(), "{}", account.id());
+            assert_eq!(
+                (field.label(), field.placeholder()),
+                (Some("API Key"), Some("Paste key"))
+            );
+        }
+    }
 
     /// No client can make the Clock's screen fail, so the action that
     /// stands without its screen is pinned here: she reads its answer, and

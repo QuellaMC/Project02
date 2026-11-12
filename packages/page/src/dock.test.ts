@@ -32,14 +32,15 @@ function character(id: string, displayName: string): CharacterSummary {
 /** A live tab of Mira's and Nova's home, nothing waiting. */
 function live(): WebState {
   return installSnapshot(initialState, {
-    protocolVersion: 12,
+    protocolVersion: 13,
     health: {
-      protocolVersion: 12,
+      protocolVersion: 13,
       homeRoot: '/home/person/.project02',
       config: {diagnostics: []},
       packages: {diagnostics: []},
       characters: [character('mira', 'Mira'), character('nova', 'Nova')],
       connectors: [],
+      accounts: [],
     },
     confirmations: [],
     pairings: [],

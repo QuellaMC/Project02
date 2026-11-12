@@ -1,6 +1,11 @@
-import {expect, type Page} from '@playwright/test';
+import {expect, type Locator, type Page} from '@playwright/test';
 
-import {publish, quiet, reminders} from '../conformance/harness/apps.ts';
+import {
+  publish,
+  quiet,
+  reminders,
+  sampler,
+} from '../conformance/harness/apps.ts';
 import {startCatalogServer} from '../conformance/harness/catalog-server.ts';
 import {startDaemon, type Daemon} from '../conformance/harness/daemon.ts';
 import {
@@ -78,6 +83,72 @@ function clockIcon(page: Page) {
 /** The chat's Her Phone button, for the character whose chat is on screen. */
 function herPhoneButton(page: Page) {
   return page.getByRole('button', {name: /^Her Phone/u});
+}
+
+/** Within half a pixel: where boxes meet. */
+const near = 0.5;
+
+type Box = NonNullable<Awaited<ReturnType<Locator['boundingBox']>>>;
+
+/** Where `locator` is drawn. */
+async function boxOf(locator: Locator): Promise<Box> {
+  const box = await locator.boundingBox();
+
+  if (box === null) {
+    throw new Error(`${String(locator)} is not drawn`);
+  }
+
+  return box;
+}
+
+/** Where each of what `locator` finds is drawn, in order. */
+async function boxesOf(locator: Locator): Promise<Box[]> {
+  return Promise.all((await locator.all()).map(boxOf));
+}
+
+/** Whether `lower` starts where `upper` ends, or below it. */
+function under(upper: Box, lower: Box): boolean {
+  return lower.y + near >= upper.y + upper.height;
+}
+
+/** Whether `inner` lies whole within `outer`, nothing of it cut off. */
+function holds(outer: Box, inner: Box): boolean {
+  return (
+    inner.x + near >= outer.x &&
+    inner.y + near >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width + near &&
+    inner.y + inner.height <= outer.y + outer.height + near
+  );
+}
+
+/** Whether `right` starts where `left` ends, or after it, on the same line. */
+function beside(left: Box, right: Box): boolean {
+  return (
+    Math.abs(left.y - right.y) <= near && right.x + near >= left.x + left.width
+  );
+}
+
+/** Whether each box of `boxes` stands to the one after it as `placed` says. */
+function inTurn(
+  boxes: readonly Box[],
+  placed: (box: Box, next: Box) => boolean,
+): boolean {
+  return boxes.every((box, at) => {
+    const next = boxes[at + 1];
+
+    return next === undefined || placed(box, next);
+  });
+}
+
+/** The colour the page's `token` paints, as a drawn colour reads. */
+async function colourOf(page: Page, token: string): Promise<string> {
+  return page.evaluate<string>(`(() => {
+    const probe = document.body.appendChild(document.createElement('span'));
+    probe.style.color = 'var(${token})';
+    const colour = getComputedStyle(probe).color;
+    probe.remove();
+    return colour;
+  })()`);
 }
 
 /** A line to Mira, sent from her chat. */
@@ -389,4 +460,111 @@ test("page.store-app-denied: while her ask to install an app on the App Store's 
     'Maybe later, then.',
   ]);
   await expect(row).toHaveText('RemindersThings to do, on a day and time');
+});
+
+test("page.phone-pieces: an app's view draws each piece where the design puts it: a glance's title, reading, caption and detail one under another; a strip's cells side by side, whole on its card, each a label over its value; each range whole on its card, its bar on one track the rows share, between its low and its high, as far in and as wide as its numbers say; a note under what it follows; a field's words; and a row's title in the link's colour, with no link to follow; a glance at the head of a screen stands where the view's title would", async ({
+  page,
+}) => {
+  const model = await startModelServer();
+  const catalog = await startCatalogServer();
+
+  publish(catalog, [sampler]);
+
+  const daemon = await startDaemon(quietHome(model), catalog.env);
+  const glance = page.locator('.phone-glance > *');
+  const cells = page.locator('.phone-cell');
+  const title = page.getByText('Green tea brewing guide');
+
+  expect(await wireOf(daemon).installApp('mira', 'sampler')).toMatchObject({
+    status: 'ok',
+  });
+  await page.goto(phoneOf(daemon, 'mira'));
+  await page.getByRole('button', {name: 'Sampler', exact: true}).click();
+  await expect(glance).toHaveText([
+    'Seattle',
+    '12°',
+    'Light Rain',
+    'H: 14° L: 8°',
+  ]);
+  await expect(page.getByRole('heading', {level: 2})).toHaveText(['Seattle']);
+  await expect(cells).toHaveText([
+    'Now12°',
+    '10AM12°',
+    '11AM13°',
+    '12PM14°',
+    '1PM14°',
+    '2PM13°',
+  ]);
+  await expect(page.locator('.phone-range')).toHaveText([
+    'Wed8°14°',
+    'Thu7°12°',
+    'Sat5°10°',
+  ]);
+  await expect(page.locator('.phone-note')).toHaveText(
+    'Weather data by Open-Meteo.com',
+  );
+  await expect(page.locator('.phone-field')).toHaveText(
+    'how long to steep green tea',
+  );
+
+  const [lines, drawnCells, labels, values, rows, lows, tracks, bars, highs] =
+    await Promise.all([
+      boxesOf(glance),
+      boxesOf(cells),
+      boxesOf(page.locator('.phone-cell-label')),
+      boxesOf(page.locator('.phone-cell-value')),
+      boxesOf(page.locator('.phone-range')),
+      boxesOf(page.locator('.phone-range-low')),
+      boxesOf(page.locator('.phone-range-track')),
+      boxesOf(page.locator('.phone-range-bar')),
+      boxesOf(page.locator('.phone-range-high')),
+    ]);
+  const [strip, ranges, track, note] = await Promise.all([
+    boxOf(page.locator('.phone-strip')),
+    boxOf(page.locator('.phone-ranges')),
+    boxOf(page.locator('.phone-range-track').first()),
+    boxOf(page.locator('.phone-note')),
+  ]);
+  const onTrack = (at: number): number =>
+    Math.round(((at - track.x) / track.width) * 100);
+
+  expect({
+    glanceStacked: inTurn(lines, under),
+    cellsSideBySide: inTurn(drawnCells, beside),
+    labelsOverValues: labels.every((label, at) => {
+      const value = values[at];
+
+      return value !== undefined && under(label, value);
+    }),
+    cellsWhole: drawnCells.every(cell => holds(strip, cell)),
+    rowsWhole: rows.every(row => holds(ranges, row)),
+    oneTrack: tracks.every(
+      each =>
+        Math.abs(each.x - track.x) <= near &&
+        Math.abs(each.width - track.width) <= near,
+    ),
+    lowsBefore: lows.every(low => low.x + low.width <= track.x + near),
+    highsAfter: highs.every(high => high.x + near >= track.x + track.width),
+    noteUnderRanges: under(ranges, note),
+  }).toEqual({
+    glanceStacked: true,
+    cellsSideBySide: true,
+    labelsOverValues: true,
+    cellsWhole: true,
+    rowsWhole: true,
+    oneTrack: true,
+    lowsBefore: true,
+    highsAfter: true,
+    noteUnderRanges: true,
+  });
+  expect(bars.map(bar => [onTrack(bar.x), onTrack(bar.x + bar.width)])).toEqual(
+    [
+      [33, 100],
+      [22, 78],
+      [0, 56],
+    ],
+  );
+
+  await expect(title).toHaveCSS('color', await colourOf(page, '--link'));
+  await expect(page.getByRole('link')).toHaveCount(0);
 });
