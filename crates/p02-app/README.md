@@ -61,8 +61,8 @@ with an outcome of p02-wire, never an error.
   log. A turn of her own carries no line's stamps, and is said running as
   it begins.
 - **Settings** change one way, a client's change or her own plugin's,
-  through p02-config; health, which says the accounts her phone knows,
-  each with whether the home's settings hold its key, then goes to every
+  through p02-config; health, which says the accounts of a key her phone
+  knows, each with whether the home's settings hold it, then goes to every
   surface, and a reconcile pass starts or stops whom the change switched
   and brings every other running character up to date at once, built
   again when what she runs on changed. A turn in flight meets it before

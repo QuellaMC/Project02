@@ -7,6 +7,7 @@
     reason = "a test, and the world it builds, fail by panicking"
 )]
 
+mod ai;
 mod apps;
 mod calls;
 mod catalog;

@@ -1,14 +1,14 @@
 //! What an app asks of her phone beyond keeping its own data, which every
 //! app does: to wake her, to reach the internet at its hosts, and to use an
-//! account of the person's there. Its manifest says it and the App Store's
-//! catalog lists it under the same rules, and what the person is told the
-//! app may do is said from it here, once.
+//! account of the person's, a key's there or a connection's. Its manifest
+//! says it and the App Store's catalog lists it under the same rules, and
+//! what the person is told the app may do is said from it here, once.
 
 use std::collections::BTreeSet;
 
 use serde::{Deserialize, Serialize};
 
-use crate::account::Account;
+use crate::account::{Account, AccountKind};
 use crate::error::PackageError;
 
 /// The most hosts an app reaches.
@@ -16,7 +16,7 @@ const MOST_HOSTS: usize = 4;
 
 /// What an app asks of her phone: whether it wakes her, the hosts it
 /// reaches, none when it names none, and the account of the person's it
-/// uses at one of them, by its id.
+/// uses, by its id: a key's at one of those hosts, or a connection's.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Asks {
     pub(crate) wakes: bool,
@@ -39,7 +39,8 @@ impl Asks {
         &self.reaches
     }
 
-    /// The account of the person's the app uses, at one of its hosts.
+    /// The account of the person's the app uses: a key's, at one of its
+    /// hosts, or a connection's.
     #[must_use]
     pub fn account(&self) -> Option<&'static Account> {
         self.account.as_deref().and_then(Account::of)
@@ -48,7 +49,8 @@ impl Asks {
     /// Refuses what breaks a rule, saying which: a host that is not a DNS
     /// name in lowercase, of two labels at least and not an address in
     /// numbers; more than 4 hosts, or one named twice; an account the phone
-    /// does not know, or whose host the app does not reach.
+    /// does not know, or a key's whose host the app does not reach. A
+    /// connection needs no host.
     pub(crate) fn check(&self) -> Result<(), PackageError> {
         if self.reaches.len() > MOST_HOSTS {
             return Err(PackageError::TooManyHosts);
@@ -71,13 +73,16 @@ impl Asks {
         };
         let account = Account::of(id).ok_or_else(|| PackageError::Account(id.clone()))?;
 
-        if self.reaches.iter().any(|host| host == account.host()) {
-            Ok(())
-        } else {
-            Err(PackageError::AccountUnreached {
-                account: id.clone(),
-                host: account.host(),
-            })
+        match account.kind() {
+            AccountKind::Key { host, .. }
+                if !self.reaches.iter().any(|reached| reached == host) =>
+            {
+                Err(PackageError::AccountUnreached {
+                    account: id.clone(),
+                    host,
+                })
+            }
+            _ => Ok(()),
         }
     }
 }
@@ -104,7 +109,13 @@ pub fn it_may(asks: &Asks) -> Vec<String> {
     }
 
     if let Some(account) = asks.account() {
-        may.push(format!("Use your {} account", account.name()));
+        may.push(match account.kind() {
+            AccountKind::Key { .. } => format!("Use your {} account", account.name()),
+            AccountKind::Connection => format!(
+                "Ask {} with a connection of yours, once you allow it",
+                account.name()
+            ),
+        });
     }
 
     may

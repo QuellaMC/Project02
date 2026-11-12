@@ -8,7 +8,8 @@
 //! opening the App Store reads its catalog anew, before the lease, and an
 //! action that reaches the internet has each of its requests made between
 //! its runs, with no lease held, the person's key sent with one for an
-//! account of theirs.
+//! account of theirs; a question an action asks is answered that her phone
+//! cannot ask yet.
 
 mod catalog;
 mod install;
@@ -25,8 +26,8 @@ use p02_contracts::{
 };
 use p02_core::SpeakerName;
 use p02_phone::{
-    Account, Acted, Acting, Action, Catalog, Exchange, Fetch, Fetched, Listed, Now, OnPhone,
-    Opened, Phone, PhoneError, STORE, View,
+    Account, AccountKind, Acted, Acting, Action, Ask, Catalog, Exchange, Fetch, Fetched, Listed,
+    Now, OnPhone, Opened, Phone, PhoneError, STORE, View,
 };
 use p02_shared::{Identifier, error_chain, sentence};
 use serde::Deserialize;
@@ -137,12 +138,13 @@ fn key_field(account: &Account) -> String {
     format!("{}ApiKey", account.id())
 }
 
-/// The person's key for each account the phone's settings, which
+/// The person's key for each account of a key the phone's settings, which
 /// `value_of` reads by field name, hold one for: its text, trimmed, when a
 /// header can carry it.
 fn keys<'v>(value_of: impl Fn(&str) -> Option<&'v Value>) -> Vec<(&'static Account, Key)> {
     Account::all()
         .iter()
+        .filter(|account| matches!(account.kind(), AccountKind::Key { .. }))
         .filter_map(|account| {
             let text = value_of(&key_field(account))
                 .and_then(Value::as_str)
@@ -183,10 +185,11 @@ struct Answered {
 }
 
 /// Where a call stands after a run on her phone: answered, or an action
-/// asking for one more request before it runs again.
+/// asking for one more thing, a request or a question, before it runs
+/// again.
 enum Step {
     Answered(Answered),
-    Asks(Fetch),
+    Asks(Ask),
 }
 
 /// A call of one of the tools, its input as the tool's contract admits it.
@@ -267,9 +270,10 @@ impl RuntimePlugin for PhonePlugin {
     }
 
     /// Answers a call of her phone: a run of it under a lease of her
-    /// phone's store, and, while an action asks for a request, that request
-    /// made with no lease held, every one of the call within one budget,
-    /// and the action run again at the same moment with what came of it.
+    /// phone's store, and, while an action asks for a request or a
+    /// question, what it asks done with no lease held, every request of the
+    /// call within one budget, and the action run again at the same moment
+    /// with what came of it.
     async fn handle_tool_call(
         &self,
         call: &ToolCall,
@@ -311,10 +315,8 @@ impl RuntimePlugin for PhonePlugin {
 
             match ran {
                 Ok(Step::Answered(answered)) => break Ok(answered),
-                Ok(Step::Asks(fetch)) => {
-                    let fetched = self.fetched(&fetch, until, person.as_ref()).await;
-
-                    exchanges.push(Exchange { fetch, fetched });
+                Ok(Step::Asks(ask)) => {
+                    exchanges.push(self.exchange(ask, until, person.as_ref()).await);
                 }
                 Err(refused) => break Err(refused),
             }
@@ -358,6 +360,24 @@ impl RuntimePlugin for PhonePlugin {
 }
 
 impl PhonePlugin {
+    /// What came of `ask`: a request made by `until`, as [`Self::fetched`]
+    /// makes it; a question answered that her phone cannot ask yet.
+    async fn exchange(&self, ask: Ask, until: Instant, person: Option<&SpeakerName>) -> Exchange {
+        match ask {
+            Ask::Fetch(fetch) => Exchange::Fetch {
+                fetched: self.fetched(&fetch, until, person).await,
+                fetch,
+            },
+            Ask::Question(question) => Exchange::Question {
+                answer: Err(format!(
+                    "This phone cannot ask {} yet.",
+                    question.account().name()
+                )),
+                question,
+            },
+        }
+    }
+
     /// What came of `fetch`, made by `until`: with the person's key when it
     /// is for an account of theirs, and not made when they gave none for it,
     /// which is said naming `person` as her notes do.
@@ -418,7 +438,7 @@ impl Request {
 
     /// What a run of the call on her phone comes to at `now`: her phone's
     /// answer, as she reads it, with why what she has in front could not be
-    /// kept, when it could not; or, for an action, the one more request it
+    /// kept, when it could not; or, for an action, the one more thing it
     /// asks for after `exchanges`. An open of the App Store keeps `read`,
     /// the catalog read for it, first.
     fn answer(
@@ -455,7 +475,7 @@ impl Request {
                             unkept,
                         })
                     }
-                    Acting::Asks(fetch) => Step::Asks(fetch),
+                    Acting::Asks(ask) => Step::Asks(ask),
                 }),
         }
     }
@@ -592,17 +612,20 @@ mod tests {
     use super::*;
 
     /// Her phone sends a key only from the field of its account, so each
-    /// account the phone knows has one, set for the whole home, never shown
-    /// back, and never the model's to change.
+    /// account of a key the phone knows has one, set for the whole home,
+    /// never shown back, and never the model's to change.
     #[test]
-    fn each_account_the_phone_knows_has_its_key_among_the_homes_secrets() {
+    fn each_account_of_a_key_the_phone_knows_has_its_key_among_the_homes_secrets() {
         let (manifest, ..) = crate::list::plugins()
             .unwrap()
             .iter()
             .find(|(manifest, ..)| manifest.id().as_str() == PHONE_PLUGIN)
             .unwrap();
 
-        for account in Account::all() {
+        for account in Account::all()
+            .iter()
+            .filter(|account| matches!(account.kind(), AccountKind::Key { .. }))
+        {
             let field = manifest.config().field(&key_field(account)).unwrap();
 
             assert!(field.secret(), "{}", account.id());

@@ -32,16 +32,20 @@ the blocking pool.
   the hosts it `reaches`, 4 at most, each once, each a DNS name in
   lowercase of two labels at least and not an address in numbers, with no
   scheme, port or path, reaches the internet, at those hosts alone. Its
-  `account` is one the phone knows, at one of those hosts. `it_may` says
-  what an app may do, a line each, from what it asks for, for the App
-  Store and for the person: "Keep its own data", "Wake her when something
-  is due", "Reach the internet at api.tavily.com" (two hosts joined by
-  "and", more by commas and "and") and "Use your Tavily account".
-- **The accounts** are the phone's own short list, each at one host, so a
-  key the person gives for one only ever goes there, and each with one
-  sentence on where the person gets a key; an app names the one it uses
-  and never says where its key goes. Today: Tavily (`tavily`, at
-  `api.tavily.com`, "Get a free key at tavily.com.").
+  `account` is one the phone knows: a key's, at one of those hosts, or a
+  connection's, which needs none. `it_may` says what an app may do, a line
+  each, from what it asks for, for the App Store and for the person: "Keep
+  its own data", "Wake her when something is due", "Reach the internet at
+  api.tavily.com" (two hosts joined by "and", more by commas and "and"),
+  and "Use your Tavily account" or "Ask ChatGPT with a connection of yours,
+  once you allow it".
+- **The accounts** are the phone's own short list, each of one of two
+  kinds; an app names the one it uses. A key's is at one host, so a key the
+  person gives for it only ever goes there, with one sentence on where the
+  person gets one: Tavily (`tavily`, at `api.tavily.com`, "Get a free key
+  at tavily.com."). A connection's is one of the person's AI services,
+  through which an app asks a model and which it never holds: ChatGPT
+  (`chatgpt`).
 - **A script reaches** the language and `phone`, nothing else:
   `storage.get`, `set` and `remove`, a JSON value under each key;
   `rings.set({id, at, title, body})`, `rings.cancel(id)` and `rings.list()`,
@@ -73,16 +77,28 @@ the blocking pool.
   through as its refusal. A request at its account's host is for that
   account, and its caller sends the key with it; the script never holds a
   key.
-- **An action that fetches** has its requests made by its caller, since
-  the phone makes none: `Phone::act` is handed the exchanges of the
-  action's runs so far, each a request and what came of it, and runs it
-  from what the app keeps, its n-th fetch answered by the n-th exchange. A fetch none
-  answers yet ends the run there, which no script catches and which keeps
-  nothing, and the call asks for that request; its caller makes it, with
-  no lease held, and takes the action again at the same moment. A fifth
-  request, or one other than asked at that place before, fails the call,
-  caught or not: an action asks for the same requests on every run. Each
-  run has the limits of a call.
+- **`ai.ask({instructions, input})`**, in an action alone too, and only in
+  an app whose `account` is a connection: elsewhere it throws a
+  `TypeError`, as a fetch does, and in any other app one saying what its
+  manifest must name. The `input` is the question, text that is not
+  blank, and the `instructions`, optional, say how to answer, each of
+  64 KiB at most, as a request's body; a question that breaks a rule
+  throws a `TypeError`. It answers `{text}`, the model's words; a question
+  with no answer throws a plain `Error` with its caller's sentence, as a
+  request does. The question names the connection it is asked through;
+  the script holds nothing of it.
+- **An action that asks its host**, a request or a question, has it done
+  by its caller, since the phone does neither: `Phone::act` is handed the
+  exchanges of the action's runs so far, each what it asked and what came
+  of it, and runs it from what the app keeps, its n-th ask answered by the
+  n-th exchange. An ask none answers yet ends the run there, which no
+  script catches and which keeps nothing, and the call asks for it; its
+  caller makes the request or asks the question, with no lease held, and
+  takes the action again at the same moment. A fifth ask, requests and
+  questions together, a third question, or one other than asked at that
+  place before, fails the call, caught or not: an action asks for the same
+  things in the same order on every run. Each run has the limits of a
+  call.
 - **Each call runs fresh**: its own QuickJS runtime and context, dropped when
   it returns, under limits of 1 second for the whole call, 16 MiB of memory
   and 256 KiB of stack. The time limit holds after an `await` too, and a

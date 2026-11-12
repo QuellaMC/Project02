@@ -66,12 +66,13 @@ up to 256 KiB, and the requests of one call share 20 seconds. What is no
 answer is said to the app in a plain sentence naming no address. Under the
 test switch every request goes below the stand-in's base by its host.
 `phone.use` runs the action under her phone's lease, and while the action
-asks for a request, makes it with no lease held and runs the action again
-at the same moment with what came of it. A request for an account of the
-person's carries `Authorization: Bearer` and the key the home's settings
-hold for it, `tavilyApiKey`, a secret of the home's alone that she cannot
-change; with none set the request is not made, and the app is told so in
-a sentence naming the person. `keyed_accounts` says which accounts have a
+asks for a request or a question, makes the request, or answers the
+question that her phone cannot ask yet, with no lease held, and runs the
+action again at the same moment with what came of it. A request for an
+account of the person's carries `Authorization: Bearer` and the key the
+home's settings hold for it, `tavilyApiKey`, a secret of the home's alone
+that she cannot change; with none set the request is not made, and the
+app is told so in a sentence naming the person. `keyed_accounts` says which accounts have a
 key her phone sends, by the rule her phone takes one by, so what a client
 is told of an account is what her phone does. The key reaches no log,
 record or app, and an answer that echoes it has it redacted. The phone's

@@ -146,7 +146,7 @@ fn a_manifest_that_breaks_a_rule_is_refused_saying_which() {
         ),
         (
             notes(json!({"reaches": ["api.openai.com"], "account": "openai"})),
-            "manifest account \"openai\" is none of the accounts the phone knows: tavily"
+            "manifest account \"openai\" is none of the accounts the phone knows: tavily, chatgpt"
                 .to_owned(),
         ),
         (
@@ -274,6 +274,7 @@ fn a_script_reaches_the_language_and_phone_and_nothing_else() {
                 ["rings", ["set", "cancel", "list"]],
                 ["time", ["now", "local", "at", "next"]],
                 ["net", ["fetch"]],
+                ["ai", ["ask"]],
             ],
             "imported": "ReferenceError: could not load module 'notes.js'",
         })

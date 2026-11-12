@@ -1,6 +1,7 @@
 //! The `phone` a script reaches, the one thing it has beside the language:
 //! its own app's storage and rings, the time, all from the call it runs
-//! in, and, in an action, the internet through the call's caller.
+//! in, and, in an action, the internet and a model through the call's
+//! caller.
 
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -13,8 +14,10 @@ use rquickjs::{Ctx, Exception, Function, Object, Value};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
+use crate::ai::{ASK, Posed, Question, UNASKED};
 use crate::data::{Kept, Ring};
-use crate::net::{Asked, End, FETCH, Net, OFFLINE};
+use crate::exchange::{Ask, Asking, End, Exchange};
+use crate::net::{FETCH, Fetch, OFFLINE, Requested};
 use crate::time::{self, Now};
 
 const GET: &str = "phone.storage.get takes a key, which is text";
@@ -51,14 +54,14 @@ pub(crate) enum Access {
 
 /// What one call's `phone` works on: a copy of what its app keeps, which
 /// the call's caller saves or drops, the moment of the call, whether the
-/// call may change the copy, and, for a run of an action, what it reaches
-/// the internet with; any other call reaches nothing.
+/// call may change the copy, and, for a run of an action, what it asks the
+/// call's caller with; any other call asks nothing.
 #[derive(Debug)]
 pub(crate) struct Host {
     kept: RefCell<Kept>,
     now: Now,
     access: Access,
-    net: Option<Net>,
+    asking: Option<Asking>,
 }
 
 /// A function of `phone`, given the arguments it was called with.
@@ -92,12 +95,12 @@ struct NextArgument {
 }
 
 impl Host {
-    pub(crate) fn new(kept: Kept, now: Now, access: Access, net: Option<Net>) -> Rc<Self> {
+    pub(crate) fn new(kept: Kept, now: Now, access: Access, asking: Option<Asking>) -> Rc<Self> {
         Rc::new(Self {
             kept: RefCell::new(kept),
             now,
             access,
-            net,
+            asking,
         })
     }
 
@@ -106,15 +109,15 @@ impl Host {
         self.kept.borrow().clone()
     }
 
-    /// Whether the run ended at a fetch: from then on, it stops at once.
+    /// Whether the run ended at an ask: from then on, it stops at once.
     pub(crate) fn ended(&self) -> bool {
-        self.net.as_ref().is_some_and(Net::ended)
+        self.asking.as_ref().is_some_and(Asking::ended)
     }
 
-    /// How the run ended at a fetch, taken once it is over; none when it
+    /// How the run ended at an ask, taken once it is over; none when it
     /// did not.
     pub(crate) fn end(&self) -> Option<End> {
-        self.net.as_ref().and_then(Net::end)
+        self.asking.as_ref().and_then(Asking::end)
     }
 
     /// Puts `phone` among the context's globals.
@@ -156,6 +159,7 @@ impl Host {
             )?,
         )?;
         phone.set("net", self.object(ctx, &[("fetch", Self::fetch)])?)?;
+        phone.set("ai", self.object(ctx, &[("ask", Self::ask)])?)?;
         ctx.globals().set("phone", phone)
     }
 
@@ -327,28 +331,36 @@ impl Host {
         to_script(ctx, &next.as_millisecond())
     }
 
-    /// `phone.net.fetch`, in an action alone: the answer of the exchange at
-    /// its place, or the sentence of its failure thrown as a plain `Error`.
-    /// A request no exchange answers yet, a fifth, or one other than asked
-    /// there before ends the run where it is, and so does any fetch after.
+    /// `phone.net.fetch`, in an action alone: what came of the request, as
+    /// [`answered`] gives it.
     fn fetch<'js>(&self, ctx: &Ctx<'js>, arguments: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
-        let Some(net) = &self.net else {
-            return Err(Exception::throw_type(ctx, OFFLINE));
-        };
-
-        if net.ended() {
-            return Err(stopped(ctx));
-        }
-
-        let asked: Asked = argument(ctx, arguments.first(), FETCH)?;
-        let fetch = net
-            .request(asked)
+        let asking = self.asking(ctx, OFFLINE)?;
+        let requested: Requested = argument(ctx, arguments.first(), FETCH)?;
+        let fetch = Fetch::of(requested, asking.asks())
             .map_err(|refusal| Exception::throw_type(ctx, refusal))?;
 
-        match net.answer(fetch) {
-            Some(Ok(fetched)) => to_script(ctx, fetched),
-            Some(Err(failure)) => Err(Exception::throw_message(ctx, failure)),
-            None => Err(stopped(ctx)),
+        answered(ctx, asking, Ask::Fetch(fetch))
+    }
+
+    /// `phone.ai.ask`, in an action alone: what came of the question, as
+    /// [`answered`] gives it.
+    fn ask<'js>(&self, ctx: &Ctx<'js>, arguments: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let asking = self.asking(ctx, UNASKED)?;
+        let posed: Posed = argument(ctx, arguments.first(), ASK)?;
+        let question = Question::of(posed, asking.asks())
+            .map_err(|refusal| Exception::throw_type(ctx, &refusal))?;
+
+        answered(ctx, asking, Ask::Question(question))
+    }
+
+    /// What the run asks the call's caller with, in an action alone: any
+    /// other call is refused in the words `elsewhere`, and a run that ended
+    /// at an ask stops here.
+    fn asking(&self, ctx: &Ctx<'_>, elsewhere: &str) -> rquickjs::Result<&Asking> {
+        match &self.asking {
+            None => Err(Exception::throw_type(ctx, elsewhere)),
+            Some(asking) if asking.ended() => Err(stopped(ctx)),
+            Some(asking) => Ok(asking),
         }
     }
 
@@ -361,6 +373,34 @@ impl Host {
                 &format!("{function} changes nothing here: a screen only reads"),
             )),
         }
+    }
+}
+
+/// What the script's call that asked `ask` gets: the answer of the
+/// exchange at its place, or the sentence of its failure thrown as a plain
+/// `Error`. An ask no exchange answers yet, a fifth, a third question, or
+/// one other than asked there before ends the run where it is, and so does
+/// any ask after.
+fn answered<'js>(ctx: &Ctx<'js>, asking: &Asking, ask: Ask) -> rquickjs::Result<Value<'js>> {
+    match asking.answer(ask) {
+        Some(Exchange::Fetch {
+            fetched: Ok(fetched),
+            ..
+        }) => to_script(ctx, fetched),
+        Some(Exchange::Question {
+            answer: Ok(answer), ..
+        }) => to_script(ctx, answer),
+        Some(
+            Exchange::Fetch {
+                fetched: Err(failure),
+                ..
+            }
+            | Exchange::Question {
+                answer: Err(failure),
+                ..
+            },
+        ) => Err(Exception::throw_message(ctx, failure)),
+        None => Err(stopped(ctx)),
     }
 }
 

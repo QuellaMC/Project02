@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use p02_characters::discover;
 use p02_config::Resolution;
 use p02_contracts::{CharacterStorage, FileStoreBackend, LeasedFiles, StoreError};
-use p02_phone::{Account, Listed, Now, OnPhone, Phone, PhoneError, Source, it_may};
+use p02_phone::{Account, AccountKind, Listed, Now, OnPhone, Phone, PhoneError, Source, it_may};
 use p02_plugins::{PHONE_PLUGIN, keyed_accounts};
 use p02_shared::{Identifier, error_chain, error_sentence, sentence};
 use p02_store::CharacterData;
@@ -268,18 +268,21 @@ pub(crate) fn drawn(app: &Listed, on_phone: &OnPhone, keyed: &[&Account]) -> Pho
     }
 }
 
-/// The accounts her phone knows, as health says them: each with whether
-/// the person gave her phone its key, and where a key comes from.
+/// The accounts of a key her phone knows, as health says them: each with
+/// whether the person gave her phone its key, and where a key comes from.
 pub(crate) fn accounts(world: &World) -> Vec<PersonAccount> {
     let keyed = keyed(world);
 
     Account::all()
         .iter()
-        .map(|account| PersonAccount {
-            id: account_id(account),
-            name: account.name().to_owned(),
-            has_key: keyed.contains(&account),
-            key_from: account.key_from().to_owned(),
+        .filter_map(|account| match account.kind() {
+            AccountKind::Key { key_from, .. } => Some(PersonAccount {
+                id: account_id(account),
+                name: account.name().to_owned(),
+                has_key: keyed.contains(&account),
+                key_from: (*key_from).to_owned(),
+            }),
+            AccountKind::Connection => None,
         })
         .collect()
 }
