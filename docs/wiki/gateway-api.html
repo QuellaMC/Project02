@@ -1072,16 +1072,17 @@ data: {…}</code></pre>
       </p>
 
       <p>
-        The web page shows each request waiting as a card beside the
-        confirmations — the connector, the account's label, the code, the time
-        it expires and the source it wrote to, with Approve and Deny —
-        installed from every <code>ready</code>, added from
-        <code>pairing_requested</code> once per code, and removed by
-        <code>pairing_settled</code>. Answering a card, the page leaves a
-        settlement to the frame; an expiry is said once, whichever news of it
-        reaches the page first; a request the daemon no longer knows is said to
-        be no longer waiting; and an approval that could not be written leaves
-        the card, with the reason.
+        The web page asks each request waiting on a card in the one spot it
+        asks everything in, above the message box, among the confirmations —
+        who asks to pair on which connector, the bot they wrote to, the code
+        and the time left, with Allow and Don't Allow — installed from every
+        <code>ready</code>, added from <code>pairing_requested</code> once per
+        code, and ended by <code>pairing_settled</code>, the card saying how
+        for a moment. Answering a card, the page leaves a settlement to the
+        frame; an expiry is said once, whichever news of it reaches the page
+        first; a request the daemon no longer knows is said to be no longer
+        waiting; and an approval that could not be written leaves the card,
+        with the reason.
       </p>
 
       <p>

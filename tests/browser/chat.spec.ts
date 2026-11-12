@@ -1,7 +1,7 @@
 import {readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
-import {expect, type Page} from '@playwright/test';
+import {expect, type Locator, type Page} from '@playwright/test';
 
 import {startDaemon} from '../conformance/harness/daemon.ts';
 import {frameOf, openEvents} from '../conformance/harness/events.ts';
@@ -58,6 +58,110 @@ function composerFor(page: Page) {
 async function send(page: Page, line: string): Promise<void> {
   await composerFor(page).fill(line);
   await composerFor(page).press('Enter');
+}
+
+/** Allow, on the card that asks. */
+async function allowOn(card: Locator): Promise<void> {
+  await card.getByRole('button', {name: 'Allow', exact: true}).click();
+}
+
+/** Within half a pixel: where boxes meet. */
+const near = 0.5;
+
+/**
+ * Where the card in front sits against her last line, the message box,
+ * the dock that holds it and the window, and whether its end is under its
+ * words; none while it is not there.
+ */
+async function placeOf(
+  page: Page,
+): Promise<Readonly<Record<string, boolean>> | undefined> {
+  const card = page.locator('.ask:not([aria-hidden])');
+  const [shown, words, end, dock, line, box] = await Promise.all([
+    card.boundingBox(),
+    card.locator('.ask-words').boundingBox(),
+    card.locator('.ask-end').boundingBox(),
+    page.locator('.dock').boundingBox(),
+    page.locator('.bubble-theirs').last().boundingBox(),
+    page.locator('.composer').boundingBox(),
+  ]);
+  const size = page.viewportSize();
+
+  if (
+    shown === null ||
+    words === null ||
+    end === null ||
+    dock === null ||
+    line === null ||
+    box === null ||
+    size === null
+  ) {
+    return undefined;
+  }
+
+  const bottom = shown.y + shown.height;
+
+  return {
+    belowHerLine: shown.y + near >= line.y + line.height,
+    aboveTheBox: bottom <= box.y + near,
+    whole: shown.y + near >= dock.y && bottom <= dock.y + dock.height + near,
+    inTheWindow:
+      shown.x >= 0 &&
+      shown.y >= 0 &&
+      shown.x + shown.width <= size.width &&
+      bottom <= size.height,
+    answerUnderWords: end.y + near >= words.y + words.height,
+  };
+}
+
+/**
+ * Every word the dock's cards say of how an ask ended, on every frame
+ * from now until the card in front is the one titled `title`.
+ */
+function saidUntil(page: Page, title: string): Promise<string[]> {
+  return page.evaluate<string[]>(`new Promise(resolve => {
+    const said = new Set();
+    const look = () => {
+      for (const words of document.querySelectorAll('.ask-said')) {
+        said.add(words.textContent);
+      }
+
+      const front = document.querySelector('.ask:not([aria-hidden]) .ask-title');
+
+      if (front !== null && front.textContent === ${JSON.stringify(title)}) {
+        resolve([...said].filter(words => words !== ''));
+      } else {
+        requestAnimationFrame(look);
+      }
+    };
+
+    look();
+  })`);
+}
+
+/**
+ * On every frame from now until the dock has opened and closed again,
+ * where the chat's first line sits in the window.
+ */
+function firstLineWhileTheDockMoves(page: Page): Promise<number[]> {
+  return page.evaluate<number[]>(`new Promise(resolve => {
+    const first = document.querySelector('.messages .bubble');
+    const dock = document.querySelector('.dock');
+    const seen = [];
+    let opened = false;
+    const look = () => {
+      seen.push(first.getBoundingClientRect().top);
+      opened = opened || dock.getBoundingClientRect().height > 0;
+
+      if (opened && dock.getBoundingClientRect().height === 0 && document.querySelector('.ask') === null) {
+        resolve(seen);
+      } else {
+        requestAnimationFrame(look);
+      }
+    };
+
+    look();
+  })`);
 }
 
 /** The model asks to set Mira's tone, against the fingerprint her settings hand out now. */
@@ -261,28 +365,28 @@ test('page.reconnect-same-address: once the daemon stops the page says Connectin
   await expect(replies).toHaveText(['Hello to you.', 'Again, hello.']);
 });
 
-test('page.confirmation-card: a tool round that needs approval shows a Confirmation card with the tool and its preview, Approve removes it and the turn finishes, and one her stop cancels is said once, naming her', async ({
+test("page.confirmation-card: her ask to change one of her settings waits on a card above the message box that says it in her settings page's words; Allow lets her turn finish, and one her stop cancels goes and is said once, naming her", async ({
   page,
 }) => {
   const {model, daemon, wire} = await miraHome();
-  const card = page.getByRole('group', {name: 'Confirmation'});
+  const card = page.getByRole('group', {
+    name: 'Mira wants to change her Reply Style',
+  });
   const replies = page.locator('.bubble-theirs .bubble-text');
 
   await page.goto(daemon.url);
   model.answer(await asksForTone(wire, 'warm'), reply('Warmly, then.'));
   await send(page, 'Be warm.');
-  await expect(card).toContainText('Confirm runtime.plugin.config.update');
-  await expect(card).toContainText('"fieldName": "tone"');
-  await expect(card).toContainText('"value": "warm"');
-  await card.getByRole('button', {name: 'Approve'}).click();
-  await expect(card).toHaveCount(0);
+  await expect(card).toHaveAccessibleDescription('Tone: not set → Warm.');
+  await allowOn(card);
   await expect(replies).toHaveText(['Warmly, then.']);
+  await expect(card).toHaveCount(0);
 
   // Switched off while a card waits: the card goes, and the turn finishes
   // on the model's word that nothing was changed.
   model.answer(await asksForTone(wire, 'formal'), reply('As you were.'));
   await send(page, 'Be formal.');
-  await expect(card).toContainText('"value": "formal"');
+  await expect(card).toHaveAccessibleDescription('Tone: Warm → Formal.');
   await saveConfig(wire, mira, {
     kind: 'set',
     path: 'project02.enabled',
@@ -295,7 +399,7 @@ test('page.confirmation-card: a tool round that needs approval shows a Confirmat
   ]);
 });
 
-test("page.pairing-card: a pairing request a connector asked for shows a Pairing card with the account, its code and the source it wrote to; an approval the home cannot take keeps it and says why, Approve removes it and puts the account in the home's pairedUsers, and one nobody answers is said once when it expires", async ({
+test("page.pairing-card: someone new asking on a connector waits on a card that says who, where they wrote and the code; an approval the home cannot take keeps it and says why, Allow says Allowed and puts the account in the home's pairedUsers, and one nobody answers says Expired and is said once", async ({
   page,
 }) => {
   // Long enough for a person to answer one, short enough to wait out.
@@ -303,7 +407,8 @@ test("page.pairing-card: a pairing request a connector asked for shows a Pairing
     {},
     {PROJECT02_TEST_DURATIONS: 'pairing=5000'},
   );
-  const cards = page.getByRole('group', {name: 'Pairing'});
+  const cardOf = (label: string) =>
+    page.getByRole('group', {name: `${label} wants to pair on Telegram`});
   const notices = page.locator('main > .notice');
 
   await page.goto(daemon.url);
@@ -315,37 +420,156 @@ test("page.pairing-card: a pairing request a connector asked for shows a Pairing
     subject: alice,
     source: 'telegram:mira_bot',
   })) as Asked;
-  const card = cards.filter({hasText: alice.label});
+  const card = cardOf(alice.label);
 
-  await expect(card).toContainText(`code ${forAlice.request.code}`);
-  await expect(card).toContainText('via telegram:mira_bot');
+  await expect(card).toHaveAccessibleDescription(
+    `Wrote to @mira_bot. Code ${forAlice.request.code}.`,
+  );
   chmod(home, 0o500);
 
   try {
-    await card.getByRole('button', {name: 'Approve'}).click();
+    await allowOn(card);
     await expect(notices).toContainText(join(home, 'config.json'));
   } finally {
     chmod(home, 0o700);
   }
 
-  await expect(card).toBeVisible();
-  await card.getByRole('button', {name: 'Approve'}).click();
-  await expect(card).toHaveCount(0);
+  await allowOn(card);
+  await expect(card).toContainText('Allowed');
   await expect(notices).toHaveCount(0);
   expect(await wire.connectorConfig('telegram')).toMatchObject({
     home: {values: {pairedUsers: {[alice.id]: alice.label}}},
   });
 
+  // Asked while the answer to the first still shows, it takes the spot.
   const forBob = (await wire.pairingRequest('telegram', {
     subject: bob,
     source: 'telegram:mira_bot',
   })) as Asked;
 
-  await expect(cards).toContainText(bob.label);
+  await expect(cardOf(bob.label)).toBeVisible();
+  await expect(cardOf(bob.label)).toContainText('Expired');
   await expect(notices).toHaveText([
     `A pairing request expired before it was answered: ${bob.label}, code ${forBob.request.code}.`,
   ]);
-  await expect(cards).toHaveCount(0);
+  await expect(cardOf(bob.label)).toHaveCount(0);
+});
+
+test('page.ask-place: what she asks waits on a card under her last line and above the message box, whole inside the window, its answer under its words in a narrow one; her row among the characters says she is asking until it is answered', async ({
+  page,
+}) => {
+  const {model, daemon, wire} = await miraHome();
+  const card = page.getByRole('group', {
+    name: 'Mira wants to change her Reply Style',
+  });
+  const herRow = page
+    .getByRole('complementary', {name: 'Characters'})
+    .getByRole('listitem')
+    .filter({hasText: 'Mira'});
+  const inPlace = {
+    belowHerLine: true,
+    aboveTheBox: true,
+    whole: true,
+    inTheWindow: true,
+  };
+
+  model.answer(reply('Hello to you.'));
+  await page.goto(daemon.url);
+  await send(page, 'Hello.');
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Hello to you.',
+  ]);
+  model.answer(await asksForTone(wire, 'warm'), reply('Warmly, then.'));
+  await send(page, 'Be warm.');
+  await expect(card).toBeVisible();
+  await expect(herRow).toContainText('Asking you…');
+  await expect
+    .poll(() => placeOf(page))
+    .toEqual({...inPlace, answerUnderWords: false});
+
+  await page.setViewportSize({width: 420, height: 760});
+  await expect
+    .poll(() => placeOf(page))
+    .toEqual({...inPlace, answerUnderWords: true});
+
+  await allowOn(card);
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Hello to you.',
+    'Warmly, then.',
+  ]);
+  await expect(herRow).not.toContainText('Asking you…');
+});
+
+test('page.asks-one-spot: what waits is answered one at a time in one spot above the message box, another behind it as an edge; once the first is answered it says Allowed, and the next takes its place', async ({
+  page,
+}) => {
+  const {model, daemon, wire} = await miraHome();
+  const dock = page.locator('.dock');
+  const hers = page.getByRole('group', {
+    name: 'Mira wants to change her Reply Style',
+  });
+  const alices = `${alice.label} wants to pair on Telegram`;
+
+  await page.goto(daemon.url);
+  model.answer(await asksForTone(wire, 'warm'), reply('Warmly, then.'));
+  await send(page, 'Be warm.');
+  await expect(hers).toBeVisible();
+  await wire.pairingRequest('telegram', {
+    subject: alice,
+    source: 'telegram:mira_bot',
+  });
+  await expect(dock).toHaveAttribute('data-edges', '1');
+  await expect(page.getByRole('group', {name: /wants to/u})).toHaveCount(1);
+
+  const said = saidUntil(page, alices);
+
+  await allowOn(hers);
+  expect(await said).toEqual(['Allowed']);
+  await expect(page.getByRole('group', {name: alices})).toBeVisible();
+  await expect(dock).toHaveAttribute('data-edges', '0');
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Warmly, then.',
+  ]);
+});
+
+test('page.ask-while-reading: in a chat scrolled up to read, the line at the top stays where it is while a card opens above the message box and while it closes as her reply arrives', async ({
+  page,
+}) => {
+  const {model, daemon, wire} = await miraHome();
+  const say = await converse(wire, 'mira');
+  const messages = page.locator('.messages');
+  const card = page.getByRole('group', {
+    name: 'Mira wants to change her Reply Style',
+  });
+
+  for (const at of Array.from({length: 15}, (_, line) => String(line + 1))) {
+    model.answer(reply(`Reply ${at}.`));
+    await say(`Line ${at}.`, `line-${at}`);
+  }
+
+  await page.goto(daemon.url);
+  await expect(page.locator('.bubble-text')).toHaveCount(30);
+  // Scrolled up as a person scrolls: the wheel, over the chat.
+  await messages.hover();
+  await page.mouse.wheel(0, -10_000);
+  await expect
+    .poll(() =>
+      page.evaluate<number>("document.querySelector('.messages').scrollTop"),
+    )
+    .toBe(0);
+
+  const firstLine = firstLineWhileTheDockMoves(page);
+
+  model.answer(await asksForTone(wire, 'warm'), reply('Warmly, then.'));
+  await send(page, 'Be warm.');
+  await allowOn(card);
+
+  const [where, ...since] = await firstLine;
+
+  expect(since.filter(top => top !== where)).toEqual([]);
+  await expect(page.locator('.bubble-theirs .bubble-text').last()).toHaveText(
+    'Warmly, then.',
+  );
 });
 
 test('page.rejected-line-kept: a line whose turn the daemon rejected stays on the thread with a notice saying why, and the composer is empty', async ({

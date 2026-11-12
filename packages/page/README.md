@@ -22,22 +22,38 @@ a pure function of the previous value and one input — the daemon's
 snapshot, an event, a history page, a send, a line's end. It is DOM-free
 and unit-tested in Node. `session.ts` holds the tab's one client and one
 stream and the verbs a page calls, and runs only in a browser; `app.tsx`
-and `thread.tsx` render the store — the roster, every confirmation and
-pairing request waiting, the thread with its draft bubbles, the one-line
-composer. A confirmation's card names the tool over what it would do; her
-ask to install an app says instead who wants which app and, in a sentence
-read from its preview, where the app comes from, what it does and the
-version it updates (`install-ask.ts`, pure and tested in Node), and a
-preview the page cannot read as one gets the tool's card.
-A pairing request is a card beside the confirmations, with its
-connector, the account, the source it wrote to, the code and when it
-expires; the daemon's answer to a click settles it as a confirmation's
-answer does — a settlement is left to the frame, an expiry is said once
-whichever news of it comes first, a request the daemon no longer knows is
-no longer waiting — and an approval that could not be written keeps the
-card and says why. Each turn in progress is the daemon's own word on it,
-replaced whole by each `turn_running` frame and installed from every
-`ready`; a stream the daemon resumed is live again with nothing installed.
+and `thread.tsx` render the store — the roster and the thread with its
+draft bubbles — and `dock-view.tsx` the foot of the column, one surface:
+the one-line message box, and above it the dock, where everything waiting
+for the person's answer is asked, every confirmation of whichever
+character and every pairing request, one at a time in one spot.
+The one that expires first is in front, with up to two more as edges
+behind it, and its card says who asks and what, in words `ask-words.ts`
+makes, pure and tested in Node: her ask to install or update an app, from
+its preview; her ask to change one of her settings, in the words her
+settings page uses, which are read for it; someone new on a connector; and
+for a preview the page cannot read, the tool and what it would do behind
+Details. It counts down the time left, and Allow and Don't Allow answer
+it: a settlement is left to the frame, an expiry is said once whichever
+news of it comes first, a request the daemon no longer knows is no longer
+waiting, and an approval that could not be written keeps the card and
+says why. One that ended in front says how — Allowed, Not allowed,
+Expired — and keeps its room half a second, then, with nothing else
+waiting, until her next line begins or her turn ends, a few seconds at
+most; which ask is in front and when one gives way are `dock.ts`'s rules,
+pure and tested in Node. While an ask of hers waits, her row in the
+roster says she is asking. The dock opens to the card's height as the
+card rises in and closes a little quicker, and a card takes no click in
+its first quarter second, so a click meant for the card it replaced never
+answers it. The chat follows its newest line until the person scrolls
+away from it, and only their scroll says so (`thread-scroll.ts`): it
+follows the dock frame by frame, and what is new at its end eases in by
+the dock's closing, so a line that arrives as the dock closes settles
+with it in one motion; a chat scrolled up does not move. A person who
+asked for less motion gets none. Each turn in progress is the daemon's
+own word on it, replaced whole by each `turn_running` frame and installed
+from every `ready`; a stream the daemon resumed is live again with nothing
+installed.
 A turn of her own, which no line began, shows nothing until she drafts,
 and its end raises no notice. A reply of hers committed to a chat that
 is not on screen, whatever began her turn, puts a dot after her name in

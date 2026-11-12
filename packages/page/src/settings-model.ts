@@ -722,8 +722,7 @@ export function sidebarOf(
       {
         page: {kind: 'telegram'},
         label: 'Telegram',
-        icon: 'plane',
-        tint: 'blue',
+        ...connectorArt('telegram'),
         value: view === undefined ? '' : telegramOn(settings) ? 'On' : 'Off',
         dot: wrong(home, sectionKey('connectors', 'telegram')),
       },
@@ -823,16 +822,23 @@ function connectionEntry(
   return wanted ? {value: 'Set Up', dot: true} : {value: 'Off', dot: false};
 }
 
-/** A section's tile: its own, Telegram's, or the plainest. */
-export function artOf(section: Section): {
-  readonly icon: IconName;
-  readonly tint: Tint;
-} {
+/** An icon on its tint: what a tile draws. */
+export type Art = {readonly icon: IconName; readonly tint: Tint};
+
+/** A section's tile: its own, a connector's, or the plainest. */
+export function artOf(section: Section): Art {
   if (section.page !== undefined) {
     return {icon: iconOf(section.page.icon), tint: tintOf(section.page.tint)};
   }
 
-  return section.namespace === 'connectors' && section.id === 'telegram'
+  return section.namespace === 'connectors'
+    ? connectorArt(section.id)
+    : {icon: 'grid', tint: 'gray'};
+}
+
+/** A connector's tile, wherever the page names one: Telegram's, or the plainest. */
+export function connectorArt(connectorId: string): Art {
+  return connectorId === 'telegram'
     ? {icon: 'plane', tint: 'blue'}
     : {icon: 'grid', tint: 'gray'};
 }

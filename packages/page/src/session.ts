@@ -4,12 +4,14 @@
  * page reads the store, never the client. The address is the page's own,
  * so this runs only in a browser: the browser suite is its cover.
  */
-import type {Answer} from '@project02/wire/contract';
+import type {Answer, PendingConfirmation} from '@project02/wire/contract';
 import {
   GatewayClientError,
   type GatewayClient,
   type HistoryPage,
 } from '@project02/wire/client';
+import {settingAskOf} from './ask-words.ts';
+import {dockStepped, dockWaited, herSettingsRead} from './dock.ts';
 import {followHerPhone, openHerPhone} from './phone-link.ts';
 import {
   createSettingsVerbs,
@@ -17,6 +19,7 @@ import {
   rememberedAdvanced,
   type SettingsVerbs,
 } from './settings-session.ts';
+import {characterTarget} from './settings.ts';
 import {
   applyEvent,
   composerChanged,
@@ -39,6 +42,7 @@ import {
   streamLost,
   streamResumed,
   threadOpened,
+  webSource,
   type PendingLine,
   type WebState,
 } from './store.ts';
@@ -52,15 +56,18 @@ export type Session = SettingsVerbs & {
   /** Sends the composer's line. */
   readonly send: () => Promise<void>;
   readonly loadEarlier: () => Promise<void>;
-  readonly answer: (id: string, decision: Answer) => Promise<void>;
-  readonly settlePairing: (code: string, decision: Answer) => Promise<void>;
+  /** Answers a confirmation: whether the daemon took the answer, which the stream then settles. */
+  readonly answer: (id: string, decision: Answer) => Promise<boolean>;
+  /** Answers a pairing request: whether the daemon took the answer, which the stream then settles. */
+  readonly settlePairing: (code: string, decision: Answer) => Promise<boolean>;
   readonly start: (characterId: string) => Promise<void>;
   /** Opens her phone in its window, or closes that window while it shows her phone. */
   readonly togglePhone: (characterId: string) => void;
+  /** Half a second after the ask with this key ended in front of the dock. */
+  readonly dockStepped: (key: string) => void;
+  /** The wait of the answered card with this key is over. */
+  readonly dockWaited: (key: string) => void;
 };
-
-/** The stamp every tab puts on its lines; a tab tells its own apart by id, not by it. */
-export const webSource = 'web';
 
 export function createSession(address: string): Session {
   const client = clientFor(address);
@@ -72,6 +79,7 @@ export function createSession(address: string): Session {
   const {getState, subscribe, apply, writtenFor} = createTabValue();
   const settings = createSettingsVerbs({client, getState, apply});
   const phone = linkHerPhone(address, {client, apply}, getState);
+  const askedOf = readsHerSettings({client, apply});
   /** Only the latest open applies; an earlier one that settles later is let go. */
   let opens = 0;
   /**
@@ -176,6 +184,10 @@ export function createSession(address: string): Session {
       apply(current => applyEvent(current, event));
       openTheOnlyCharacter();
 
+      if (event.kind === 'confirmation_requested') {
+        askedOf(event);
+      }
+
       // A character that was away when its lines were last accounted
       // for is a fresh chance at them, and the only one that comes.
       if (event.kind === 'state_changed' && event.state === 'ready') {
@@ -200,6 +212,7 @@ export function createSession(address: string): Session {
       // already in flight for it says what it shows any more.
       reads.clear();
       apply(current => installSnapshot(current, snapshot));
+      snapshot.confirmations.forEach(askedOf);
 
       const {thread} = getState();
 
@@ -314,15 +327,19 @@ export function createSession(address: string): Session {
         const outcome = await client.answerConfirmation(id, decision);
 
         // An answer the daemon took is followed by the settled frame that
-        // removes the card. Anything else says the request is not waiting
+        // ends the card. Anything else says the request is not waiting
         // any more, and no frame is coming to say so — an expiry the
         // broker cancelled, or one it no longer knows, which another
         // surface may have answered either way.
         if (outcome.status !== 'answered') {
           apply(current => confirmationGone(current, id, outcome.status));
         }
+
+        return outcome.status === 'answered';
       } catch (error: unknown) {
         apply(current => noticed(current, problem(error)));
+
+        return false;
       }
     },
     async settlePairing(code, decision) {
@@ -332,8 +349,12 @@ export function createSession(address: string): Session {
         const outcome = await client.settlePairing(code, decision);
 
         apply(current => pairingGone(current, code, outcome));
+
+        return outcome.status === 'settled';
       } catch (error: unknown) {
         apply(current => noticed(current, problem(error)));
+
+        return false;
       }
     },
     async start(characterId) {
@@ -350,6 +371,45 @@ export function createSession(address: string): Session {
       }
     },
     togglePhone: phone.toggle,
+    dockStepped(key) {
+      apply(current => dockStepped(current, key));
+    },
+    dockWaited(key) {
+      apply(current => dockWaited(current, key));
+    },
+  };
+}
+
+/**
+ * Her settings, read for each ask of hers to change one of them, so its
+ * card says the change in the words her settings page uses; only the
+ * newest read of hers lands. A read that does not come back leaves the
+ * card in the preview's own words.
+ */
+function readsHerSettings({
+  client,
+  apply,
+}: Sending): (pending: PendingConfirmation) => void {
+  const reads = new Map<string, number>();
+  let tickets = 0;
+
+  return pending => {
+    if (settingAskOf(pending.request.preview) === undefined) {
+      return;
+    }
+
+    const {characterId} = pending;
+    const mine = (tickets += 1);
+
+    reads.set(characterId, mine);
+    void client
+      .configView(characterTarget(characterId))
+      .then(view => {
+        if (reads.get(characterId) === mine) {
+          apply(current => herSettingsRead(current, characterId, view));
+        }
+      })
+      .catch(() => undefined);
   };
 }
 
@@ -665,9 +725,11 @@ function refusedSession(message: string): Session {
     open: nothing,
     send: nothing,
     loadEarlier: nothing,
-    answer: nothing,
-    settlePairing: nothing,
+    answer: () => Promise.resolve(false),
+    settlePairing: () => Promise.resolve(false),
     start: nothing,
     togglePhone: () => undefined,
+    dockStepped: () => undefined,
+    dockWaited: () => undefined,
   };
 }

@@ -345,7 +345,7 @@ function AppTile({
 
   return (
     <span
-      className={`phone-tile phone-tile-${size} tint-${tintOf(tile.tint)}`}
+      className={`tile-solid phone-tile-${size} tint-${tintOf(tile.tint)}`}
       aria-hidden="true"
     >
       <Icon name={iconOf(tile.icon)} size={glyph.size} weight={glyph.weight} />

@@ -23,7 +23,7 @@ import type {
   ScreenOutcome,
   ScreenRow,
 } from '@project02/wire/contract';
-import {installAskOf} from './install-ask.ts';
+import {installAskOf} from './ask-words.ts';
 import type {Connection} from './store.ts';
 
 /** Her phone as a read gave it. */

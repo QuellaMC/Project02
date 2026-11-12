@@ -8,6 +8,7 @@
  * with the rest of the suite.
  */
 import type {
+  Answer,
   AnswerOutcome,
   AppPreviewOutcome,
   CharacterPreviewOutcome,
@@ -31,6 +32,16 @@ import type {
   VisibleMessageRole,
 } from '@project02/wire/contract';
 import type {HistoryPage} from '@project02/wire/client';
+import {
+  askArrived,
+  askEnded,
+  confirmationKey,
+  dockCleared,
+  pairingKey,
+  sheWentOn,
+  type Answered,
+  type Asking,
+} from './dock.ts';
 
 export type Connection =
   | {readonly status: 'connecting'}
@@ -224,13 +235,13 @@ export type Settings = {
   readonly catalogs: ReadonlyMap<string, StoreOutcome>;
 };
 
-export type WebState = {
+/**
+ * The tab's value: what waits for the person's answer, whose rules are
+ * dock.ts's, and everything else it shows.
+ */
+export type WebState = Asking & {
   readonly connection: Connection;
   readonly health?: GatewayHealth;
-  /** Every confirmation still waiting, whatever surface raised it. */
-  readonly confirmations: readonly PendingConfirmation[];
-  /** Every pairing request waiting for the owner's answer, whatever connector asked. */
-  readonly pairings: readonly PairingRequest[];
   /** The one open DM. */
   readonly thread?: Thread;
   /** The settings window or the welcome, when one is open in front of the chat. */
@@ -298,11 +309,15 @@ export type Opened = Extract<OpenOutcome, {status: 'opened'}>;
 /** The plugin that puts her phone in her hands: a tool it provides is one of her phone's. */
 export const phonePlugin = 'phone';
 
+/** The stamp every tab puts on its lines; a tab tells its own apart by id, not by it. */
+export const webSource = 'web';
+
 export const initialState: WebState = {
   connection: {status: 'connecting'},
   advanced: false,
   confirmations: [],
   pairings: [],
+  herSettings: new Map(),
   pending: new Map(),
   composers: new Map(),
   turns: new Map(),
@@ -403,17 +418,17 @@ export function streamResumed<State extends Connected>(state: State): State {
 
 /**
  * The address will never work again: the page stops taking new lines,
- * and every confirmation and pairing request waiting and every turn in
- * progress goes, since an answer would never reach the daemon and a draft
- * would never be finished. A line already sent stays as it is, with the
- * id it was sent under — a token dies when a daemon restarts, and a line
- * it committed just before is one the log can still be asked about.
- * Turning it back into ordinary text would lose the only name it can be
- * recognised by.
+ * and every confirmation and pairing request waiting, the card that said
+ * how one ended and every turn in progress go, since an answer would never
+ * reach the daemon and a draft would never be finished. A line already
+ * sent stays as it is, with the id it was sent under — a token dies when
+ * a daemon restarts, and a line it committed just before is one the log
+ * can still be asked about. Turning it back into ordinary text would lose
+ * the only name it can be recognised by.
  */
 export function connectionRefused(state: WebState, message: string): WebState {
   return {
-    ...state,
+    ...dockCleared(state),
     connection: {status: 'refused', message},
     confirmations: [],
     pairings: [],
@@ -715,7 +730,11 @@ export function confirmationGone(
       );
 }
 
-/** A confirmation that ended without this tab's answer, and why the person's click did nothing. */
+/**
+ * A confirmation that ended without this tab's answer, and why the
+ * person's click did nothing. One that ran out says so on its card while
+ * it is in front.
+ */
 function cancelled(
   state: WebState,
   id: string,
@@ -724,12 +743,18 @@ function cancelled(
 ): WebState {
   const name = characterName(state, characterId);
 
-  return noticed(
-    withoutConfirmation(state, id),
-    reason === 'expired'
-      ? `${name}: A confirmation expired before it was answered.`
-      : `${name}: A confirmation was cancelled when the character stopped.`,
-  );
+  return reason === 'expired'
+    ? noticed(
+        withoutConfirmation(
+          askEnded(state, confirmationKey(id), 'expired'),
+          id,
+        ),
+        `${name}: A confirmation expired before it was answered.`,
+      )
+    : noticed(
+        withoutConfirmation(state, id),
+        `${name}: A confirmation was cancelled when the character stopped.`,
+      );
 }
 
 function withoutConfirmation(state: WebState, id: string): WebState {
@@ -774,13 +799,16 @@ export function pairingGone(
   }
 }
 
-/** A pairing request whose hour ran out unanswered, said the same way whichever news of it comes first. */
+/**
+ * A pairing request whose hour ran out unanswered, said the same way
+ * whichever news of it comes first, and on its card while it is in front.
+ */
 function pairingExpired(
   state: WebState,
   {code, subject}: Pick<PairingRequest, 'code' | 'subject'>,
 ): WebState {
   return noticed(
-    withoutPairing(state, code),
+    withoutPairing(askEnded(state, pairingKey(code), 'expired'), code),
     `A pairing request expired before it was answered: ${subject.label}, code ${code}.`,
   );
 }
@@ -863,21 +891,37 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
     case 'confirmation_requested':
       return state.confirmations.some(pending => pending.id === event.id)
         ? state
-        : {...state, confirmations: [...state.confirmations, pendingOf(event)]};
+        : {
+            ...askArrived(state),
+            confirmations: [...state.confirmations, pendingOf(event)],
+          };
     case 'confirmation_settled':
       // The card was on the page whoever raised it, so its end is too,
       // with the daemon's reason when nobody answered.
       return event.decision === 'cancelled'
         ? cancelled(state, event.id, event.characterId, event.reason)
-        : withoutConfirmation(state, event.id);
+        : withoutConfirmation(
+            askEnded(
+              state,
+              confirmationKey(event.id),
+              answerOf(event.decision),
+            ),
+            event.id,
+          );
     case 'pairing_requested':
       return state.pairings.some(pairing => pairing.code === event.code)
         ? state
-        : {...state, pairings: [...state.pairings, pairingOf(event)]};
+        : {
+            ...askArrived(state),
+            pairings: [...state.pairings, pairingOf(event)],
+          };
     case 'pairing_settled':
       return event.decision === 'expired'
         ? pairingExpired(state, event)
-        : withoutPairing(state, event.code);
+        : withoutPairing(
+            askEnded(state, pairingKey(event.code), answerOf(event.decision)),
+            event.code,
+          );
     case 'turn_progress':
       return progressed(state, event);
     case 'turn_running': {
@@ -891,10 +935,16 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
 
       return event.drafts.length === 0
         ? running
-        : withoutPhoning(running, event.conversationId);
+        : sheWentOn(
+            withoutPhoning(running, event.conversationId),
+            event.characterId,
+          );
     }
     case 'turn_completed': {
-      const ended = withoutTurnEnded(state, event);
+      const ended = sheWentOn(
+        withoutTurnEnded(state, event),
+        event.characterId,
+      );
 
       // A turn of her own, which no line began, ends unsaid: nobody asked
       // for anything.
@@ -913,12 +963,17 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
   }
 }
 
+/** The person's answer as the card that asked says it, from whichever surface it came. */
+function answerOf(decision: Answer): Answered {
+  return decision === 'approved' ? 'allowed' : 'not_allowed';
+}
+
 /**
  * A step of a turn, in whichever conversation it ran: a line the daemon
  * took settles, whichever thread it went to; whether she is using her
- * phone moves with the turn's tool calls and replies; a committed message
- * joins the thread on screen; and a reply of hers committed anywhere else
- * is one the person has not seen.
+ * phone moves with the turn's tool calls and replies, and a reply of hers
+ * is her going on; a committed message joins the thread on screen; and a
+ * reply of hers committed anywhere else is one the person has not seen.
  */
 function progressed(
   state: WebState,
@@ -930,7 +985,10 @@ function progressed(
     state.pending.has(progress.clientMessageId)
       ? settled(state, progress.clientMessageId)
       : state;
-  const used = phoneUse(taken, event);
+  const used =
+    progress.kind === 'visible_reply'
+      ? sheWentOn(phoneUse(taken, event), event.characterId)
+      : phoneUse(taken, event);
 
   if (state.thread?.conversationId === event.conversationId) {
     return withThread(used, thread => committed(thread, progress));

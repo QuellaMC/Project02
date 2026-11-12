@@ -289,7 +289,7 @@ test("page.phone-in-use: while a turn of hers that called a tool of her phone wa
   await expect(dot).toHaveCount(0);
 });
 
-test("page.store-app-approved: her phone's window shows the App Store's list as she opens it, each app with its name, its summary and how it stands on her phone, then the page of the app she looks at; once she asks to install it the page says it waits for the person while her chat's card says in a sentence what she wants; Approve takes the card away, the page says Installed, and the app is on her home screen", async ({
+test("page.store-app-approved: her phone's window shows the App Store's list as she opens it, each app with its name, its summary and how it stands on her phone, then the page of the app she looks at; once she asks to install it the page says it waits for the person while her chat's card says in a sentence what she wants; Allow takes the card away, the page says Installed, and the app is on her home screen", async ({
   context,
   page,
 }) => {
@@ -300,7 +300,9 @@ test("page.store-app-approved: her phone's window shows the App Store's list as 
 
   const daemon = await startDaemon(quietHome(model), catalog.env);
   const phone = await context.newPage();
-  const card = page.getByRole('group', {name: 'Confirmation'});
+  const card = page.getByRole('group', {
+    name: 'Mira wants to install Reminders',
+  });
   const pill = phone.locator('.phone-pill');
 
   expect(await wireOf(daemon).installApp('mira', 'notes')).toMatchObject({
@@ -339,14 +341,11 @@ test("page.store-app-approved: her phone's window shows the App Store's list as 
   model.answer(reply('It is on my phone now.'));
   asking.release(calling(['phone_install', {app: 'reminders'}]));
   await expect(pill).toHaveText('Waiting for you');
-  await expect(card.locator('.card-title')).toHaveText(
-    'Mira wants to install Reminders',
-  );
-  await expect(card.locator('.card-sentence')).toHaveText(
-    'From the App Store, reviewed by Project02. It keeps its own data and can wake her up.',
+  await expect(card).toHaveAccessibleDescription(
+    'From the App Store. It keeps its own data and can wake her up.',
   );
 
-  await card.getByRole('button', {name: 'Approve'}).click();
+  await card.getByRole('button', {name: 'Allow', exact: true}).click();
   await expect(card).toHaveCount(0);
   await expect(pill).toHaveText('Installed');
   await phone.getByRole('button', {name: 'Home'}).click();
@@ -355,7 +354,7 @@ test("page.store-app-approved: her phone's window shows the App Store's list as 
   ).toBeVisible();
 });
 
-test("page.store-app-denied: while her ask to install an app on the App Store's list waits for the person, the app's row says Waiting and her chat's card what she wants; Deny takes the card away, she answers, and the row says nothing of the app being on her phone", async ({
+test("page.store-app-denied: while her ask to install an app on the App Store's list waits for the person, the app's row says Waiting and her chat's card what she wants; Don't Allow takes the card away, she answers, and the row says nothing of the app being on her phone", async ({
   context,
   page,
 }) => {
@@ -366,7 +365,9 @@ test("page.store-app-denied: while her ask to install an app on the App Store's 
 
   const daemon = await startDaemon(quietHome(model), catalog.env);
   const phone = await context.newPage();
-  const card = page.getByRole('group', {name: 'Confirmation'});
+  const card = page.getByRole('group', {
+    name: 'Mira wants to install Reminders',
+  });
   const row = phone.locator('.phone-row');
 
   await phone.goto(phoneOf(daemon, 'mira'));
@@ -380,11 +381,9 @@ test("page.store-app-denied: while her ask to install an app on the App Store's 
   await expect(row).toHaveText(
     'RemindersThings to do, on a day and timeWaiting',
   );
-  await expect(card.locator('.card-title')).toHaveText(
-    'Mira wants to install Reminders',
-  );
+  await expect(card).toBeVisible();
 
-  await card.getByRole('button', {name: 'Deny'}).click();
+  await card.getByRole('button', {name: "Don't Allow"}).click();
   await expect(card).toHaveCount(0);
   await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
     'Maybe later, then.',
