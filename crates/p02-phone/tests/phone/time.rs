@@ -10,10 +10,15 @@ use crate::support::{Files, actions, app, at, input, millis, now};
 /// Clock, which answers what `phone.time` does.
 fn clock() -> Phone {
     Phone::new(vec![app(
-        &json!({"id": "clock", "name": "Clock", "actions": actions(&["now", "local", "next"])}),
+        &json!({
+            "id": "clock",
+            "name": "Clock",
+            "actions": actions(&["now", "local", "at", "next"]),
+        }),
         "export function screen() { return { items: [] }; }
         export function now() { return phone.time.now(); }
         export function local({ at, zone }) { return phone.time.local(at, zone); }
+        export function at(wanted) { return phone.time.at(wanted); }
         export function next(wanted) { return phone.time.next(wanted); }",
     )])
 }
@@ -24,6 +29,11 @@ fn asked(function: &str, asked: &Value, now: &Now) -> Result<Value, String> {
         .act(&mut Files::default(), "clock", function, &input(asked), now)
         .map(|acted| acted.answer)
         .map_err(|refused| refused.to_string())
+}
+
+/// A day and a time of it, as `phone.time.at` takes them.
+fn day_and_time([year, month, day, hour, minute]: [i32; 5]) -> Value {
+    json!({"year": year, "month": month, "day": day, "hour": hour, "minute": minute})
 }
 
 #[test]
@@ -58,6 +68,68 @@ fn local_reads_a_moment_where_the_person_is_or_in_a_named_zone() {
                 .to_owned()
         )
     );
+}
+
+#[test]
+fn at_finds_the_moment_a_clock_reads_a_day_and_a_time_and_refuses_a_day_not_on_the_calendar() {
+    for (wanted, moment, read) in [
+        (
+            [2026, 3, 7, 12, 0],
+            "2026-03-07T17:00:00.000Z",
+            [2026, 3, 7, 12, 0],
+        ),
+        (
+            [2028, 2, 29, 9, 30],
+            "2028-02-29T14:30:00.000Z",
+            [2028, 2, 29, 9, 30],
+        ),
+        // A time the clocks skip comes as much later as they jumped.
+        (
+            [2026, 3, 8, 2, 30],
+            "2026-03-08T07:30:00.000Z",
+            [2026, 3, 8, 3, 30],
+        ),
+        // One they pass twice comes the first time.
+        (
+            [2026, 11, 1, 1, 30],
+            "2026-11-01T05:30:00.000Z",
+            [2026, 11, 1, 1, 30],
+        ),
+    ] {
+        assert_eq!(
+            asked("at", &day_and_time(wanted), &now()),
+            Ok(json!(millis(moment))),
+            "{wanted:?}"
+        );
+
+        let reading = asked("local", &json!({"at": millis(moment)}), &now()).unwrap();
+
+        assert_eq!(
+            ["year", "month", "day", "hour", "minute"].map(|field| reading[field].clone()),
+            read.map(|number| json!(number)),
+            "{wanted:?}"
+        );
+    }
+
+    for refused in [
+        day_and_time([2026, 2, 29, 9, 0]),
+        day_and_time([2026, 4, 31, 9, 0]),
+        day_and_time([2026, 13, 1, 9, 0]),
+        day_and_time([2026, 3, 7, 24, 0]),
+        day_and_time([2026, 3, 7, 12, 60]),
+        json!({"year": 2026, "month": 3, "day": 7, "hour": 12}),
+        json!({"year": 2026, "month": 3, "day": 7, "hour": 12, "minute": 0, "second": 0}),
+    ] {
+        assert_eq!(
+            asked("at", &refused, &now()),
+            Err(
+                "Clock failed: TypeError: phone.time.at takes {year, month, day, hour, minute}: \
+                 a day on the calendar, an hour from 0 to 23 and a minute from 0 to 59"
+                    .to_owned()
+            ),
+            "{refused}"
+        );
+    }
 }
 
 #[test]

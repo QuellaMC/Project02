@@ -224,7 +224,7 @@ fn a_script_reaches_the_language_and_phone_and_nothing_else() {
             "phone": [
                 ["storage", ["get", "set", "remove"]],
                 ["rings", ["set", "cancel", "list"]],
-                ["time", ["now", "local", "next"]],
+                ["time", ["now", "local", "at", "next"]],
             ],
             "imported": "ReferenceError: could not load module 'notes.js'",
         })

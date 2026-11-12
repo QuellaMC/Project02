@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use jiff::civil::Time;
+use jiff::civil::{DateTime, Time};
 use jiff::tz::TimeZone;
 use p02_core::Timestamp;
 use rquickjs::function::Rest;
@@ -32,6 +32,8 @@ const UNWAKING: &str = "phone.rings.set sets no ring here: an app must say it wa
 const CANCEL_RING: &str = "phone.rings.cancel takes the id of a ring, which is text";
 const LOCAL: &str = "phone.time.local takes a time in whole milliseconds since the epoch and \
                      the IANA name of a time zone, both optional";
+const AT: &str = "phone.time.at takes {year, month, day, hour, minute}: a day on the calendar, \
+                  an hour from 0 to 23 and a minute from 0 to 59";
 const NEXT: &str = "phone.time.next takes {hour, minute, weekdays}: an hour from 0 to 23, a \
                     minute from 0 to 59 and, if it has them, weekdays, a list of days from 1 \
                     (Monday) to 7 (Sunday)";
@@ -66,6 +68,16 @@ struct RingArgument {
     at: i64,
     title: String,
     body: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AtArgument {
+    year: i16,
+    month: i8,
+    day: i8,
+    hour: i8,
+    minute: i8,
 }
 
 #[derive(Deserialize)]
@@ -123,6 +135,7 @@ impl Host {
                 &[
                     ("now", Self::now),
                     ("local", Self::local),
+                    ("at", Self::at),
                     ("next", Self::next),
                 ],
             )?,
@@ -261,6 +274,22 @@ impl Host {
         };
 
         to_script(ctx, &time::reading(at, zone))
+    }
+
+    fn at<'js>(&self, ctx: &Ctx<'js>, arguments: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {
+        let AtArgument {
+            year,
+            month,
+            day,
+            hour,
+            minute,
+        } = argument(ctx, arguments.first(), AT)?;
+        let at = DateTime::new(year, month, day, hour, minute, 0, 0)
+            .ok()
+            .and_then(|wanted| time::moment(wanted, self.now.zone()))
+            .ok_or_else(|| Exception::throw_type(ctx, AT))?;
+
+        to_script(ctx, &at.as_millisecond())
     }
 
     fn next<'js>(&self, ctx: &Ctx<'js>, arguments: &[Value<'js>]) -> rquickjs::Result<Value<'js>> {

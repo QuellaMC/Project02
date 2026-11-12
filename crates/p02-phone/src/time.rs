@@ -2,7 +2,7 @@
 //! from it.
 
 use jiff::ToSpan;
-use jiff::civil::Time;
+use jiff::civil::{DateTime, Time};
 use jiff::tz::TimeZone;
 use p02_core::Timestamp;
 use serde::Serialize;
@@ -90,10 +90,16 @@ pub(crate) fn reading(at: jiff::Timestamp, zone: TimeZone) -> Reading {
     }
 }
 
+/// The moment at which a clock in `zone` reads `wanted`. A time the clocks
+/// skip comes as much later as they jumped, and one they pass twice comes
+/// the first time, as jiff resolves them; none past the moments jiff keeps.
+pub(crate) fn moment(wanted: DateTime, zone: &TimeZone) -> Option<jiff::Timestamp> {
+    zone.to_timestamp(wanted).ok()
+}
+
 /// The first moment after `now` at which a clock in `zone` reads `time`,
-/// on a day of `weekdays` (1, Monday, to 7, Sunday). A time the clocks skip
-/// that day comes as much later as they jumped, and one they pass twice
-/// comes the first time, as jiff resolves them.
+/// on a day of `weekdays` (1, Monday, to 7, Sunday), each day's as
+/// [`moment`] finds it.
 pub(crate) fn next(
     now: jiff::Timestamp,
     zone: &TimeZone,
@@ -109,12 +115,6 @@ pub(crate) fn next(
             return None;
         }
 
-        let moment = day
-            .to_datetime(time)
-            .to_zoned(zone.clone())
-            .ok()?
-            .timestamp();
-
-        (moment > now).then_some(moment)
+        moment(day.to_datetime(time), zone).filter(|moment| *moment > now)
     })
 }

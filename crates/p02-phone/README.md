@@ -32,12 +32,14 @@ the blocking pool.
   `rings.set({id, at, title, body})`, `rings.cancel(id)` and `rings.list()`,
   its own rings, `at` in milliseconds since the epoch, the title one line of
   40 characters at most, as a notification's, and the body one line of 120;
-  and `time.now()`, `time.local(at, zone)` and
+  and `time.now()`, `time.local(at, zone)`,
+  `time.at({year, month, day, hour, minute})`, the moment of that day and
+  time, a day or a time that does not exist refused, and
   `time.next({hour, minute, weekdays})`, read from the moment and the zone
-  each call is given. A clock time the clocks skip
-  comes as much later as they jumped, and one they pass twice comes the
-  first time. A screen only reads, and is held to the pieces and fields the
-  wire's screen knows.
+  each call is given. A clock time the clocks skip comes as much later as
+  they jumped, and one they pass twice comes the first time, as jiff, the
+  phone's time library, answers them. A screen only reads, and is held to
+  the pieces and fields the wire's screen knows.
 - **Each call runs fresh**: its own QuickJS runtime and context, dropped when
   it returns, under limits of 1 second for the whole call, 16 MiB of memory
   and 256 KiB of stack. The time limit holds after an `await` too, and a
@@ -90,6 +92,13 @@ the blocking pool.
   Clock, `apps/clock.js`: alarms, timers, a stopwatch and a world clock. A
   bundled app that is refused fails the bundled phone at its first use, as
   a build that must not ship. And the App Store, last on her home screen.
+- **The apps we publish** to the App Store's catalog are kept here too, in
+  `catalog/`, and tested in the engine as the Clock is, though no phone
+  comes with them: today Reminders, `catalog/reminders.js`, things to do on
+  a day and time, once or repeating. Publishing version `V` of one copies
+  its file to `apps/<id>/V.js` in the catalog's repository and adds its
+  entry there with the file's SHA-256. A published version's file never
+  changes: a change is a new version.
 - **The catalog** is one document, `project02.catalog.v1`, listing at most
   100 apps, each by what the store shows of it without fetching it: its id,
   name, summary, icon, tint, version and whether it wakes her, under the
