@@ -13,17 +13,20 @@ use p02_characters::discover;
 use p02_contracts::{
     BeforeRoleModelCallOutput, ChatMessage, HookContext, Invocation, Manifest, ModelOutput,
     PluginError, ProvidedTool, ProviderAnswer, ProviderFailure, ReplyDelta, RoleModelAdapter,
-    RuntimePlugin, ToolCall, ToolCallOutcome, ToolInputContract, WrittenCall,
+    RuntimePlugin, TextCompletionRequest, ToolCall, ToolCallOutcome, ToolInputContract,
+    WrittenCall,
 };
 use p02_core::{ClientStamp, ConversationId, SpeakerName};
+use p02_phone::Account;
 use p02_plugins::{
     AppCatalog, AppInternet, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
-    FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError,
+    Connections, FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError,
+    Unanswered,
 };
 use p02_runtime::{Character, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{BaseUrl, DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, LogRecord, RecordKind};
-use p02_wire::ActivationStatus;
+use p02_wire::{ActivationStatus, AppConnection};
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
 
@@ -119,6 +122,7 @@ impl World {
                     Arc::new(AppInternet::new(Some(
                         BaseUrl::parse("http://127.0.0.1:9").unwrap(),
                     ))),
+                    Arc::new(Unconnected),
                 ),
                 |builder, toy| {
                     let plugin: Arc<dyn RuntimePlugin> = Arc::clone(toy) as _;
@@ -574,6 +578,28 @@ struct Nobody;
 impl Confirmer for Nobody {
     async fn confirm(&self, _request: ConfirmationRequest) -> ConfirmationDecision {
         ConfirmationDecision::Cancelled
+    }
+}
+
+/// The person's connections, none connected: the thread's tests run no
+/// phone.
+#[derive(Debug)]
+struct Unconnected;
+
+#[async_trait]
+impl Connections for Unconnected {
+    async fn connected(&self, _account: &'static Account) -> Vec<AppConnection> {
+        Vec::new()
+    }
+
+    async fn ask(
+        &self,
+        _account: &'static Account,
+        _connection: &str,
+        _model: Option<&str>,
+        _request: &TextCompletionRequest,
+    ) -> Result<String, Unanswered> {
+        unreachable!("the thread's tests run no phone")
     }
 }
 

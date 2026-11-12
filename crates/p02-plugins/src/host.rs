@@ -15,7 +15,7 @@ use crate::config_control::ConfigControl;
 use crate::confirmation::Confirmer;
 use crate::lifecycle::{HookPhaseReport, Lifecycle};
 use crate::management;
-use crate::phone::{self, AppCatalog, AppInternet, PHONE_PLUGIN};
+use crate::phone::{self, AppCatalog, AppInternet, Connections, PHONE_PLUGIN};
 use crate::policy;
 use crate::turn::Turn;
 
@@ -41,6 +41,7 @@ pub struct PluginHostBuilder {
     config_control: Arc<dyn ConfigControl>,
     catalog: Arc<AppCatalog>,
     internet: Arc<AppInternet>,
+    connections: Arc<dyn Connections>,
 }
 
 /// A plugin as it is enabled: its manifest, the values its character's
@@ -120,7 +121,8 @@ impl PluginHost {
     /// through `confirmer` before an approval-gated call takes effect,
     /// whose settings `config_control` reads and changes for the host's own
     /// plugin, and whose phone reads the App Store's catalog through
-    /// `catalog` and has her apps' requests made through `internet`.
+    /// `catalog`, has her apps' requests made through `internet`, and their
+    /// questions asked through the person's `connections`.
     #[must_use]
     pub fn builder(
         storage: Arc<dyn CharacterStorage>,
@@ -128,6 +130,7 @@ impl PluginHost {
         config_control: Arc<dyn ConfigControl>,
         catalog: Arc<AppCatalog>,
         internet: Arc<AppInternet>,
+        connections: Arc<dyn Connections>,
     ) -> PluginHostBuilder {
         PluginHostBuilder {
             storage,
@@ -136,6 +139,7 @@ impl PluginHost {
             config_control,
             catalog,
             internet,
+            connections,
         }
     }
 
@@ -170,8 +174,9 @@ impl PluginHostBuilder {
     /// values its character's settings give it by field name. Its hooks run
     /// after those of every plugin added before it. The host's own plugin,
     /// `runtime.plugin`, the host builds itself, linked to it, and her
-    /// phone with the App Store's catalog and the internet her apps reach,
-    /// whatever factory comes with them.
+    /// phone with the App Store's catalog, the internet her apps reach and
+    /// the person's connections they ask a model through, whatever factory
+    /// comes with them.
     #[must_use]
     pub fn plugin(
         mut self,
@@ -226,9 +231,11 @@ impl PluginHostBuilder {
 
             let factory = match plugin_id.as_str() {
                 HOST_PLUGIN => management::factory(&host, Arc::clone(&self.config_control)),
-                PHONE_PLUGIN => {
-                    phone::factory(Arc::clone(&self.catalog), Arc::clone(&self.internet))
-                }
+                PHONE_PLUGIN => phone::factory(
+                    Arc::clone(&self.catalog),
+                    Arc::clone(&self.internet),
+                    Arc::clone(&self.connections),
+                ),
                 _ => factory,
             };
             let registration =
@@ -383,6 +390,7 @@ impl fmt::Debug for PluginHostBuilder {
             .field("config_control", &self.config_control)
             .field("catalog", &self.catalog)
             .field("internet", &self.internet)
+            .field("connections", &self.connections)
             .finish()
     }
 }

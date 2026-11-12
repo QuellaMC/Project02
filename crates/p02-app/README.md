@@ -36,7 +36,9 @@ with an outcome of p02-wire, never an error.
 - **Her phone** is read from her data whether she runs or not, under a
   lease of its store: her apps, those it comes with and those installed
   on it, the App Store last, each with what it may do and the person's
-  account it uses, with whether the home's settings hold its key; what
+  account it uses by a key, with whether the home's settings hold that
+  key, or, for an app that asks a model, the connections of theirs it can
+  sign in with now and how it is signed in; what
   she has in front with its screen and what she last did, with what
   rings, which her actor publishes while a ring's moment runs. A view of
   an app is read on request too, and changes nothing of hers. One whose settings switch her phone off has none to
@@ -46,15 +48,28 @@ with an outcome of p02-wire, never an error.
   Store's catalog, from the base the binary gives it, and the one seam
   that makes her apps' requests, at a stand-in the binary names under its
   test switch, and hands both to every host it builds her.
+- **The person's connections** her apps ask a model through are the
+  person's AI services of OpenAI's, in the AI Model page's order: the
+  ChatGPT plan while the home is signed in, and the OpenAI API while the
+  home's settings hold its key, each with the models its service offers
+  and the one it starts with, as p02-config says them. The daemon hands
+  every host it builds her the seam that answers her app's question
+  through one, with the very adapter a character thinks with on that
+  service, on the home's sign-in or key, at the stand-ins the binary
+  names: nothing of either reaches her phone, and a failure is the
+  service's sentence without them. A connection no longer connected asks
+  nothing, and her stop ends a question in flight at once.
 - **Her apps in the person's hands**, each the person's own act, which
   asks nobody, made on her data whether she runs or not, as her phone is
   read: the App Store's catalog read anew for them to browse, with how
   each app stands on her phone; an app of it given to her by the one path
   her own ask takes, an older version replaced keeping what it keeps;
   an app from a file, previewed with nothing written, then given; an app
-  removed; and whether an app may wake her. Each that changed her phone
-  says so on the stream, and her actor, while she runs, reads its rings
-  again.
+  removed; whether an app may wake her; and how an app that asks a model
+  is signed in: with a connection of theirs connected now, asking a model
+  it offers or the one it starts with, or signed out. Each that changed
+  her phone says so on the stream, and her actor, while she runs, reads
+  its rings again.
 - **The stream** hears each turn as it goes: its messages once they are
   on disk, the turn as it runs now, her drafts whole, whenever that
   changes, and then its completion, which says whether its line is in the

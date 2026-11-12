@@ -46,6 +46,14 @@ impl Asks {
         self.account.as_deref().and_then(Account::of)
     }
 
+    /// The connection of the person's the app asks a model through, when
+    /// its account is a connection's: what it signs in to.
+    #[must_use]
+    pub fn connection(&self) -> Option<&'static Account> {
+        self.account()
+            .filter(|account| *account.kind() == AccountKind::Connection)
+    }
+
     /// Refuses what breaks a rule, saying which: a host that is not a DNS
     /// name in lowercase, of two labels at least and not an address in
     /// numbers; more than 4 hosts, or one named twice; an account the phone

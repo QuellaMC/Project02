@@ -127,6 +127,7 @@ async fn the_listed_plugins_activate_together() {
             "mem0.add",
             "phone.open",
             "phone.use",
+            "phone.sign_in",
             "phone.install",
             "sessions.search",
             "sessions.read"

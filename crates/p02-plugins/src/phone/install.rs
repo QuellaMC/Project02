@@ -180,9 +180,9 @@ pub(super) async fn prepare(
 
 /// What the person is shown: the app, with what it asks of her phone that
 /// the card says, whether it wakes her, whether it reaches the internet and
-/// the name of the person's account it uses there, when it uses one; where
-/// it comes from; and the version it replaces on her phone, when there is
-/// one.
+/// the name of the person's account it uses there by a key, or the name of
+/// the connection it asks a model through, when it does; where it comes
+/// from; and the version it replaces on her phone, when there is one.
 fn preview(app: &CatalogApp, replaces: Option<String>) -> Map<String, Value> {
     let asks = app.asks();
     let mut listed = json!({
@@ -196,8 +196,10 @@ fn preview(app: &CatalogApp, replaces: Option<String>) -> Map<String, Value> {
         "reachesInternet": !asks.reaches().is_empty(),
     });
 
-    if let Some(account) = asks.account() {
-        listed["account"] = Value::from(account.name());
+    match (asks.account(), asks.connection()) {
+        (_, Some(connection)) => listed["connection"] = Value::from(connection.name()),
+        (Some(account), None) => listed["account"] = Value::from(account.name()),
+        (None, None) => {}
     }
 
     let mut preview = Map::from_iter([

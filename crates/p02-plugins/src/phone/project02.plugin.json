@@ -39,7 +39,7 @@
       ]
     },
     "runtimePolicy": {
-      "timeoutMs": 30000,
+      "timeoutMs": 240000,
       "redactionLabels": [],
       "failureBehavior": {
         "beforeRoleModelCall": "degrade",

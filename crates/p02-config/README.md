@@ -33,7 +33,11 @@ under the store's locks, and its views and changes are p02-wire's types.
   deciding anything itself. The sign-in is no setting: the view's caller
   says it, as it judges the AI model, and the plan's model then offers
   the models that plan offers, a free plan's fewer, the first in effect
-  until one is set.
+  until one is set. `connection` says a service as a connection an app on
+  her phone signs in with, from the same lists: its name, the models it
+  offers in their words, and the one it asks until another is chosen, the
+  best its plan offers for the ChatGPT plan and the least costly for the
+  OpenAI API; NVIDIA, whose models no list holds, is none.
 - **Reading.** For the home a value is the home's, else its default; for
   a character it is hers, else the home's, else the default. A value its
   field refuses stays in effect, refused, so no farther value stands in

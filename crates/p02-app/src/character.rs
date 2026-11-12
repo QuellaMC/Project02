@@ -36,6 +36,7 @@ use tokio_util::sync::CancellationToken;
 use crate::chatgpt::PlanTokens;
 use crate::config_control::CharacterConfig;
 use crate::confirmation::Broker;
+use crate::connections::PersonConnections;
 use crate::daemon::{Daemon, WeakDaemon, World, blocking};
 use crate::outcome::{duplicate, running_turn, storage_failure, told};
 use crate::reconcile::settings_now;
@@ -1063,8 +1064,9 @@ impl Her {
         let id = self.id.clone();
         let broker = Arc::clone(&self.broker);
         let daemon = self.daemon.clone();
+        let stop = self.stop.clone();
 
-        blocking(move || assemble(&world, &id, broker, daemon)).await
+        blocking(move || assemble(&world, &id, broker, daemon, stop)).await
     }
 
     /// Brings `built` up to date with her settings: she is built again, as
@@ -1249,12 +1251,14 @@ async fn take_turn(
 /// settings merged into her overlay, her model, or what she needs for one,
 /// and her host built with `broker` to ask the person, her settings for
 /// its own plugin to read and change, through `daemon`, the App Store's
-/// catalog for her phone to read, and the internet her apps reach.
+/// catalog for her phone to read, the internet her apps reach, and the
+/// person's connections they ask a model through, until `stop`.
 fn assemble(
     world: &Arc<World>,
     id: &Identifier,
     broker: Arc<Broker>,
     daemon: WeakDaemon,
+    stop: CancellationToken,
 ) -> Result<Assembled, String> {
     let discovery = discover(world.home.root());
     let definition = discovery
@@ -1286,6 +1290,7 @@ fn assemble(
     let signed_in = plan_sign_in(world, settings.host());
     let model = model(world, &daemon, settings.host(), signed_in.as_ref());
     let cautions: Vec<&str> = resolution.cautions().map(Diagnostic::message).collect();
+    let connections = PersonConnections::new(Arc::clone(world), daemon.clone(), stop);
     let host = settings
         .plugins()
         .filter_map(|(plugin_id, values)| Some((world.plugin(plugin_id)?, values)))
@@ -1296,6 +1301,7 @@ fn assemble(
                 Arc::new(CharacterConfig::new(Arc::clone(world), daemon, id.clone())),
                 Arc::clone(&world.catalog),
                 Arc::clone(&world.internet),
+                Arc::new(connections),
             ),
             |builder, (plugin, values)| {
                 builder.plugin(plugin.manifest().clone(), values.clone(), plugin.factory())
@@ -1335,34 +1341,29 @@ fn plan_sign_in(world: &World, host: &HostSettings) -> Option<PlanAccount> {
         .flatten()
 }
 
-/// Her model: the one the test switch puts in every character's place,
-/// else the service her settings choose, built, a service of OpenAI's at
-/// the stand-in the binary names when it names one, and the ChatGPT plan
-/// on the home's sign-in, as `account`, through `daemon`; or the sentence
-/// saying what they need for one. Her settings' view asks this too, so the
-/// page says what she says.
+/// Her model: the service her settings choose, as [`built`] builds it, a
+/// service of OpenAI's at the stand-in the binary names when it names one,
+/// and the ChatGPT plan on the home's sign-in, as `account`, through
+/// `daemon`; or the sentence saying what they need for one. Her settings'
+/// view asks this too, so the page says what she says.
 pub(crate) fn model(
     world: &World,
     daemon: &WeakDaemon,
     host: &HostSettings,
     account: Option<&PlanAccount>,
 ) -> Result<Arc<dyn RoleModelAdapter>, String> {
-    if let Some(adapter) = &world.test_provider {
-        return Ok(Arc::clone(adapter));
-    }
-
     let service = host.role_model_provider.map(|provider| match provider {
-        RoleModelProvider::Chatgpt => ServiceSettings::Chatgpt(ChatgptSettings {
-            sign_in: account
-                .map(|_| Arc::new(PlanTokens::new(daemon.clone())) as Arc<dyn PlanSignIn>),
-            model: host.chatgpt_model_on(account.and_then(|account| account.plan.as_deref())),
-            base_url: world.chatgpt_api.clone(),
-        }),
-        RoleModelProvider::Openai => ServiceSettings::Openai(OpenaiSettings {
-            api_key: host.openai_api_key.clone(),
-            model: host.openai_model.clone(),
-            base_url: world.openai_api.clone(),
-        }),
+        RoleModelProvider::Chatgpt => plan(
+            world,
+            daemon,
+            account.is_some(),
+            host.chatgpt_model_on(account.and_then(|account| account.plan.as_deref())),
+        ),
+        RoleModelProvider::Openai => openai(
+            world,
+            host.openai_api_key.clone(),
+            host.openai_model.clone(),
+        ),
         RoleModelProvider::Nvidia => ServiceSettings::Nvidia(NvidiaSettings {
             api_key: host.nvidia_api_key.clone(),
             model: host.nvidia_model.clone(),
@@ -1370,7 +1371,50 @@ pub(crate) fn model(
         }),
     });
 
-    match select_adapter(None, service.as_ref(), world.durations.model_silence) {
+    built(world, service.as_ref())
+}
+
+/// The ChatGPT plan asked for `model`: on the home's sign-in, through
+/// `daemon`, while `signed_in` says the home is signed in, at the stand-in
+/// the binary names when it names one.
+pub(crate) fn plan(
+    world: &World,
+    daemon: &WeakDaemon,
+    signed_in: bool,
+    model: String,
+) -> ServiceSettings {
+    ServiceSettings::Chatgpt(ChatgptSettings {
+        sign_in: signed_in
+            .then(|| Arc::new(PlanTokens::new(daemon.clone())) as Arc<dyn PlanSignIn>),
+        model,
+        base_url: world.chatgpt_api.clone(),
+    })
+}
+
+/// The OpenAI API asked for `model`, on `key`, at the stand-in the binary
+/// names when it names one.
+pub(crate) fn openai(world: &World, key: Option<String>, model: String) -> ServiceSettings {
+    ServiceSettings::Openai(OpenaiSettings {
+        api_key: key,
+        model,
+        base_url: world.openai_api.clone(),
+    })
+}
+
+/// The adapter a character thinks with on `service`, its silence bounded as
+/// the binary says; or the sentence saying what it needs for one, or to
+/// choose a service when there is none. The one the test switch puts in
+/// every model's place stands in for whatever `service` is, so nothing a
+/// test runs asks a real service: her own model, or the one her app asks.
+pub(crate) fn built(
+    world: &World,
+    service: Option<&ServiceSettings>,
+) -> Result<Arc<dyn RoleModelAdapter>, String> {
+    if let Some(adapter) = &world.test_provider {
+        return Ok(Arc::clone(adapter));
+    }
+
+    match select_adapter(None, service, world.durations.model_silence) {
         Ok(Some(adapter)) => Ok(adapter),
         Ok(None) => Err(NO_SERVICE.to_owned()),
         Err(error) => Err(error_sentence(&error)),

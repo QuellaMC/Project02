@@ -1,7 +1,7 @@
 # p02-plugins
 
 The plugin host and the plugins compiled into the daemon. It depends on
-p02-contracts, p02-core, p02-memory, p02-phone and p02-shared.
+p02-contracts, p02-core, p02-memory, p02-phone, p02-shared and p02-wire.
 
 Each plugin keeps its descriptor, `project02.plugin.json`, beside its
 code: the manifest of its hooks, its tools, its settings, the access it
@@ -12,9 +12,9 @@ enough to build it, made by the code the factory builds it with. A
 character's host is built from the plugins her settings switch on and that
 check finds set up, each by its factory from the values her settings give
 it and checked against its manifest, but for two the host builds itself:
-its own, linked to it, and her phone, handed the App Store's catalog and
-the internet her apps reach. When her settings change, she gets a host
-built anew.
+its own, linked to it, and her phone, handed the App Store's catalog, the
+internet her apps reach and the person's connections they ask a model
+through. When her settings change, she gets a host built anew.
 
 The host's rules:
 
@@ -39,11 +39,13 @@ apps, those it comes with and those installed on it, the App Store last,
 she is told of before each call as her phone's store lists them, each the
 person said may not wake her saying so beside its name, with the person's
 name as her notes say it; she opens and acts in them through two tools,
-and, while her settings' Ask to Install Apps is on, asks the person to
-install from the App Store through a third, which is prepared reading the
-catalog and fetching and judging the app, its preview saying whether the
-app wakes her, whether it reaches the internet and the name of the
-person's account it uses, and installs the text judged on their yes; and
+asks the person to sign an app in with a connection of theirs through a
+third, and, while her settings' Ask to Install Apps is on, asks the person
+to install from the App Store through a fourth, which is prepared reading
+the catalog and fetching and judging the app, its preview saying whether
+the app wakes her, whether it reaches the internet, and the name of the
+person's account it uses there by a key or of the connection it asks a
+model through, and installs the text judged on their yes; and
 reply-style, the tone she writes in and a signoff, each character's own.
 
 `AppCatalog` is the one reader of the App Store's catalog, which the daemon
@@ -66,14 +68,37 @@ up to 256 KiB, and the requests of one call share 20 seconds. What is no
 answer is said to the app in a plain sentence naming no address. Under the
 test switch every request goes below the stand-in's base by its host.
 `phone.use` runs the action under her phone's lease, and while the action
-asks for a request or a question, makes the request, or answers the
-question that her phone cannot ask yet, with no lease held, and runs the
-action again at the same moment with what came of it. A request for an
-account of the person's carries `Authorization: Bearer` and the key the
+asks for a request or a question, makes the request, or asks the
+question, with no lease held, and runs the action again at the same
+moment with what came of it. A request for an account of the person's
+carries `Authorization: Bearer` and the key the
 home's settings hold for it, `tavilyApiKey`, a secret of the home's alone
 that she cannot change; with none set the request is not made, and the
 app is told so in a sentence naming the person. `keyed_accounts` says which accounts have a
 key her phone sends, by the rule her phone takes one by, so what a client
 is told of an account is what her phone does. The key reaches no log,
-record or app, and an answer that echoes it has it redacted. The phone's
-budget, 30 seconds, is the room a call that fetches has.
+record or app, and an answer that echoes it has it redacted.
+
+`Connections` is the one seam through which her phone reaches the
+person's AI services, a trait the daemon implements, handed to her phone
+as the catalog's reader and the internet are: which of their connections
+an app whose account is a connection signs in with, connected now, in the
+AI Model page's order, each with the models it offers and the one it
+starts with, and a question asked through one. Nothing of a connection
+reaches the plugin or the app. A question is asked through the connection
+the app is signed in with on her phone, of the model chosen for it or the
+one that connection starts with, with the app's instructions and the most
+an app is handed, 4,096 characters, which a longer answer is cut to. It
+waits 90 seconds at most, of its own, and ends at once when the call is
+cancelled, or, as the seam answers it, her stop comes. An app not signed
+in, or signed in with a connection no longer connected, asks nothing, and
+is told so in a sentence naming the person and what to ask them.
+`phone.sign_in {app}` is her ask
+to sign one in: prepared reading her phone and the connections, its
+preview `{kind: "phone_app_sign_in", app: {id, name, icon, tint},
+connection: {id, name}}` names the first of the person's connected, and
+their yes signs the app in with it, no model chosen. An app her phone
+lacks, one that signs in to nothing, one signed in already, and one with
+none of the person's connections connected are refused unasked. The
+phone's budget, 4 minutes, holds a call that asks its two questions and
+makes its requests.

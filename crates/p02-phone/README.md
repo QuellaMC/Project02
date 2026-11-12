@@ -128,6 +128,17 @@ the blocking pool.
   only of an app that says it wakes her, an update keeps it, and it goes
   when the app is removed. A list that does not read is passed over and
   said, and every app may wake her.
+- **How an app that asks a model is signed in** is the person's say too,
+  by their own hand or by allowing her ask, kept with her phone in
+  `signed-in.json`: for each app signed in, the connection of theirs it
+  asks through, by the id its caller knows it by, and the model they
+  chose for it, none while it asks the one its connection starts with.
+  Every other app is signed out. Only an app whose account is a
+  connection signs in, the list is written whole, an update keeps what it
+  says of an app, and it goes when the app is removed. A list that does
+  not read is passed over and said, and every app is signed out. The
+  phone knows no service: what a connection is, and whether it is
+  connected, is its caller's.
 - **Her apps** are the apps her phone comes with, then those installed on
   it by name, then the App Store, each character her own. An installed app
   is its one file, kept as text in `apps/<app-id>.txt`, and
@@ -143,9 +154,10 @@ the blocking pool.
   installing says the version it replaced. A preview judges a file as
   installing it does, and neither writes it nor keeps the app it makes.
   Removing an app takes what it keeps, with its rings, what the person said
-  of it, its file and its place on the list, and closes it when it is in
-  front; an app the phone comes with cannot be removed. A list, or an entry
-  of it, that does not read is passed over and said. An app is made from
+  of it, whether it may wake her and how it is signed in, its file and its
+  place on the list, and closes it when it is in front; an app the phone
+  comes with cannot be removed. A list, or an entry of it, that does not
+  read is passed over and said. An app is made from
   its file at the first call that runs it and kept while the file is
   unchanged; one whose file is gone or no longer makes it cannot run, which
   each call that runs it says, while the rest of her phone works.

@@ -55,10 +55,7 @@ impl Question {
             return Err(ASK.to_owned());
         }
 
-        let account = asks
-            .account()
-            .filter(|account| *account.kind() == AccountKind::Connection)
-            .ok_or_else(unconnected)?;
+        let account = asks.connection().ok_or_else(unconnected)?;
 
         Ok(Self {
             instructions,

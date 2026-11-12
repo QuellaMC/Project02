@@ -519,6 +519,24 @@
             </td>
           </tr>
           <tr>
+            <td>sign in app</td>
+            <td><code>POST /api/characters/:id/phone/apps/:app/sign-in</code></td>
+            <td>
+              <code>{connection?, model?}</code> →
+              <code>AppSignInOutcome</code>: <code>ok</code>, the app signed
+              in with the person's <code>connection</code>, by its service's
+              id, asking <code>model</code>, or the model it starts with when
+              none is named, or, with no connection, signed out;
+              <code>refused</code> (<code>unknown_character</code>,
+              <code>no_phone</code>, <code>unknown_app</code>,
+              <code>signs_in_to_nothing</code>, for an app that asks no model,
+              <code>not_connected</code>, for a connection not connected now
+              or one the app does not sign in with,
+              <code>unknown_model</code>, for a model it does not offer); or
+              <code>failed</code>. Described below.
+            </td>
+          </tr>
+          <tr>
             <td>open</td>
             <td><code>POST /api/conversations/open</code></td>
             <td>
@@ -778,7 +796,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":15,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":16,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -1159,11 +1177,25 @@ data: {…}</code></pre>
         falls back for one it does not know — whether it says it
         <code>wakes</code> her and whether the person lets it,
         <code>mayWake</code>, what it may do, its <code>itMay</code> lines,
-        the <code>account</code> of the person's it uses, when it uses one,
-        by its <code>id</code> and <code>name</code> with whether the home's
-        settings hold its key, <code>hasKey</code>, its <code>views</code>,
+        the <code>account</code> of the person's it uses by a key, when it
+        uses one, by its <code>id</code> and <code>name</code> with whether
+        the home's settings hold its key, <code>hasKey</code>, or, for an app
+        that asks a model through a connection of the person's,
+        <code>signIn</code>, how it signs in, its <code>views</code>,
         each an <code>id</code>, a <code>title</code> and an
         <code>icon</code>, and the view it <code>opensOn</code>.
+        <code>signIn</code> holds the <code>connections</code> of the
+        person's it can sign in with now, in the AI Model page's order, each
+        by its service's <code>id</code> (<code>chatgpt</code>,
+        <code>openai</code>) with the <code>name</code> that page calls it,
+        the <code>models</code> it offers, best first, each an
+        <code>id</code> and the <code>name</code> a person reads, and the
+        <code>defaultModel</code> it asks until another is chosen; and,
+        while the app is signed in, <code>signedIn</code>: the
+        <code>connection</code> it is signed in with, connected or no longer,
+        and the <code>model</code> it asks. An app that signs in to nothing
+        has no <code>signIn</code>, and one that does has no
+        <code>account</code>.
         <code>front</code> is the app she has in front, by its
         <code>appId</code> and <code>viewId</code>, with that view's
         <code>screen</code>, or, when the app fails to show it, the
@@ -1245,7 +1277,11 @@ data: {…}</code></pre>
         while it may not, its rings stay set and nothing tells them to her,
         and her note says so beside its name; allowed again, a ring whose
         time passed rings, late. Nothing tells her the rings of an app that
-        does not say it wakes her either.
+        does not say it wakes her either. How an app that asks a model is
+        signed in is the person's say too, kept with her phone until the app
+        goes: signed in with one of their connections connected now, asking
+        a model it offers or, with none chosen, the one it starts with, or
+        signed out; choosing a connection again starts it on that one.
       </p>
 
       <p>
@@ -1260,14 +1296,24 @@ data: {…}</code></pre>
         instead a connection of the person's AI services, ChatGPT, which
         needs no host of its own: while she takes one of its actions, it asks
         the daemon a question for a model as it asks for a request, with her
-        phone's store not held, and holds nothing of the connection; this
-        daemon answers it that her phone cannot ask yet. What an app may do,
+        phone's store not held, and holds nothing of the connection. The
+        daemon asks it through the connection the app is signed in with, of
+        the model chosen for it or the one that connection starts with, by
+        the very adapter a character thinks with on that service: the
+        ChatGPT plan on the home's sign-in, the OpenAI API on the home's key.
+        A question waits 90 seconds at most, and her stop ends one in flight
+        at once. An app not signed in, or signed in with a connection no
+        longer connected, asks nothing, and is told so, and to ask the
+        person. What an app may do,
         its <code>itMay</code> lines, says the hosts it reaches and the
         account it uses, a key's or a connection's. Whether a key is set is
         said where a client reads the account, in health's
         <code>accounts</code> and in an app's <code>account</code>, by the
         rule her phone takes a key by, and a change of a key goes out as
-        <code>health_changed</code>, as any change of the settings does.
+        <code>health_changed</code>, as any change of the settings does. So
+        does a change of the connections an app can sign in with: the home's
+        sign-in to a ChatGPT plan, or the OpenAI API's key; a surface that
+        shows them reads her phone again then.
       </p>
 
       <p>
@@ -1277,10 +1323,27 @@ data: {…}</code></pre>
         the <code>app</code> by its <code>id</code>, <code>name</code>,
         <code>summary</code>, <code>icon</code>, <code>tint</code> and
         <code>version</code>, whether it <code>wakes</code> her, whether it
-        <code>reachesInternet</code>, and the name of the
-        <code>account</code> of the person's it uses there, when it uses one;
+        <code>reachesInternet</code>, the name of the
+        <code>account</code> of the person's it uses there by a key, when it
+        uses one, and the name of the <code>connection</code> it asks a
+        model through, <code>ChatGPT</code>, when it asks one;
         <code>replaces</code> is the version on her phone it updates, when
         there is one. The web page words its card from these.
+      </p>
+
+      <p>
+        Her ask to sign an app in, <code>phone.sign_in</code>, is a
+        confirmation whose <code>preview</code> is
+        <code>{kind: "phone_app_sign_in", app, connection}</code>: the
+        <code>app</code> by its <code>id</code>, <code>name</code>,
+        <code>icon</code> and <code>tint</code>, and the
+        <code>connection</code> of the person's it would sign in with, the
+        first connected in the AI Model page's order, by its
+        <code>id</code> and <code>name</code>. Allowed, the app is signed in
+        with it, asking the model it starts with. An app her phone lacks,
+        one that signs in to nothing, one signed in already, and one with
+        none of the person's connections connected are refused before anyone
+        is asked.
       </p>
 
       <p>
@@ -1288,7 +1351,8 @@ data: {…}</code></pre>
         call of her phone's tools came back accepted, as a moment that a ring
         began begins, and once that moment's rings went to their apps, before
         its <code>turn_completed</code>; and once the person gave her an app,
-        removed one or said whether one may wake her. A surface showing her
+        removed one, said whether one may wake her or said how one is signed
+        in. A surface showing her
         phone reads it again then, and on every <code>ready</code>. A call of
         one of her phone's tools comes back as a
         <code>tool_call_completed</code> whose

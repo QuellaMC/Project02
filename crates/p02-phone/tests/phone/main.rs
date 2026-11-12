@@ -19,6 +19,7 @@ mod reminders;
 mod rings;
 mod screens;
 mod search;
+mod sign_in;
 mod support;
 mod time;
 mod weather;

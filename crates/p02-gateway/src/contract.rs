@@ -17,24 +17,25 @@ use p02_core::{
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, SettingsDocument};
 use p02_wire::{
-    AddCharacterOutcome, AddCharacterRefusal, Answer, AnswerBody, AppAccount, AppInstallOutcome,
-    AppInstallRefusal, AppPreviewOutcome, AppRemoveOutcome, AppRemoveRefusal, AppSource, AppView,
-    AppWakeBody, AppWakeOutcome, AppWakeRefusal, BotState, BotUsername, CancelReason,
-    ChangeOutcome, ChangeRefusal, CharacterFeature, CharacterInstalled, CharacterPreviewOutcome,
-    CharacterPreviewRefusal, CharacterState, CharacterSummary, ChatgptOutcome, ChatgptSignIn,
-    ConfigChange, ConfigHealth, ConfigTarget, ConfigView, ConfirmationAnswer, ConfirmationId,
-    ConfirmationQuestion, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome,
-    ConnectorBotsRefusal, ConnectorConfigView, ConnectorPresence, ConnectorRefusal, ErrorBody,
-    Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome, HistoryRefusal, LiveReading,
-    MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport,
-    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
-    PairingRequestBody, PairingSubject, PendingConfirmation, PersonAccount, PhoneApp, PhoneDid,
-    PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing, PlanAccount, ProtocolVersion, Ready,
-    Refusal, RemoveCharacterOutcome, RemoveCharacterRefusal, RosterState, RunningDraft,
-    RunningTurn, Screen, ScreenCell, ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal,
-    ScreenRow, ScreenTile, Settlement, StartOutcome, StartRefusal, StorageFailure, StoreApp,
-    StoreAppStatus, StoreOutcome, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal,
-    TurnStamp, TurnStatus, ViewRefusal,
+    AddCharacterOutcome, AddCharacterRefusal, Answer, AnswerBody, AppAccount, AppConnection,
+    AppInstallOutcome, AppInstallRefusal, AppModel, AppPreviewOutcome, AppRemoveOutcome,
+    AppRemoveRefusal, AppSignIn, AppSignInBody, AppSignInOutcome, AppSignInRefusal, AppSignedIn,
+    AppSource, AppView, AppWakeBody, AppWakeOutcome, AppWakeRefusal, BotState, BotUsername,
+    CancelReason, ChangeOutcome, ChangeRefusal, CharacterFeature, CharacterInstalled,
+    CharacterPreviewOutcome, CharacterPreviewRefusal, CharacterState, CharacterSummary,
+    ChatgptOutcome, ChatgptSignIn, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
+    ConfirmationAnswer, ConfirmationId, ConfirmationQuestion, ConnectorBot, ConnectorBotsBody,
+    ConnectorBotsOutcome, ConnectorBotsRefusal, ConnectorConfigView, ConnectorPresence,
+    ConnectorRefusal, ErrorBody, Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome,
+    HistoryRefusal, LiveReading, MaintenanceFailure, OpenConversationBody, OpenOutcome,
+    OpenRefusal, PackageReport, PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome,
+    PairingRefusal, PairingRequest, PairingRequestBody, PairingSubject, PendingConfirmation,
+    PersonAccount, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing,
+    PlanAccount, ProtocolVersion, Ready, Refusal, RemoveCharacterOutcome, RemoveCharacterRefusal,
+    RoleModelProvider, RosterState, RunningDraft, RunningTurn, Screen, ScreenCell, ScreenItem,
+    ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow, ScreenTile, Settlement, StartOutcome,
+    StartRefusal, StorageFailure, StoreApp, StoreAppStatus, StoreOutcome, SubmitOutcome,
+    ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -77,6 +78,7 @@ fn walk(wire: &mut impl Wire) {
     wire.written::<AppInstallOutcome>();
     wire.written::<AppRemoveOutcome>();
     wire.written::<AppWakeOutcome>();
+    wire.written::<AppSignInOutcome>();
     wire.written::<ChatgptOutcome>();
     wire.written::<ErrorBody>();
     wire.written::<Ready>();
@@ -92,6 +94,7 @@ fn walk(wire: &mut impl Wire) {
     wire.read::<ConfigChange>();
     wire.read::<ConfigTarget>();
     wire.read::<AppWakeBody>();
+    wire.read::<AppSignInBody>();
 }
 
 /// Every declaration the roots reach, by name.
@@ -356,6 +359,11 @@ fn read() -> Vec<(&'static str, Value)> {
             }),
         ),
         reads::<AppWakeBody>("AppWakeBody", json!({"allowed": false})),
+        reads::<AppSignInBody>(
+            "AppSignInBody",
+            json!({"connection": "openai", "model": "gpt-6.1-terra"}),
+        ),
+        reads::<AppSignInBody>("AppSignInBody", json!({})),
     ]
 }
 
@@ -475,6 +483,43 @@ fn written() -> Vec<(&'static str, Value)> {
         ..running.clone()
     };
     let (clock, screen) = phone();
+    let asker = PhoneApp {
+        id: id("asker"),
+        name: "Asker".to_owned(),
+        summary: "Asks a stronger model".to_owned(),
+        version: "1.0.0".to_owned(),
+        source: AppSource::File,
+        icon: "bulb".to_owned(),
+        tint: "indigo".to_owned(),
+        wakes: false,
+        may_wake: true,
+        it_may: vec![
+            "Keep its own data".to_owned(),
+            "Ask ChatGPT with a connection of yours, once you allow it".to_owned(),
+        ],
+        account: None,
+        sign_in: Some(AppSignIn {
+            connections: vec![AppConnection {
+                id: RoleModelProvider::Openai,
+                name: "OpenAI API".to_owned(),
+                models: vec![AppModel {
+                    id: "gpt-6-luna".to_owned(),
+                    name: "GPT-6 Luna".to_owned(),
+                }],
+                default_model: "gpt-6-luna".to_owned(),
+            }],
+            signed_in: Some(AppSignedIn {
+                connection: RoleModelProvider::Openai,
+                model: "gpt-6-luna".to_owned(),
+            }),
+        }),
+        views: vec![AppView {
+            id: id("asked"),
+            title: "Asked".to_owned(),
+            icon: "bulb".to_owned(),
+        }],
+        opens_on: id("asked"),
+    };
     let front = PhoneFront {
         app_id: id("clock"),
         view_id: id("alarms"),
@@ -738,7 +783,7 @@ fn written() -> Vec<(&'static str, Value)> {
         value(
             "PhoneOutcome",
             &PhoneOutcome::Ok {
-                apps: vec![clock.clone()],
+                apps: vec![clock.clone(), asker],
                 front: Some(Box::new(front.clone())),
                 did: Some(did),
                 ringing: vec![ring],
@@ -854,6 +899,7 @@ fn written() -> Vec<(&'static str, Value)> {
                         name: "Tavily".to_owned(),
                         has_key: false,
                     }),
+                    sign_in: None,
                     views: vec![AppView {
                         id: id("results"),
                         title: "Results".to_owned(),
@@ -891,6 +937,15 @@ fn written() -> Vec<(&'static str, Value)> {
             &AppWakeOutcome::Refused {
                 reason: AppWakeRefusal::CannotWake,
                 message: "Notes cannot wake her, so there is nothing to change.".to_owned(),
+            },
+        ),
+        value("AppSignInOutcome", &AppSignInOutcome::Ok),
+        value(
+            "AppSignInOutcome",
+            &AppSignInOutcome::Refused {
+                reason: AppSignInRefusal::NotConnected,
+                message: "Your OpenAI API is not connected. Connect it under AI Model first."
+                    .to_owned(),
             },
         ),
         read_back(
@@ -968,6 +1023,7 @@ fn phone() -> (PhoneApp, Screen) {
                 "Wake her when something is due".to_owned(),
             ],
             account: None,
+            sign_in: None,
             views: vec![AppView {
                 id: id("alarms"),
                 title: "Alarms".to_owned(),

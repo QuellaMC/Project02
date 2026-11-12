@@ -19,7 +19,8 @@ mod text;
 
 pub use apps::{
     AppInstallOutcome, AppInstallRefusal, AppPreviewOutcome, AppRemoveOutcome, AppRemoveRefusal,
-    AppWakeBody, AppWakeOutcome, AppWakeRefusal, StoreApp, StoreAppStatus, StoreOutcome,
+    AppSignInBody, AppSignInOutcome, AppSignInRefusal, AppWakeBody, AppWakeOutcome, AppWakeRefusal,
+    StoreApp, StoreAppStatus, StoreOutcome,
 };
 pub use bots::{
     BotState, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome, ConnectorBotsRefusal,
@@ -58,9 +59,9 @@ pub use pairing::{
     PairingRequestBody, PairingSubject, PairingSubjectBody,
 };
 pub use phone::{
-    AppAccount, AppSource, AppView, LiveReading, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome,
-    PhoneRefusal, PhoneRing, Screen, ScreenCell, ScreenItem, ScreenOutcome, ScreenRange,
-    ScreenRefusal, ScreenRow, ScreenTile,
+    AppAccount, AppConnection, AppModel, AppSignIn, AppSignedIn, AppSource, AppView, LiveReading,
+    PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing, Screen, ScreenCell,
+    ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow, ScreenTile,
 };
 pub use protocol::{PROTOCOL_VERSION, ProtocolVersion};
 pub use refusal::{ErrorBody, Refusal};

@@ -3,8 +3,9 @@
  * server: an app's one file, its entry in the catalog with that file's
  * SHA-256, and a catalog of apps published where its rule puts each file;
  * with the apps the tests publish, Reminders and quiet ones, Lookup, which
- * reaches the internet, and Sampler, which shows the pieces Weather and
- * Web Search are drawn with.
+ * reaches the internet, Asker, which asks a model through a connection of
+ * the person's, and Sampler, which shows the pieces Weather and Web Search
+ * are drawn with.
  */
 import {createHash} from 'node:crypto';
 
@@ -135,6 +136,62 @@ export function fetch_all({requests}) {
   });
 
   phone.storage.set('found', JSON.stringify(came));
+
+  return came;
+}`,
+};
+
+/**
+ * Asker, which asks a model through the person's ChatGPT, a connection of
+ * theirs, and reaches no host. `ask` asks its question, with instructions
+ * of its own, and answers what came of it, the answer or the sentence of
+ * its failure, which it keeps; its screen shows what it kept.
+ */
+export const asker: App = {
+  manifest: {
+    id: 'asker',
+    name: 'Asker',
+    summary: 'Asks a stronger model',
+    version: '1.0.0',
+    icon: 'bulb',
+    tint: 'indigo',
+    wakes: false,
+    account: 'chatgpt',
+    views: [{id: 'asked', title: 'Asked', icon: 'bulb'}],
+    opensOn: 'asked',
+    actions: [
+      {
+        name: 'ask',
+        description: 'Ask a question.',
+        did: 'Asked a question',
+        view: 'asked',
+        input: {
+          type: 'object',
+          properties: {question: {type: 'string'}},
+          required: ['question'],
+          additionalProperties: false,
+        },
+      },
+    ],
+  },
+  script: `export function screen() {
+  return {items: [{kind: 'text', text: phone.storage.get('asked') ?? 'Nothing yet'}]};
+}
+
+export function ask({question}) {
+  let came;
+
+  try {
+    came = phone.ai.ask({instructions: 'Answer in one sentence.', input: question});
+  } catch (error) {
+    if (error.name !== 'Error') {
+      throw error;
+    }
+
+    came = {error: error.message};
+  }
+
+  phone.storage.set('asked', JSON.stringify(came));
 
   return came;
 }`,

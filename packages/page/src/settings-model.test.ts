@@ -393,7 +393,7 @@ function health(
   accounts: GatewayHealth['accounts'] = [],
 ): GatewayHealth {
   return {
-    protocolVersion: 15,
+    protocolVersion: 16,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},

@@ -1,10 +1,11 @@
 //! Her apps in the person's hands, whether she runs or not: the App Store's
 //! catalog as they browse it for her, an app given to her from it or from
-//! a file, an app removed, and their say on whether one may wake her. Each
-//! is their own act, which asks nobody, made on her phone under a lease of
-//! its store, and no request is made under a lease. Each that changed her
-//! phone says so on the stream, and has her actor, while she runs, read its
-//! rings again, as after a turn of hers.
+//! a file, an app removed, their say on whether one may wake her, and how
+//! one that asks a model is signed in. Each is their own act, which asks
+//! nobody, made on her phone under a lease of its store, and no request is
+//! made under a lease. Each that changed her phone says so on the stream,
+//! and has her actor, while she runs, read its rings again, as after a
+//! turn of hers.
 
 use std::sync::Arc;
 
@@ -13,11 +14,13 @@ use p02_plugins::{Installable, NotInstallable, installable};
 use p02_shared::{Identifier, sentence};
 use p02_wire::{
     AppInstallOutcome, AppInstallRefusal, AppPreviewOutcome, AppRemoveOutcome, AppRemoveRefusal,
-    AppWakeOutcome, AppWakeRefusal, Event, PhoneRefusal, StoreApp, StoreOutcome,
+    AppSignInOutcome, AppSignInRefusal, AppWakeOutcome, AppWakeRefusal, Event, PhoneRefusal,
+    RoleModelProvider, StoreApp, StoreOutcome,
 };
 
+use crate::connections::Linked;
 use crate::daemon::{Daemon, blocking};
-use crate::phone::{HerPhone, Unread, drawn, keyed, unread};
+use crate::phone::{HerPhone, Unread, drawn, unread};
 
 /// What is said of a file the person picked that is not text.
 const NOT_TEXT: &str = "This file is not text, so it holds no app.";
@@ -190,13 +193,59 @@ impl Daemon {
         .await
     }
 
+    /// Signs `app` on the phone of `character` in with the person's
+    /// `connection`, asking `model`, or the model that connection starts
+    /// with when none is named, or signs it out when no connection is named,
+    /// as the person says: kept with her phone until the app is removed. A
+    /// connection of theirs that is not connected now, or that the app does
+    /// not sign in with, and a model it does not offer are refused.
+    pub async fn sign_in_app(
+        &self,
+        character: &str,
+        app: &str,
+        connection: Option<RoleModelProvider>,
+        model: Option<String>,
+    ) -> AppSignInOutcome {
+        let world = Arc::clone(self.world());
+        let app = app.to_owned();
+
+        self.change(character, move |her| {
+            let linked = Linked::now(&world);
+
+            her.with(|phone, files| {
+                let on_phone = phone
+                    .apps(files)
+                    .map_err(|error| Unread::Failed(unread(&error)))?;
+                let signed_in = match (on_phone.signing_in(&app), connection) {
+                    (Err(refusal), _) => return Ok(sign_in_refused(&refusal)),
+                    (Ok(_), None) => None,
+                    (Ok((listed, account)), Some(service)) => {
+                        match linked.chosen(&listed.name, account, service, model) {
+                            Ok(signed_in) => Some(signed_in),
+                            Err((reason, message)) => {
+                                return Ok(AppSignInOutcome::Refused { reason, message });
+                            }
+                        }
+                    }
+                };
+
+                match phone.sign_in(files, &app, signed_in) {
+                    Ok(()) => Ok(AppSignInOutcome::Ok),
+                    Err(PhoneError::Store(error)) => Err(Unread::Failed(unread(&error))),
+                    Err(refusal) => Ok(sign_in_refused(&refusal)),
+                }
+            })
+        })
+        .await
+    }
+
     /// Installs on her phone the app `text` makes, which came from
     /// `source`, as her phone installs any.
     async fn give(&self, her: HerPhone, text: String, source: Source) -> AppInstallOutcome {
         let world = Arc::clone(self.world());
 
         self.change_her(her, move |her| {
-            let keyed = keyed(&world);
+            let linked = Linked::now(&world);
 
             her.with(|phone, files| {
                 // What the person said of her apps, which installing keeps.
@@ -206,7 +255,7 @@ impl Daemon {
 
                 match phone.install(files, &text, source) {
                     Ok(Installed { app, replaced }) => Ok(AppInstallOutcome::Ok {
-                        app: Box::new(drawn(&app, &before, &keyed)),
+                        app: Box::new(drawn(&app, &before, &linked)),
                         replaced,
                     }),
                     Err(PhoneError::Store(error)) => Err(Unread::Failed(unread(&error))),
@@ -291,6 +340,23 @@ impl Changed for AppRemoveOutcome {
 impl Changed for AppWakeOutcome {
     fn changed(&self) -> bool {
         matches!(self, Self::Ok)
+    }
+}
+
+impl Changed for AppSignInOutcome {
+    fn changed(&self) -> bool {
+        matches!(self, Self::Ok)
+    }
+}
+
+/// How an app her phone refused to sign in is said to the person.
+fn sign_in_refused(refusal: &PhoneError) -> AppSignInOutcome {
+    AppSignInOutcome::Refused {
+        reason: match refusal {
+            PhoneError::SignsInToNothing(_) => AppSignInRefusal::SignsInToNothing,
+            _ => AppSignInRefusal::UnknownApp,
+        },
+        message: sentence(&refusal.to_string()),
     }
 }
 
@@ -421,6 +487,22 @@ impl From<Unread> for AppWakeOutcome {
             },
             Unread::NoPhone(message) => Self::Refused {
                 reason: AppWakeRefusal::NoPhone,
+                message,
+            },
+            Unread::Failed(message) => Self::Failed { message },
+        }
+    }
+}
+
+impl From<Unread> for AppSignInOutcome {
+    fn from(unread: Unread) -> Self {
+        match unread {
+            Unread::UnknownCharacter(message) => Self::Refused {
+                reason: AppSignInRefusal::UnknownCharacter,
+                message,
+            },
+            Unread::NoPhone(message) => Self::Refused {
+                reason: AppSignInRefusal::NoPhone,
                 message,
             },
             Unread::Failed(message) => Self::Failed { message },

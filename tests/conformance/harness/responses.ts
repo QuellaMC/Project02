@@ -1,10 +1,12 @@
 /**
  * The Responses protocol as the model server speaks it in the OpenAI
- * API's place and in a ChatGPT plan's: a response's output items, each
- * streamed by its events at its place in the output and held whole by the
- * event that ends the response, or, as the plan's service may end one, by
- * its own last event alone; the service's error, a plan's usage used up
- * and a token refused; and the input a request showed the model.
+ * API's place and in a ChatGPT plan's: a response's output items, a
+ * function call or plain words, each streamed by its events at its place
+ * in the output and held whole by the event that ends the response, or,
+ * as the plan's service may end one, by its own last event alone, or whole
+ * in one body for a request that does not stream; the service's error, a
+ * plan's usage used up and a token refused; and the input a request showed
+ * the model.
  */
 import {
   pieces,
@@ -73,6 +75,38 @@ export function replying(words: string, ...cuts: number[]): OutputItem {
   return functionCall('visible_reply', JSON.stringify({text: words}), ...cuts);
 }
 
+/** The model's words as a plain completion answers: a message holding them as its text. */
+export function saying(words: string): OutputItem {
+  const item = (index: number, written: string) => ({
+    type: 'message',
+    id: `msg_${String(index)}`,
+    role: 'assistant',
+    content: written === '' ? [] : [{type: 'output_text', text: written}],
+  });
+
+  return {
+    events: index => [
+      {
+        type: 'response.output_item.added',
+        output_index: index,
+        item: item(index, ''),
+      },
+      {
+        type: 'response.output_text.delta',
+        output_index: index,
+        content_index: 0,
+        delta: words,
+      },
+      {
+        type: 'response.output_item.done',
+        output_index: index,
+        item: item(index, words),
+      },
+    ],
+    item: index => item(index, words),
+  };
+}
+
 /** The events of a response that completes with these items. */
 export function responseEvents(
   ...items: readonly OutputItem[]
@@ -94,6 +128,16 @@ export function responseEvents(
 /** A response that completes with these items. */
 export function responded(...items: readonly OutputItem[]): Answer {
   return {events: responseEvents(...items)};
+}
+
+/** A response that completes with these items, whole in one body, as the OpenAI API answers a request that does not stream. */
+export function respondedWhole(...items: readonly OutputItem[]): Answer {
+  return {
+    completion: {
+      status: 'completed',
+      output: items.map((item, index) => item.item(index)),
+    },
+  };
 }
 
 /** The events of a response as a ChatGPT plan's service streams it: each item held whole by its own last event, and an end that carries no output. */
