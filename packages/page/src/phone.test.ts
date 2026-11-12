@@ -3,6 +3,8 @@ import {describe, expect, it} from 'vitest';
 import type {
   CharacterSummary,
   GatewayHealth,
+  GatewayReady,
+  PendingConfirmation,
   PhoneApp,
   PhoneDid,
   PhoneFront,
@@ -13,6 +15,8 @@ import type {
 } from '@project02/wire/contract';
 import {
   ago,
+  askRaised,
+  askSettled,
   clockParts,
   framed,
   healthSaid,
@@ -74,6 +78,20 @@ function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   };
 }
 
+/** The stream's first frame: health as `said`, and the confirmations waiting. */
+function ready(
+  said: GatewayHealth,
+  ...confirmations: readonly PendingConfirmation[]
+): GatewayReady {
+  return {
+    protocolVersion: 12,
+    health: said,
+    confirmations,
+    pairings: [],
+    turns: [],
+  };
+}
+
 /** Her phone as a read gives it: the Clock, and what she has in front, did and what rings. */
 function herPhone(
   parts: {
@@ -124,10 +142,66 @@ const wakeSam: PhoneRing = {
   at: '2026-11-11T07:00:00.000Z',
 };
 
+const store: PhoneApp = {
+  id: 'store',
+  name: 'App Store',
+  summary: 'More apps, each reviewed by Project02',
+  version: '1.0.0',
+  source: 'built_in',
+  icon: 'bag',
+  tint: 'blue',
+  wakes: false,
+  mayWake: true,
+  views: [{id: 'apps', title: 'App Store', icon: 'bag'}],
+  opensOn: 'apps',
+};
+
+/** Her ask to install the App Store's `app`, as confirmation `id` asks the person; Mira's unless it names another. */
+function askFor(
+  id: string,
+  app: string,
+  characterId = 'mira',
+): PendingConfirmation {
+  return {
+    characterId,
+    id,
+    request: {
+      pluginId: 'phone',
+      toolName: 'phone.install',
+      summary: `Install "${app}" 1.0.0 from the App Store.`,
+      preview: {
+        kind: 'phone_app_install',
+        app: {
+          id: app,
+          name: app,
+          summary: 'An app',
+          icon: 'list',
+          tint: 'orange',
+          version: '1.0.0',
+          wakes: true,
+        },
+        source: 'catalog',
+      },
+    },
+    deadlineAt: now + 5 * minute,
+  };
+}
+
+/** The apps her phone's window shows she waits on the person to install, on the view in front. */
+function waitingOn(state: PhoneState): ReadonlySet<string> {
+  const shown = screenOf(state);
+
+  if (shown.kind !== 'view') {
+    throw new Error('The window shows no view.');
+  }
+
+  return shown.waiting;
+}
+
 /** Mira's window, live, with her phone as `outcome` says it. */
 function watching(outcome: PhoneOutcome = herPhone()): PhoneState {
   return phoneRead(
-    phoneReady(initialPhoneState('mira'), health(mira)),
+    phoneReady(initialPhoneState('mira'), ready(health(mira))),
     outcome,
   );
 }
@@ -151,6 +225,7 @@ describe("her phone's window", () => {
       screen: alarmList(),
       message: undefined,
       fresh: new Set(),
+      waiting: new Set(),
     });
 
     // The person opens the World Clock, which shows once read; the same
@@ -234,7 +309,7 @@ describe("her phone's window", () => {
 
   it('names her as health lists her, says why in place of her phone when it cannot be read until a read can, and draws the soonest of what rings', () => {
     const nova = initialPhoneState('nova');
-    let state = phoneReady(nova, health(mira));
+    let state = phoneReady(nova, ready(health(mira)));
 
     expect(state.name).toBeUndefined();
     expect(screenOf(state)).toEqual({kind: 'blank'});
@@ -392,6 +467,114 @@ describe("her phone's window", () => {
       herPhone({front: laps(lap(2), lap(1)), did: did('Marked a lap', 4)}),
     );
     expect(state.fresh).toEqual(new Set([JSON.stringify(lap(2))]));
+  });
+
+  it("marks no row New when the view she has in front shows another page of it, as the App Store's list and its page of an app are, and still marks the rows that the same page gains", () => {
+    const keep: ScreenRow = {title: 'Keep its own data'};
+    const wake: ScreenRow = {title: 'Wake her when something is due'};
+    const list: Screen = {
+      items: [
+        {
+          kind: 'list',
+          header: 'Reviewed by Project02',
+          rows: [{id: 'reminders', title: 'Reminders'}],
+        },
+      ],
+    };
+    const page = (...rows: readonly ScreenRow[]): Screen => ({
+      items: [{kind: 'list', header: 'It may', rows}],
+      page: 'reminders',
+    });
+    const inStore = (
+      screen: Screen,
+      words: string,
+      seconds: number,
+    ): PhoneOutcome => ({
+      status: 'ok',
+      apps: [clock, store],
+      front: {appId: 'store', viewId: 'apps', screen},
+      did: {...did(words, seconds), appId: 'store'},
+      ringing: [],
+    });
+    let state = watching(inStore(list, 'Opened App Store', 1));
+
+    state = phoneRead(state, inStore(page(keep), 'Looked at an app', 2));
+    expect(state.fresh).toEqual(new Set());
+    state = phoneRead(state, inStore(page(keep, wake), 'Looked at an app', 3));
+    expect(state.fresh).toEqual(new Set([JSON.stringify(wake)]));
+    state = phoneRead(state, inStore(list, 'Opened App Store', 4));
+    expect(state.fresh).toEqual(new Set());
+  });
+
+  it("knows which apps she waits on the person to install: those she asked for that wait when the window connects, then each she asks for, until it is settled, approved or denied; another character's ask and a confirmation of anything else are not hers to wait on, and each new connection says again what waits", () => {
+    const tone: PendingConfirmation = {
+      ...askFor('c0', 'tone'),
+      request: {
+        pluginId: 'runtime.plugin',
+        toolName: 'runtime.plugin.config.update',
+        summary: 'Set the tone to warm.',
+        preview: {fieldName: 'tone', value: 'warm'},
+      },
+    };
+    const inStore: PhoneOutcome = {
+      status: 'ok',
+      apps: [clock, store],
+      front: {
+        appId: 'store',
+        viewId: 'apps',
+        screen: {items: [{kind: 'list', rows: []}]},
+      },
+      ringing: [],
+    };
+    let state = phoneRead(
+      phoneReady(
+        initialPhoneState('mira'),
+        ready(
+          health(mira),
+          askFor('c1', 'reminders'),
+          askFor('c2', 'weather', 'nova'),
+          tone,
+        ),
+      ),
+      inStore,
+    );
+
+    expect(waitingOn(state)).toEqual(new Set(['reminders']));
+
+    state = askRaised(state, askFor('c3', 'notes'));
+    expect(waitingOn(state)).toEqual(new Set(['reminders', 'notes']));
+    expect(askRaised(state, askFor('c4', 'search', 'nova'))).toBe(state);
+    expect(askRaised(state, tone)).toBe(state);
+
+    state = askSettled(state, {
+      kind: 'confirmation_settled',
+      characterId: 'mira',
+      id: 'c1',
+      decision: 'approved',
+    });
+    expect(waitingOn(state)).toEqual(new Set(['notes']));
+    expect(
+      askSettled(state, {
+        kind: 'confirmation_settled',
+        characterId: 'nova',
+        id: 'c2',
+        decision: 'denied',
+      }),
+    ).toBe(state);
+
+    // Settled while the window's stream was away: the next connection's
+    // confirmations no longer hold it.
+    expect(waitingOn(phoneReady(state, ready(health(mira))))).toEqual(
+      new Set(),
+    );
+
+    state = askSettled(state, {
+      kind: 'confirmation_settled',
+      characterId: 'mira',
+      id: 'c3',
+      decision: 'denied',
+    });
+    expect(waitingOn(state)).toEqual(new Set());
   });
 
   it("draws a clock reading's day period apart from its digits, as the design does", () => {

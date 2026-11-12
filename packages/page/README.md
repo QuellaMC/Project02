@@ -24,7 +24,12 @@ and unit-tested in Node. `session.ts` holds the tab's one client and one
 stream and the verbs a page calls, and runs only in a browser; `app.tsx`
 and `thread.tsx` render the store — the roster, every confirmation and
 pairing request waiting, the thread with its draft bubbles, the one-line
-composer. A pairing request is a card beside the confirmations, with its
+composer. A confirmation's card names the tool over what it would do; her
+ask to install an app says instead who wants which app and, in a sentence
+read from its preview, where the app comes from, what it does and the
+version it updates (`install-ask.ts`, pure and tested in Node), and a
+preview the page cannot read as one gets the tool's card.
+A pairing request is a card beside the confirmations, with its
 connector, the account, the source it wrote to, the code and when it
 expires; the daemon's answer to a click settles it as a confirmation's
 answer does — a settlement is left to the frame, an expiry is said once
@@ -105,18 +110,26 @@ switch its views and go home, each view read on its own and nothing of hers
 changed, until a read in which what she did, what she has in front or what
 rings is new takes the window back to her. What rings is drawn over
 everything, the soonest of several; a row that a read right after something
-she did holds for the first time is marked New until the next read; the
+she did holds for the first time on the same page of the same view is
+marked New until the next read, and another page of a view, as the App
+Store's page of an app is to its list, marks none; the
 view on screen is read again at each minute's turn, and a reading that
-moves is counted on the page from the moments it carries. A character the
-daemon does not know, or whose settings give her no phone, is said in the
-daemon's sentence where her phone would be. `phone-window.tsx` and
-`phone-device.tsx` draw it as the design draws an iPhone, with nothing
-painted around it, so a window that can show what is behind it does.
-`window-calls.ts` tells, from the page's `window` and importing nothing of
-the app, whether a page is in the desktop app and what its window
-answers. The app's window for her phone has no frame of its own and
-answers four window calls: there the bar moves the window, a pin keeps it
-on top of other windows as the window says it does, and closing it, from
-the bar or when the chat asks, is the app's. A browser's popup, which has
-a title bar of its own, answers none: it gets no pin and no moving bar,
-and closes as a window a script opened.
+moves is counted on the page from the moments it carries. The App Store's
+rows carry an app's tile and its page an app's header, and while her ask
+to install an app waits for the person, the row and the header with that
+app's id say so in place of their status: "Waiting", and "Waiting for
+you", since the window does not know the person's name. The window learns
+of her asks from what the stream says of confirmations, those waiting
+when it connects and each one raised and settled; the daemon keeps none.
+A character the daemon does not know, or whose settings give her no phone,
+is said in the daemon's sentence where her phone would be.
+`phone-window.tsx` and `phone-device.tsx` draw it as the design draws an
+iPhone, with nothing painted around it, so a window that can show what is
+behind it does. `window-calls.ts` tells, from the page's `window` and
+importing nothing of the app, whether a page is in the desktop app and what
+its window answers. The app's window for her phone has no frame of its own
+and answers four window calls: there the bar moves the window, a pin keeps
+it on top of other windows as the window says it does, and closing it, from
+the bar or when the chat asks, is the app's. A browser's popup, which has a
+title bar of its own, answers none: it gets no pin and no moving bar, and
+closes as a window a script opened.

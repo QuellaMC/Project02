@@ -15,6 +15,7 @@ import type {
   PhoneRing,
   ScreenItem,
   ScreenRow,
+  ScreenTile,
 } from '@project02/wire/contract';
 import {avatarColor, iconOf, tintOf} from './look.ts';
 import {
@@ -30,6 +31,14 @@ import {Icon} from './settings-controls.tsx';
 
 type View = Extract<OnScreen, {kind: 'view'}>;
 type ReadoutItem = Extract<ScreenItem, {kind: 'readout'}>;
+type AppItem = Extract<ScreenItem, {kind: 'app'}>;
+
+/** An app's tile at each size her phone draws one: its icon's size and its stroke there. */
+const tileGlyphs = {
+  home: {size: 30, weight: 1.7},
+  row: {size: 24, weight: 1.7},
+  header: {size: 40, weight: 1.6},
+} as const;
 
 /** The length of the ring a timer's readout is drawn in, whose radius is 100. */
 const ringLength = 2 * Math.PI * 100;
@@ -118,12 +127,7 @@ function Home({
             session.look(app.id, app.opensOn);
           }}
         >
-          <span
-            className={`phone-app-icon tint-${tintOf(app.tint)}`}
-            aria-hidden="true"
-          >
-            <Icon name={iconOf(app.icon)} size={30} weight={1.7} />
-          </span>
+          <AppTile tile={app} size="home" />
           <span className="phone-app-name">{app.name}</span>
         </button>
       ))}
@@ -149,8 +153,14 @@ function AppView({
         <h2 className="phone-view-title">{title}</h2>
         <div className="phone-pieces">
           {view.message === undefined ? (
-            view.screen?.items.map((item, at) => (
-              <Piece key={at} item={item} fresh={view.fresh} />
+            view.screen?.items.map((item, at, items) => (
+              <Piece
+                key={at}
+                item={item}
+                alone={items.length === 1}
+                fresh={view.fresh}
+                waiting={view.waiting}
+              />
             ))
           ) : (
             <p className="phone-quiet">{view.message}</p>
@@ -179,12 +189,23 @@ function AppView({
   );
 }
 
+/**
+ * A piece of a screen. Text alone on its screen is a quiet line in the
+ * middle of it, as a view with nothing in it yet says so, and among other
+ * pieces a paragraph. A row or an app's header carrying the id of an app
+ * she waits on the person to install says so in place of its status.
+ */
 function Piece({
   item,
+  alone,
   fresh,
+  waiting,
 }: {
   readonly item: ScreenItem;
+  /** Whether it is the only piece of its screen. */
+  readonly alone: boolean;
   readonly fresh: ReadonlySet<string>;
+  readonly waiting: ReadonlySet<string>;
 }) {
   switch (item.kind) {
     case 'list':
@@ -195,7 +216,12 @@ function Piece({
           )}
           <div className="phone-card">
             {item.rows.map((row, at) => (
-              <Row key={at} row={row} fresh={fresh.has(rowKey(row))} />
+              <Row
+                key={at}
+                row={row}
+                fresh={fresh.has(rowKey(row))}
+                waiting={row.id !== undefined && waiting.has(row.id)}
+              />
             ))}
           </div>
         </section>
@@ -207,24 +233,44 @@ function Piece({
         <CountingReadout readout={item} live={item.live} />
       );
     case 'text':
-      return <p className="phone-quiet">{item.text}</p>;
+      return (
+        <p className={alone ? 'phone-quiet' : 'phone-text'}>{item.text}</p>
+      );
+    case 'app':
+      return <AppHeader app={item} waiting={waiting.has(item.id)} />;
   }
 }
 
 /**
- * A row: the small line above, its title or else its clock reading, the
- * small line below, and at its end a clock reading beside a title, a value
- * and a switch. A row whose switch is off is dimmed, and one that is new
- * since she did something is tinted and says so.
+ * A row: an app's tile, the small line above, its title or else its clock
+ * reading, the small line below, and at its end a clock reading beside a
+ * title, a value and a switch. A row whose switch is off is dimmed, one
+ * that is new since she did something is tinted and says so, and an app's
+ * row, which the App Store lists, says at its end how the app stands on
+ * her phone, or that she waits on the person to install it.
  */
-function Row({row, fresh}: {readonly row: ScreenRow; readonly fresh: boolean}) {
+function Row({
+  row,
+  fresh,
+  waiting,
+}: {
+  readonly row: ScreenRow;
+  readonly fresh: boolean;
+  readonly waiting: boolean;
+}) {
   // A row has a title, a time or both: a time beside a title goes to its end.
   const end = row.title === undefined ? undefined : row.time;
+  const value = waiting ? 'Waiting' : row.value;
+  const looks = [
+    end === undefined ? '' : ' phone-row-timed',
+    row.tile === undefined ? '' : ' phone-row-tiled',
+    row.switch === false ? ' phone-row-off' : '',
+    fresh ? ' phone-row-fresh' : '',
+  ].join('');
 
   return (
-    <div
-      className={`phone-row${end === undefined ? '' : ' phone-row-timed'}${row.switch === false ? ' phone-row-off' : ''}${fresh ? ' phone-row-fresh' : ''}`}
-    >
+    <div className={`phone-row${looks}`}>
+      {row.tile === undefined ? null : <AppTile tile={row.tile} size="row" />}
       <span className="phone-row-words">
         {row.caption === undefined ? null : (
           <span className="phone-row-caption">{row.caption}</span>
@@ -242,8 +288,10 @@ function Row({row, fresh}: {readonly row: ScreenRow; readonly fresh: boolean}) {
       {end === undefined ? null : (
         <Clock time={end} className="phone-row-end" />
       )}
-      {row.value === undefined ? null : (
-        <span className="phone-row-value">{row.value}</span>
+      {value === undefined ? null : (
+        <span className={`phone-row-value${waiting ? ' phone-waiting' : ''}`}>
+          {value}
+        </span>
       )}
       {row.switch === undefined ? null : (
         <span
@@ -255,6 +303,53 @@ function Row({row, fresh}: {readonly row: ScreenRow; readonly fresh: boolean}) {
         </span>
       )}
     </div>
+  );
+}
+
+/**
+ * An app's header, as the App Store draws the app's page: its tile large,
+ * its name, the line under it, and how the app stands on her phone, or
+ * that she waits on the person to install it. Her phone's window does not
+ * know the person's name, so it says she waits for you.
+ */
+function AppHeader({
+  app,
+  waiting,
+}: {
+  readonly app: AppItem;
+  readonly waiting: boolean;
+}) {
+  return (
+    <div className="phone-app-header">
+      <AppTile tile={app.tile} size="header" />
+      <div className="phone-app-header-words">
+        <h3 className="phone-app-header-name">{app.name}</h3>
+        <span className="phone-app-header-subtitle">{app.subtitle}</span>
+        <span className={`phone-pill${waiting ? ' phone-waiting' : ''}`}>
+          {waiting ? 'Waiting for you' : app.status}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/** An app's tile: its icon, white, on its tint, at the size her phone draws it there. */
+function AppTile({
+  tile,
+  size,
+}: {
+  readonly tile: ScreenTile;
+  readonly size: keyof typeof tileGlyphs;
+}) {
+  const glyph = tileGlyphs[size];
+
+  return (
+    <span
+      className={`phone-tile phone-tile-${size} tint-${tintOf(tile.tint)}`}
+      aria-hidden="true"
+    >
+      <Icon name={iconOf(tile.icon)} size={glyph.size} weight={glyph.weight} />
+    </span>
   );
 }
 

@@ -1,13 +1,17 @@
-import {createHash} from 'node:crypto';
 import {readdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {expect, it} from 'vitest';
 
 import {
-  startCatalogServer,
-  type CatalogServer,
-} from './harness/catalog-server.ts';
+  entryOf,
+  fileOf,
+  publish,
+  quiet,
+  reminders,
+  type App,
+} from './harness/apps.ts';
+import {startCatalogServer} from './harness/catalog-server.ts';
 import {startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents, type Frame} from './harness/events.ts';
 import {configJson, createHome} from './harness/home.ts';
@@ -23,127 +27,7 @@ import {
 } from './harness/model-server.ts';
 import {converse, saveConfig, wireOf} from './harness/wire.ts';
 
-/** An app as its one file says it: its manifest, and its functions beside it. */
-type App = {
-  readonly manifest: {
-    readonly id: string;
-    readonly name: string;
-    readonly summary: string;
-    readonly version: string;
-    readonly icon: string;
-    readonly tint: string;
-    readonly wakes: boolean;
-    readonly views: readonly object[];
-    readonly opensOn: string;
-    readonly actions: readonly object[];
-  };
-  readonly script: string;
-};
-
-/** Reminders, which keeps what she adds and says it wakes her. */
-const reminders: App = {
-  manifest: {
-    id: 'reminders',
-    name: 'Reminders',
-    summary: 'Things to do, on a day and time',
-    version: '1.0.0',
-    icon: 'list',
-    tint: 'orange',
-    wakes: true,
-    views: [{id: 'all', title: 'All', icon: 'list'}],
-    opensOn: 'all',
-    actions: [
-      {
-        name: 'add',
-        description: 'Add a reminder.',
-        did: 'Added a reminder',
-        view: 'all',
-        input: {
-          type: 'object',
-          properties: {title: {type: 'string'}},
-          required: ['title'],
-          additionalProperties: false,
-        },
-      },
-    ],
-  },
-  script: `export function screen() {
-  const kept = phone.storage.get('reminders') ?? [];
-
-  return {items: kept.length === 0
-    ? [{kind: 'text', text: 'No Reminders'}]
-    : [{kind: 'list', rows: kept.map((title) => ({title}))}]};
-}
-
-export function add({title}) {
-  phone.storage.set('reminders', [...(phone.storage.get('reminders') ?? []), title]);
-
-  return {title};
-}`,
-};
-
-/** An app of `name` that shows a line and does nothing, at `version`. */
-function quiet(id: string, name: string, version: string): App {
-  return {
-    manifest: {
-      id,
-      name,
-      summary: `${name}, quietly`,
-      version,
-      icon: 'doc',
-      tint: 'gray',
-      wakes: false,
-      views: [{id: 'all', title: 'All', icon: 'doc'}],
-      opensOn: 'all',
-      actions: [],
-    },
-    script: `export function screen() { return {items: [{kind: 'text', text: 'No ${name}'}]}; }`,
-  };
-}
-
 const mira = {scope: 'character', characterId: 'mira'} as const;
-
-function fileOf(app: App): string {
-  return `export const manifest = ${JSON.stringify({format: 'project02.app.v1', ...app.manifest})};\n\n${app.script}\n`;
-}
-
-/** The catalog's entry of `app`, listing the file whose text is `listed`, its own unless the test says otherwise. */
-function entryOf(app: App, listed = fileOf(app)): object {
-  const {id, name, summary, icon, tint, version, wakes} = app.manifest;
-
-  return {
-    id,
-    name,
-    summary,
-    icon,
-    tint,
-    version,
-    changes: 'The first version.',
-    wakes,
-    sha256: createHash('sha256').update(listed).digest('hex'),
-  };
-}
-
-/** The catalog of `apps`, in their order, each beside its file where the catalog's rule puts it; an entry given with an app lists in its place. */
-function publish(
-  catalog: CatalogServer,
-  ...apps: readonly (readonly [App, object?])[]
-): void {
-  catalog.publish(
-    'catalog.json',
-    JSON.stringify({
-      format: 'project02.catalog.v1',
-      apps: apps.map(([app, entry]) => entry ?? entryOf(app)),
-    }),
-  );
-
-  for (const [app] of apps) {
-    catalog.publish(
-      `apps/${app.manifest.id}/${app.manifest.version}.js`,
-      fileOf(app),
-    );
-  }
-}
 
 /** A home where Mira answers through `model`, the person goes by Sam, her heartbeat is off, and `installed` is on her phone from the store, as her phone keeps an app installed. */
 function storeHome(model: ModelServer, ...installed: readonly App[]): string {
@@ -248,8 +132,13 @@ it('store.look-through: before she opens the App Store a look at it says so; her
           {title: 'Wake her when something is due'},
         ],
       },
-      {kind: 'text', text: 'Version 1.0.0 — The first version.'},
+      {
+        kind: 'list',
+        header: "What's New",
+        rows: [{caption: 'Version 1.0.0', title: 'The first version.'}],
+      },
     ],
+    page: 'reminders',
   };
 
   expect(await wire.phoneScreen('mira', 'store', 'apps')).toEqual({

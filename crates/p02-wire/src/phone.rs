@@ -23,8 +23,9 @@ use ts_rs::TS;
 pub enum PhoneOutcome {
     Ok {
         apps: Vec<PhoneApp>,
+        // Boxed, since it holds her whole screen.
         #[serde(skip_serializing_if = "Option::is_none")]
-        front: Option<PhoneFront>,
+        front: Option<Box<PhoneFront>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         did: Option<PhoneDid>,
         ringing: Vec<PhoneRing>,
@@ -158,11 +159,18 @@ pub enum ScreenRefusal {
     AppFailed,
 }
 
-/// What a view of an app shows: its pieces, top to bottom.
+/// What a view of an app shows: its pieces, top to bottom, and which page
+/// of the view it is, when the view shows more than one.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
+#[ts(optional_fields)]
 pub struct Screen {
     pub items: Vec<ScreenItem>,
+    /// Which page of its view this is, as the App Store's page of an app
+    /// says that app's id; none for a view of one page. One page's rows
+    /// are not another's.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page: Option<String>,
 }
 
 /// A piece of a screen.
@@ -192,7 +200,8 @@ pub enum ScreenItem {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         live: Option<LiveReading>,
     },
-    /// A line of plain words, as for a view with nothing in it yet.
+    /// Plain words: a line alone on a view with nothing in it yet, or a
+    /// paragraph among other pieces.
     Text { text: String },
     /// An app's header: its tile, its name, a small line under it and its
     /// status, as a store's page of the app shows them.

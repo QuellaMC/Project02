@@ -3215,12 +3215,16 @@
           "items": {
             "$ref": "#/$defs/ScreenItem"
           }
+        },
+        "page": {
+          "type": "string",
+          "description": "Which page of its view this is, as the App Store's page of an app\nsays that app's id; none for a view of one page. One page's rows\nare not another's."
         }
       },
       "required": [
         "items"
       ],
-      "description": "What a view of an app shows: its pieces, top to bottom."
+      "description": "What a view of an app shows: its pieces, top to bottom, and which page\nof the view it is, when the view shows more than one."
     },
     "ScreenItem": {
       "oneOf": [
@@ -3297,7 +3301,7 @@
             "kind",
             "text"
           ],
-          "description": "A line of plain words, as for a view with nothing in it yet."
+          "description": "Plain words: a line alone on a view with nothing in it yet, or a\nparagraph among other pieces."
         },
         {
           "type": "object",

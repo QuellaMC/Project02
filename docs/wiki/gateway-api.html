@@ -1138,7 +1138,11 @@ data: {…}</code></pre>
 
       <p>
         A screen is one piece of data, the same she reads when she opens the
-        view: its <code>items</code>, top to bottom. A <code>list</code> is a
+        view: its <code>items</code>, top to bottom, and, for a view that
+        shows more than one page, which <code>page</code> it is — the App
+        Store's page of an app names the app's id, and its list names none —
+        so that a client tells one page's rows from another's. A
+        <code>list</code> is a
         card of <code>rows</code> under an optional <code>header</code>, each
         row a <code>title</code>, a clock reading as <code>time</code> or
         both, with an optional <code>tile</code> at its start, an app's
@@ -1153,7 +1157,8 @@ data: {…}</code></pre>
         <code>live</code>: <code>{counts: "up", from}</code> or
         <code>{counts: "down", to, of}</code>, in milliseconds since the
         epoch, which a client counts from without asking again; a
-        <code>text</code> is a quiet line of words. Any view is read on
+        <code>text</code> is plain words, a quiet line when it is all the
+        screen shows and a paragraph among other pieces. Any view is read on
         request with
         <code>GET /api/characters/:id/phone/apps/:app/views/:view</code>,
         which puts nothing in front of her.

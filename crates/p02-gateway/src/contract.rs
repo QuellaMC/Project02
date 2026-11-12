@@ -727,7 +727,7 @@ fn written() -> Vec<(&'static str, Value)> {
             "PhoneOutcome",
             &PhoneOutcome::Ok {
                 apps: vec![clock.clone()],
-                front: Some(front.clone()),
+                front: Some(Box::new(front.clone())),
                 did: Some(did),
                 ringing: vec![ring],
             },
@@ -736,11 +736,11 @@ fn written() -> Vec<(&'static str, Value)> {
             "PhoneOutcome",
             &PhoneOutcome::Ok {
                 apps: vec![clock.clone()],
-                front: Some(PhoneFront {
+                front: Some(Box::new(PhoneFront {
                     screen: None,
                     message: Some("Clock took too long and was stopped.".to_owned()),
                     ..front
-                }),
+                })),
                 did: None,
                 ringing: Vec::new(),
             },
@@ -954,6 +954,7 @@ fn phone() -> (PhoneApp, Screen) {
                     text: "No World Clocks".to_owned(),
                 },
             ],
+            page: words("reminders"),
         },
     )
 }

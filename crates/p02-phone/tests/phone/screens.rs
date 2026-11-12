@@ -23,7 +23,7 @@ fn showing(screens: &Value) -> Phone {
 
 #[test]
 fn a_screen_reads_into_the_pieces_the_phone_knows_and_back() {
-    let everything = json!({"items": [
+    let everything = json!({"page": "tea", "items": [
         {"kind": "app", "id": "tea", "tile": {"icon": "timer", "tint": "mint"}, "name": "Tea",
          "subtitle": "Reviewed", "status": "Installed"},
         {"kind": "list", "header": "Recents", "rows": [

@@ -721,9 +721,16 @@ layout: ReadonlyArray<LayoutCard>, diagnostics: ReadonlyArray<RuntimeConfigDiagn
 export type RuntimeConfigSectionNamespace = "plugins" | "connectors";
 
 /**
- * What a view of an app shows: its pieces, top to bottom.
+ * What a view of an app shows: its pieces, top to bottom, and which page
+ * of the view it is, when the view shows more than one.
  */
-export type Screen = { items: ReadonlyArray<ScreenItem>, };
+export type Screen = { items: ReadonlyArray<ScreenItem>, 
+/**
+ * Which page of its view this is, as the App Store's page of an app
+ * says that app's id; none for a view of one page. One page's rows
+ * are not another's.
+ */
+page?: string, };
 
 /**
  * A piece of a screen.

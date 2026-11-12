@@ -181,12 +181,12 @@ fn shown(
                     Err(failure) => (None, Some(sentence(&failure.to_string()))),
                 };
 
-            Some(PhoneFront {
+            Some(Box::new(PhoneFront {
                 app_id: front.app,
                 view_id: front.view,
                 screen,
                 message,
-            })
+            }))
         }
     };
 

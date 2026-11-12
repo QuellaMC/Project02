@@ -6,6 +6,7 @@ import type {
   PairingRequest,
   PendingConfirmation,
 } from '@project02/wire/contract';
+import {installAskOf, installSentence} from './install-ask.ts';
 import {webSource, type Session} from './session.ts';
 import {SettingsWindow} from './settings-window.tsx';
 import {characterName, type WebState} from './store.ts';
@@ -299,6 +300,10 @@ function Roster({
   );
 }
 
+/**
+ * A confirmation: her ask to install an app said in a sentence, as the
+ * design draws it, and any other the tool's name over what it would do.
+ */
 function ConfirmationCard({
   pending,
   characterName,
@@ -312,17 +317,27 @@ function ConfirmationCard({
     pending.turn === undefined || pending.turn.source === webSource
       ? ''
       : ` · raised on ${pending.turn.source}`;
+  const install = installAskOf(pending.request.preview);
 
   return (
     <div className="card" role="group" aria-label="Confirmation">
-      <p className="card-title">
-        Confirm {pending.request.toolName}{' '}
-        <span className="muted">· {pending.request.pluginId}</span>
-      </p>
-      <p className="card-summary">{pending.request.summary}</p>
-      <pre className="card-preview">
-        {JSON.stringify(pending.request.preview, null, 2)}
-      </pre>
+      {install === undefined ? (
+        <>
+          <p className="card-title">
+            Confirm {pending.request.toolName}{' '}
+            <span className="muted">· {pending.request.pluginId}</span>
+          </p>
+          <p className="card-summary">{pending.request.summary}</p>
+          <pre className="card-preview">
+            {JSON.stringify(pending.request.preview, null, 2)}
+          </pre>
+        </>
+      ) : (
+        <>
+          <p className="card-title">{`${characterName} wants to install ${install.app.name}`}</p>
+          <p className="card-sentence">{installSentence(install)}</p>
+        </>
+      )}
       <CardActions
         note={`${characterName} · expires at ${clockTime(pending.deadlineAt)}${raisedOn}`}
         onAnswer={onAnswer}

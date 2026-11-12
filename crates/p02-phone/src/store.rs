@@ -1,7 +1,8 @@
 //! The App Store, the phone's own app: written here, with no script, since
 //! it needs what no app is given. It keeps the catalog it last read, which
 //! her opening it reads anew, and which app's page is open; its one view
-//! shows that page, or else the list of the catalog's apps. How an app
+//! shows that page, which its screen names by the app's id, or else the
+//! list of the catalog's apps. How an app
 //! stands on her phone is read from her phone whenever the screen is made,
 //! by the one rule every reader of the App Store takes.
 
@@ -26,6 +27,7 @@ const PAGE: &str = "page";
 
 const REVIEWED_BY: &str = "Reviewed by Project02";
 const REVIEWED: &str = "Reviewed · Project02 Apps";
+const WHATS_NEW: &str = "What's New";
 const UNREAD: &str = "The App Store shows its apps once she opens it.";
 
 /// The App Store as an app: one view, its list or an app's page, and one
@@ -84,13 +86,15 @@ impl Phone {
 }
 
 /// What the App Store's view shows from what it keeps, `kept`, her phone's
-/// apps being `on_phone`: the page it has open, or its list.
+/// apps being `on_phone`: the page it has open, by that app's id, or its
+/// list.
 pub(crate) fn screen(kept: &Kept, on_phone: &[Listed]) -> Screen {
     let Some(apps) = read(kept) else {
         return Screen {
             items: vec![ScreenItem::Text {
                 text: UNREAD.to_owned(),
             }],
+            page: None,
         };
     };
     let open = kept
@@ -98,29 +102,34 @@ pub(crate) fn screen(kept: &Kept, on_phone: &[Listed]) -> Screen {
         .get(PAGE)
         .and_then(Value::as_str)
         .and_then(|id| apps.iter().find(|app| app.id().as_str() == id));
-    let items = match open {
-        Some(app) => page(app, app.status(on_phone)),
-        None => vec![ScreenItem::List {
-            header: Some(REVIEWED_BY.to_owned()),
-            rows: apps
-                .iter()
-                .map(|app| ScreenRow {
-                    id: Some(app.id().to_string()),
-                    tile: Some(tile(app)),
-                    title: Some(app.name().to_owned()),
-                    subtitle: Some(app.summary().to_owned()),
-                    value: match app.status(on_phone) {
-                        StoreAppStatus::NotOnPhone => None,
-                        StoreAppStatus::Update => Some("Update".to_owned()),
-                        StoreAppStatus::Installed => Some("Installed".to_owned()),
-                    },
-                    ..ScreenRow::default()
-                })
-                .collect(),
-        }],
-    };
 
-    Screen { items }
+    match open {
+        Some(app) => Screen {
+            items: page(app, app.status(on_phone)),
+            page: Some(app.id().to_string()),
+        },
+        None => Screen {
+            items: vec![ScreenItem::List {
+                header: Some(REVIEWED_BY.to_owned()),
+                rows: apps
+                    .iter()
+                    .map(|app| ScreenRow {
+                        id: Some(app.id().to_string()),
+                        tile: Some(tile(app)),
+                        title: Some(app.name().to_owned()),
+                        subtitle: Some(app.summary().to_owned()),
+                        value: match app.status(on_phone) {
+                            StoreAppStatus::NotOnPhone => None,
+                            StoreAppStatus::Update => Some("Update".to_owned()),
+                            StoreAppStatus::Installed => Some("Installed".to_owned()),
+                        },
+                        ..ScreenRow::default()
+                    })
+                    .collect(),
+            }],
+            page: None,
+        },
+    }
 }
 
 /// What `show_app` answers of the app `input` names, her phone's apps
@@ -191,8 +200,8 @@ fn read(kept: &Kept) -> Option<Vec<CatalogApp>> {
     Some(apps.iter().filter_map(CatalogApp::of).collect())
 }
 
-/// An app's page: its header, its summary, what it may do, and its version
-/// with what changed.
+/// An app's page: its header, its summary, what it may do, and what is new
+/// in its version.
 fn page(app: &CatalogApp, status: StoreAppStatus) -> Vec<ScreenItem> {
     vec![
         ScreenItem::App {
@@ -215,8 +224,13 @@ fn page(app: &CatalogApp, status: StoreAppStatus) -> Vec<ScreenItem> {
                 })
                 .collect(),
         },
-        ScreenItem::Text {
-            text: format!("Version {} — {}", app.version(), app.changes()),
+        ScreenItem::List {
+            header: Some(WHATS_NEW.to_owned()),
+            rows: vec![ScreenRow {
+                caption: Some(format!("Version {}", app.version())),
+                title: Some(app.changes().to_owned()),
+                ..ScreenRow::default()
+            }],
         },
     ]
 }

@@ -113,8 +113,10 @@ the blocking pool.
   "Reviewed by Project02", each with its tile, name and summary and how it
   stands on her phone ("Update", "Installed", or nothing when it is not on
   it), read from her phone whenever the screen is made. `show_app {app}`
-  answers what the app is and may do and opens its page: its header, its
+  answers what the app is and may do and opens its page, a screen whose
+  `page` is the app's id, where the list's names none: its header, its
   summary, what it may do ("Keep its own data", and "Wake her when
   something is due" for one that wakes her, the lines `it_may` makes for
-  the person too), and its version with what changed. Opened again, it
-  shows its list; before it read anything, a line says so.
+  the person too), and under "What's New" its version with what changed.
+  Opened again, it shows its list; before it read anything, a line says
+  so.

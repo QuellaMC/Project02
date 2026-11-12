@@ -427,6 +427,13 @@ code {
   margin: 0;
 }
 
+/* What she asks for, in a sentence, under the card's title. */
+.card-sentence {
+  margin: 0;
+  font-size: 14px;
+  color: var(--secondary);
+}
+
 .card-preview {
   margin: 0;
   padding: 8px 10px;
@@ -1957,49 +1964,69 @@ body:has(> #root > .phone-window) {
   gap: 6px;
 }
 
-/* An app's icon: white on its tint, solid, in light and dark alike. */
-.phone-app-icon {
+/*
+ * An app's tile: its icon white on its tint, solid, in light and dark
+ * alike; on her home screen, at a row of the App Store, and large at the
+ * head of an app's page there.
+ */
+.phone-tile {
+  flex: none;
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
   color: #ffffff;
 }
 
-.phone-app-icon.tint-indigo {
+.phone-tile-home {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+}
+
+.phone-tile-row {
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+}
+
+.phone-tile-header {
+  width: 76px;
+  height: 76px;
+  border-radius: 18px;
+}
+
+.phone-tile.tint-indigo {
   background: #564ade;
 }
 
-.phone-app-icon.tint-blue {
+.phone-tile.tint-blue {
   background: #1e6ef4;
 }
 
-.phone-app-icon.tint-brown {
+.phone-tile.tint-brown {
   background: #956d51;
 }
 
-.phone-app-icon.tint-gray {
+.phone-tile.tint-gray {
   background: #6c6c70;
 }
 
-.phone-app-icon.tint-orange {
+.phone-tile.tint-orange {
   background: #c55300;
 }
 
-.phone-app-icon.tint-cyan {
+.phone-tile.tint-cyan {
   background: #007eae;
 }
 
-.phone-app-icon.tint-pink {
+.phone-tile.tint-pink {
   background: #e7124d;
 }
 
-.phone-app-icon.tint-mint {
+.phone-tile.tint-mint {
   background: #008575;
 }
 
-.phone-app-icon.tint-graphite {
+.phone-tile.tint-graphite {
   background: #1c1c1e;
 }
 
@@ -2052,6 +2079,14 @@ body:has(> #root > .phone-window) {
   text-align: center;
   font-size: 17px;
   color: var(--secondary);
+}
+
+/* Words among a screen's other pieces: a paragraph, as an app's summary on its page in the App Store. */
+.phone-text {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
 }
 
 .phone-list {
@@ -2162,6 +2197,74 @@ body:has(> #root > .phone-window) {
 
 .phone-row .switch-track {
   flex: none;
+}
+
+/* An app's row, as the App Store lists it: its tile, its name, its summary, and how it stands on her phone. */
+.phone-row-tiled {
+  padding: 10px 12px;
+}
+
+.phone-row-tiled .phone-row-title {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.phone-row-tiled .phone-row-subtitle {
+  color: var(--secondary);
+}
+
+.phone-row-tiled .phone-row-value {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* An app's header, at the head of its page in the App Store. */
+.phone-app-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.phone-app-header-words {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.phone-app-header-name {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.phone-app-header-subtitle {
+  font-size: 13px;
+  color: var(--secondary);
+}
+
+.phone-pill {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  margin-top: 2px;
+  padding: 0 12px;
+  border-radius: 13px;
+  background: var(--fill);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--secondary);
+}
+
+/* While she waits on the person to install an app, its row and its page say so in the warning's ink. */
+.phone-waiting {
+  color: var(--orange-glyph);
+}
+
+.phone-pill.phone-waiting {
+  background: var(--orange-tile);
 }
 
 /* One large reading; counting down, inside a ring of what is left of its whole. */
