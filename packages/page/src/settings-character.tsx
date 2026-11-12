@@ -8,6 +8,7 @@ import type {CharacterSummary} from '@project02/wire/contract';
 import {askToInstallRow, hasPhone} from './her-apps.ts';
 import {HerApps} from './settings-apps.tsx';
 import {
+  BackButton,
   Cell,
   Chevron,
   Face,
@@ -35,6 +36,9 @@ import {
   featureControl,
   featureValue,
   featuresPlaced,
+  ownModelExtras,
+  ownModelRows,
+  serviceChoice,
   setupPage,
   switchedOn,
   telegramOn,
@@ -44,6 +48,8 @@ import {
 import {
   characterTarget,
   fieldAt,
+  home,
+  hostRow,
   sectionOf,
   targetKey,
   viewOf,
@@ -53,15 +59,6 @@ import {
 } from './settings.ts';
 import type {SettingsPage} from './store.ts';
 
-/** The host fields that make a character's AI model, in the order her page shows them. */
-const modelFields = [
-  'roleModelProvider',
-  'nvidiaApiKey',
-  'nvidiaModel',
-  'nvidiaBaseUrl',
-  'contextWindowTokens',
-] as const;
-
 function characterOf(
   ctx: Ctx,
   characterId: string,
@@ -69,10 +66,6 @@ function characterOf(
   return ctx.state.health?.characters.find(
     character => character.id === characterId,
   );
-}
-
-function hostRow(characterId: string, name: string): Row {
-  return {target: characterTarget(characterId), place: {kind: 'host', name}};
 }
 
 export function CharacterPage({
@@ -94,15 +87,12 @@ export function CharacterPage({
     return null;
   }
 
-  const enabled =
-    view === undefined
-      ? undefined
-      : fieldAt(view, hostRow(characterId, 'enabled').place);
+  const row = hostRow(target, 'enabled');
+  const enabled = view === undefined ? undefined : fieldAt(view, row.place);
   const on =
     enabled === undefined
       ? character.enabled
-      : valueNow(ctx.settings, hostRow(characterId, 'enabled'), enabled) ===
-        'true';
+      : valueNow(ctx.settings, row, enabled) === 'true';
 
   return (
     <>
@@ -229,7 +219,7 @@ function CharacterHeader({
   readonly refused?: string;
 }) {
   const status = characterStatus({...character, enabled: on}, view);
-  const row = hostRow(character.id, 'enabled');
+  const row = hostRow(characterTarget(character.id), 'enabled');
   const word = (
     <>
       <span className={`status-dot status-${status.tone}`} aria-hidden="true" />
@@ -495,7 +485,7 @@ function HerHeartbeat({
   readonly characterId: string;
   readonly view: OkView;
 }) {
-  const row = hostRow(characterId, 'heartbeat');
+  const row = hostRow(characterTarget(characterId), 'heartbeat');
   const field = fieldAt(view, row.place);
 
   return field === undefined ? null : (
@@ -539,9 +529,10 @@ function HerBot({
 }
 
 /**
- * What is hers alone, under Advanced: her own AI model and what she calls
- * the person. Shown while the Advanced switch is on, and a row she holds a
- * value for shows without it.
+ * What is hers alone, under Advanced: her own AI model, by its service,
+ * Custom while she holds only other parts of one, or the same as
+ * everyone's, and what she calls the person. Shown while the Advanced
+ * switch is on, and a row she holds a value for shows without it.
  */
 function HerOwn({
   ctx,
@@ -553,30 +544,18 @@ function HerOwn({
   readonly view: OkView;
 }) {
   const {advanced} = ctx.state;
-  const holds = (name: string) =>
-    fieldAt(view, hostRow(character.id, name).place)?.authored.configured ===
-    true;
-  const model = fieldAt(view, hostRow(character.id, 'nvidiaModel').place);
-  const ownModel = modelFields.some(holds);
-  const callsYou = fieldAt(
-    view,
-    hostRow(character.id, 'userDisplayName').place,
-  );
-  const showModel = advanced || ownModel;
+  const target = characterTarget(character.id);
+  const service = serviceChoice(ctx.settings, target).chosen;
+  const custom = ownModelExtras(ctx.settings, character.id).length > 0;
+  const callsYouRow = hostRow(target, 'userDisplayName');
+  const callsYou = fieldAt(view, callsYouRow.place);
+  const showModel = advanced || service !== undefined || custom;
   const showName =
-    callsYou !== undefined && (advanced || holds('userDisplayName'));
+    callsYou !== undefined && (advanced || callsYou.authored.configured);
 
   if (!showModel && !showName) {
     return null;
   }
-
-  const modelValue =
-    model?.authored.configured === true &&
-    typeof model.authored.value === 'string'
-      ? model.authored.value
-      : ownModel
-        ? 'Custom'
-        : 'Same as Settings';
 
   return (
     <Group
@@ -585,7 +564,7 @@ function HerOwn({
     >
       {showModel ? (
         <LinkCell
-          value={modelValue}
+          value={service?.name ?? (custom ? 'Custom' : 'Same as Everyone')}
           onClick={() => {
             ctx.session.goTo({
               kind: 'character-model',
@@ -600,7 +579,7 @@ function HerOwn({
       {showName ? (
         <FieldRow
           ctx={ctx}
-          row={hostRow(character.id, 'userDisplayName')}
+          row={callsYouRow}
           field={{...callsYou, label: 'Calls You'}}
           leading={<Tile icon="person" tint="gray" />}
         />
@@ -663,7 +642,14 @@ export function FeaturePage({
   );
 }
 
-/** Her own AI model: the model always, and each other part of it she holds a value of her own for. */
+/**
+ * Her own AI model: the service, Same as Everyone naming the one every
+ * character thinks with, or one of the services connected; and with a
+ * service of her own, its model. Same as Everyone takes away her service
+ * and every model of her own, so none stands in for what everyone uses.
+ * Under them, whatever else of it she holds a value of her own for, each
+ * to be seen and taken away.
+ */
 export function CharacterModelPage({
   ctx,
   characterId,
@@ -671,45 +657,86 @@ export function CharacterModelPage({
   readonly ctx: Ctx;
   readonly characterId: string;
 }) {
+  const {settings, session} = ctx;
   const character = characterOf(ctx, characterId);
-  const view = viewOf(ctx.settings, characterTarget(characterId));
+  const target = characterTarget(characterId);
+  const view = viewOf(settings, target);
+  const row = hostRow(target, 'roleModelProvider');
+  const field = view === undefined ? undefined : fieldAt(view, row.place);
 
-  if (character === undefined || view === undefined) {
+  if (character === undefined || field === undefined) {
     return null;
   }
 
-  const rows = modelFields.flatMap(name => {
-    const row = hostRow(characterId, name);
-    const field = fieldAt(view, row.place);
-
-    return field !== undefined &&
-      (name === 'nvidiaModel' ||
-        field.authored.configured ||
-        problemsAt(ctx, row).length > 0)
-      ? [{row, field}]
-      : [];
-  });
+  const name = character.displayName;
+  const {chosen, options, model} = serviceChoice(settings, target);
+  const everyone = serviceChoice(settings, home).chosen;
 
   return (
     <>
-      <SubHeader
-        back={character.displayName}
-        onBack={() => {
-          ctx.session.goTo({kind: 'character', characterId});
-        }}
-        title={`AI Model for ${character.displayName}`}
-      />
+      <div className="sub-header">
+        <BackButton
+          label={name}
+          onClick={() => {
+            session.goTo({kind: 'character', characterId});
+          }}
+        />
+        <PageHeader
+          art={<Tile icon="sparkle" tint="indigo" size="page" />}
+          title="AI Model"
+          subtitle={`What ${name} thinks with.`}
+        />
+      </div>
       <Group
-        footer={`Only for ${character.displayName}. Empty uses your settings.`}
+        footer={
+          chosen === undefined
+            ? `${name} thinks with what every character does. Choose a service here to give her one of her own.`
+            : `Only for ${name}. Everyone else keeps the one on the AI Model page.`
+        }
       >
-        {rows.map(({row, field}) =>
-          field.name === 'roleModelProvider' ? (
-            <ServiceRow key={field.name} ctx={ctx} row={row} field={field} />
-          ) : (
-            <FieldRow key={field.name} ctx={ctx} row={row} field={field} />
-          ),
+        <ServiceRow
+          ctx={ctx}
+          row={row}
+          field={field}
+          value={chosen?.id}
+          options={options}
+          none={
+            everyone === undefined
+              ? 'Same as Everyone'
+              : `Same as Everyone (${everyone.name})`
+          }
+          onChoose={value => {
+            if (value !== undefined) {
+              void session.choose(row, value);
+
+              return;
+            }
+
+            for (const own of ownModelRows(settings, characterId)) {
+              void session.choose(own, undefined);
+            }
+          }}
+        />
+        {chosen === undefined || model === undefined ? null : (
+          <FieldRow ctx={ctx} row={hostRow(target, model.name)} field={model} />
         )}
       </Group>
+      {ownModelExtras(settings, characterId).map(held => (
+        <Group
+          key={held.title}
+          title={held.title}
+          footer={`Only for ${name}. Empty uses everyone's.`}
+        >
+          {held.rows.map(own => (
+            <FieldRow
+              key={own.field.name}
+              ctx={ctx}
+              row={own.row}
+              field={own.field}
+            />
+          ))}
+        </Group>
+      ))}
     </>
   );
 }

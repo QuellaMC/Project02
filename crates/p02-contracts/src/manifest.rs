@@ -105,8 +105,13 @@ pub enum ManifestError {
     )]
     AllowedValuesMismatch(Identifier),
     #[error(
-        "plugin config field \"{0}\" choices must give words to each of its allowedValues, and \
-         to nothing else"
+        "plugin config field \"{0}\" suggestedValues must name one value at least, each a value \
+         of its valueType, on a field that is no secret and lists no allowedValues"
+    )]
+    SuggestedValuesMismatch(Identifier),
+    #[error(
+        "plugin config field \"{0}\" choices must give words to each of its allowedValues or \
+         suggestedValues, and to nothing else"
     )]
     ChoicesMismatch(Identifier),
     #[error(
@@ -442,6 +447,7 @@ fn config_section(fields: &Fields<'_>) -> Result<ConfigSection, ManifestError> {
                 "valueType",
                 "defaultValue",
                 "allowedValues",
+                "suggestedValues",
                 "choices",
                 "agentMutable",
                 "redactionLabels",
@@ -649,6 +655,10 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
         .get("allowedValues")
         .map(|_| fields.strings("allowedValues"))
         .transpose()?;
+    let suggested_values = fields
+        .get("suggestedValues")
+        .map(|_| fields.strings("suggestedValues"))
+        .transpose()?;
     let choices = fields
         .get("choices")
         .map(|_| fields.words("choices"))
@@ -670,6 +680,7 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
         value_type,
         default_value,
         allowed_values,
+        suggested_values,
         choices,
         agent_mutable,
         redaction_labels,
@@ -677,30 +688,46 @@ fn config_field(fields: &Fields<'_>) -> Result<ConfigField, ManifestError> {
 }
 
 /// Every value a manifest names for a field is one the field accepts: each
-/// allowed value, of which there is one at least, and the default, which is
-/// what the field takes wherever nothing sets it. Words for the allowed
-/// values are for each of them and nothing else. A credential is never a
-/// default a manifest decides, and a secret's type is one that holds a
+/// allowed value, of which there is one at least, each suggested value, of
+/// which there is one at least on a field that lists no allowed values,
+/// and the default, which is what the field takes wherever nothing sets
+/// it. Words for the allowed or suggested values are for each of them and
+/// nothing else. A credential is never a value a manifest decides, a
+/// default or a suggestion, and a secret's type is one that holds a
 /// string, since a credential is one.
 fn check_values(field: &ConfigField) -> Result<(), ManifestError> {
+    let accepted = |values: &[String]| {
+        !values.is_empty()
+            && values
+                .iter()
+                .all(|value| field.accepts(&Value::from(value.as_str())))
+    };
+
     if field.secret && !field.of_its_type(&Value::from("")) {
         return Err(ManifestError::SecretNotText(field.name.clone()));
     }
 
     if let Some(allowed) = &field.allowed_values
-        && (allowed.is_empty()
-            || !allowed
-                .iter()
-                .all(|value| field.accepts(&Value::from(value.as_str()))))
+        && !accepted(allowed)
     {
         return Err(ManifestError::AllowedValuesMismatch(field.name.clone()));
     }
 
+    if let Some(suggested) = &field.suggested_values
+        && (field.secret || field.allowed_values.is_some() || !accepted(suggested))
+    {
+        return Err(ManifestError::SuggestedValuesMismatch(field.name.clone()));
+    }
+
     if let Some(choices) = &field.choices
-        && !field.allowed_values.as_ref().is_some_and(|allowed| {
-            allowed.iter().all(|value| choices.contains_key(value))
-                && choices.keys().all(|value| allowed.contains(value))
-        })
+        && !field
+            .allowed_values
+            .as_ref()
+            .or(field.suggested_values.as_ref())
+            .is_some_and(|worded| {
+                worded.iter().all(|value| choices.contains_key(value))
+                    && choices.keys().all(|value| worded.contains(value))
+            })
     {
         return Err(ManifestError::ChoicesMismatch(field.name.clone()));
     }
@@ -1083,6 +1110,24 @@ mod tests {
                 ManifestError::AllowedValuesMismatch(name("tone")),
             ),
             (
+                |m| m["config"]["fields"][0]["suggestedValues"] = json!(["warm"]),
+                ManifestError::SuggestedValuesMismatch(name("tone")),
+            ),
+            (
+                |m| m["config"]["fields"][1]["suggestedValues"] = json!(["sk-shared"]),
+                ManifestError::SuggestedValuesMismatch(name("apiKey")),
+            ),
+            (
+                |m| {
+                    let tone = m["config"]["fields"][0].as_object_mut().unwrap();
+
+                    tone.remove("allowedValues");
+                    tone.insert("valueType".to_owned(), json!("number"));
+                    tone.insert("suggestedValues".to_owned(), json!(["warm"]));
+                },
+                ManifestError::SuggestedValuesMismatch(name("tone")),
+            ),
+            (
                 |m| m["config"]["fields"][0]["choices"] = json!({"warm": "Warm"}),
                 ManifestError::ChoicesMismatch(name("tone")),
             ),
@@ -1277,6 +1322,8 @@ mod tests {
                 "name": "signoff",
                 "description": "A signoff.",
                 "secret": false,
+                "suggestedValues": ["yours", "love"],
+                "choices": {"yours": "Yours truly", "love": "With love"},
                 "redactionLabels": [],
             }));
         manifest["config"]["layout"] = json!([{
@@ -1309,6 +1356,14 @@ mod tests {
         assert_eq!(
             tone.choices().map(|choices| choices["formal"].as_str()),
             Some("Formal")
+        );
+        assert_eq!(
+            accepted
+                .config()
+                .field("signoff")
+                .unwrap()
+                .suggested_values(),
+            Some(["yours".to_owned(), "love".to_owned()].as_slice())
         );
         assert_eq!(
             accepted.config().field("apiKey").unwrap().placeholder(),

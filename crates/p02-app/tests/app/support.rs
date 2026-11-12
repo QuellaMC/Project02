@@ -134,6 +134,7 @@ impl World {
                 plugins: listed.chain([gated]).collect(),
                 app_catalog: nowhere(),
                 app_internet: Some(nowhere()),
+                openai_api: Some(nowhere()),
             },
         )
         .await
@@ -141,8 +142,8 @@ impl World {
     }
 }
 
-/// Where nothing serves: no test of these reads the App Store or reaches
-/// the internet.
+/// Where nothing serves: no test of these reads the App Store, reaches the
+/// internet, or asks the OpenAI API.
 fn nowhere() -> BaseUrl {
     BaseUrl::parse("http://127.0.0.1:9").unwrap()
 }

@@ -151,6 +151,9 @@ pub struct DaemonSettings {
     /// The stand-in that takes every request of her apps, under the test
     /// switch; none, and each goes where it says.
     pub app_internet: Option<BaseUrl>,
+    /// Where the OpenAI API is, under the test switch; none, and it is at
+    /// its own address.
+    pub openai_api: Option<BaseUrl>,
 }
 
 /// A line a client delivers into a conversation.
@@ -174,8 +177,9 @@ pub struct OpenDaemonError {
 
 /// What every actor of the daemon reads and nothing changes: the home, the
 /// settings' sections, the plugins, the waits, the model that stands in
-/// for every character's, the App Store's catalog her phone reads, the
-/// internet her apps reach, and the events.
+/// for every character's, where the OpenAI API is when the binary names a
+/// stand-in for it, the App Store's catalog her phone reads, the internet
+/// her apps reach, and the events.
 #[derive(Debug)]
 pub(crate) struct World {
     pub(crate) home: Home,
@@ -183,6 +187,7 @@ pub(crate) struct World {
     pub(crate) plugins: Vec<Plugin>,
     pub(crate) durations: Durations,
     pub(crate) test_provider: Option<Arc<dyn RoleModelAdapter>>,
+    pub(crate) openai_api: Option<BaseUrl>,
     pub(crate) catalog: Arc<AppCatalog>,
     pub(crate) internet: Arc<AppInternet>,
     pub(crate) events: Arc<Events>,
@@ -356,6 +361,7 @@ impl Daemon {
             plugins,
             app_catalog,
             app_internet,
+            openai_api,
         } = settings;
 
         Ok(Self {
@@ -370,6 +376,7 @@ impl Daemon {
                     plugins,
                     durations,
                     test_provider,
+                    openai_api,
                     catalog: Arc::new(AppCatalog::new(app_catalog)),
                     internet: Arc::new(AppInternet::new(app_internet)),
                     events: Arc::default(),

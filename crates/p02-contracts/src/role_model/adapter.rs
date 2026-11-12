@@ -114,6 +114,7 @@ pub struct ReplyDelta {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ProviderName {
+    Openai,
     Nvidia,
 }
 

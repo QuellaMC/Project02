@@ -136,10 +136,88 @@ fn a_view_draws_only_what_its_target_may_set_in_the_cards_and_words_its_declarat
     assert_eq!(host_field(&home_view, "userDisplayName")["label"], "Name");
 }
 
+/// A page lists the services from the view alone: each one's name, what it
+/// is and where its key comes from, its own fields and its model's among
+/// them, connected while a credential of it is in effect for the target, a
+/// server of the person's own among NVIDIA's; and the OpenAI model offers
+/// its models, the default in effect until one is chosen.
+#[test]
+fn a_view_lists_every_service_each_connected_by_a_credential_in_effect_for_its_target() {
+    let world = World::new();
+
+    world
+        .write_home(&document(json!({"project02": {"openaiApiKey": "sk-home"}})))
+        .write_overlay(
+            "mira",
+            &document(json!({"project02": {"nvidiaBaseUrl": "http://localhost:1234/v1"}})),
+        );
+
+    let home_view = world.view(&home());
+    let connected = |view: &Value| -> Vec<Value> {
+        view["services"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|service| json!([service["id"], service["connected"]]))
+            .collect()
+    };
+    let model = host_field(&home_view, "openaiModel");
+
+    assert_eq!(
+        home_view["services"],
+        json!([
+            {
+                "id": "openai",
+                "name": "OpenAI API",
+                "summary": "Pay as you go, with an API key",
+                "keyFrom": "Get one at platform.openai.com.",
+                "connected": true,
+                "model": "openaiModel",
+                "fields": ["openaiApiKey", "openaiModel"],
+            },
+            {
+                "id": "nvidia",
+                "name": "NVIDIA",
+                "summary": "An API key, or a server of your own",
+                "keyFrom": "Get one at build.nvidia.com.",
+                "connected": false,
+                "model": "nvidiaModel",
+                "fields": ["nvidiaApiKey", "nvidiaModel", "nvidiaBaseUrl"],
+            },
+        ])
+    );
+    assert_eq!(
+        connected(&world.view(&of("mira"))),
+        [json!(["openai", true]), json!(["nvidia", true])]
+    );
+    assert_eq!(
+        json!([
+            model["suggestedValues"],
+            model["choices"],
+            model["effective"]["source"],
+            model["effective"]["value"],
+            host_field(&home_view, "roleModelProvider")["allowedValues"],
+        ]),
+        json!([
+            ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna"],
+            {
+                "gpt-6-astra": "GPT-6 Astra",
+                "gpt-6.1-sol": "GPT-6.1 Sol",
+                "gpt-6.1-terra": "GPT-6.1 Terra",
+                "gpt-6-luna": "GPT-6 Luna",
+            },
+            "default",
+            "gpt-6-luna",
+            ["openai", "nvidia"],
+        ])
+    );
+}
+
 #[test]
 fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
     let secrets = [
         "nvapi-home-secret",
+        "sk-home-secret",
         "mem0-key-secret",
         "123456:management-secret",
         "111111:misplaced-secret",
@@ -153,7 +231,7 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
 
     world
         .write_home(&document(json!({
-            "project02": {"nvidiaApiKey": "nvapi-home-secret"},
+            "project02": {"nvidiaApiKey": "nvapi-home-secret", "openaiApiKey": "sk-home-secret"},
             "plugins": {"mem0": {"config": {"apiKey": "mem0-key-secret"}}},
             "connectors": {"telegram": {"config": {
                 "managementBotToken": "123456:management-secret",
@@ -179,10 +257,14 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
     let report = serde_json::to_value(world.resolve(&of("mira")).report(&world.home)).unwrap();
     let telegram = section(&home_view, "connectors", "telegram").unwrap();
 
-    assert_eq!(
-        host_field(&home_view, "nvidiaApiKey")["effective"]["value"],
-        "[redacted]"
-    );
+    for key in ["nvidiaApiKey", "openaiApiKey"] {
+        assert_eq!(
+            host_field(&home_view, key)["effective"]["value"],
+            "[redacted]"
+        );
+        assert_eq!(report["runtimeConfig"]["project02"][key], "[redacted]");
+    }
+
     assert_eq!(
         field(section(&home_view, "plugins", "mem0").unwrap(), "apiKey").unwrap()["authored"]["value"],
         "[redacted]"
@@ -209,10 +291,6 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
         .unwrap()["authored"]["value"],
         "[redacted]"
     );
-    assert_eq!(
-        report["runtimeConfig"]["project02"]["nvidiaApiKey"],
-        "[redacted]"
-    );
 
     let change: ConfigChange = serde_json::from_value(json!({
         "target": {"scope": "global"},
@@ -225,6 +303,7 @@ fn no_secret_reaches_a_view_a_report_or_a_debug_rendering_but_as_redacted() {
         mira_view.to_string(),
         report.to_string(),
         format!("{:?}", world.resolve(&of("mira"))),
+        format!("{:?}", world.resolve(&of("mira")).settings()),
         format!(
             "{:?}",
             connector_config_view(&world.home, &world.sections, &world.discovery(), "telegram")
@@ -345,7 +424,12 @@ fn inspect_reports_where_the_settings_come_from_the_host_values_and_each_connect
     let world = World::new();
 
     world.write_home(&document(json!({
-        "project02": {"nvidiaApiKey": "nvapi-home", "contextWindowTokens": 4096},
+        "project02": {
+            "roleModelProvider": "openai",
+            "openaiApiKey": "sk-home",
+            "nvidiaApiKey": "nvapi-home",
+            "contextWindowTokens": 4096,
+        },
         "connectors": {"telegram": {"config": {
             "managementBotToken": "123456:home",
             "botToken": "654321:misplaced",
@@ -368,6 +452,9 @@ fn inspect_reports_where_the_settings_come_from_the_host_values_and_each_connect
             "character": "mira",
             "enabled": true,
             "userDisplayName": "You",
+            "roleModelProvider": "openai",
+            "openaiApiKey": "[redacted]",
+            "openaiModel": "gpt-6-luna",
             "nvidiaApiKey": "[redacted]",
             "contextWindowTokens": 4096,
             "heartbeatMinutes": 30,

@@ -22,6 +22,7 @@ import {
   choiceWords,
   keyPlaceholder,
   valueNow,
+  welcomeKey,
   welcomeReady,
 } from './settings-model.ts';
 import {fieldAt, home, ownText, rowKey, viewOf, type Row} from './settings.ts';
@@ -35,7 +36,6 @@ const serviceRow: Row = {
   target: home,
   place: {kind: 'host', name: 'roleModelProvider'},
 };
-const keyRow: Row = {target: home, place: {kind: 'host', name: 'nvidiaApiKey'}};
 
 export function Welcome({
   state,
@@ -220,7 +220,7 @@ function ModelStep({
   const view = viewOf(settings, home);
   const service =
     view === undefined ? undefined : fieldAt(view, serviceRow.place);
-  const key = view === undefined ? undefined : fieldAt(view, keyRow.place);
+  const key = welcomeKey(settings);
   const chosen =
     service === undefined ? undefined : valueNow(settings, serviceRow, service);
   const saved = settings.saved;
@@ -252,27 +252,27 @@ function ModelStep({
           <Problems problems={problemOf(settings, serviceRow)} />
         </div>
       )}
-      {chosen === undefined || key === undefined ? null : (
+      {key === undefined ? null : (
         <div className="welcome-field">
           <label htmlFor="welcome-key" className="welcome-label">
             API Key
           </label>
           <KeyBox
             id="welcome-key"
-            text={settings.edits.get(rowKey(keyRow)) ?? ''}
-            stored={key.authored.configured}
-            placeholder={focused => keyPlaceholder(key, focused)}
-            {...(saved?.key === rowKey(keyRow) ? {check: saved.ticket} : {})}
+            text={settings.edits.get(rowKey(key.row)) ?? ''}
+            stored={key.field.authored.configured}
+            placeholder={focused => keyPlaceholder(key.field, focused)}
+            {...(saved?.key === rowKey(key.row) ? {check: saved.ticket} : {})}
             onChange={text => {
-              session.edit(keyRow, text);
+              session.edit(key.row, text);
             }}
             onCommit={() => {
-              void session.save(keyRow);
+              void session.save(key.row);
             }}
           />
-          <Problems problems={problemOf(settings, keyRow)} />
+          <Problems problems={problemOf(settings, key.row)} />
           <p className="welcome-hint">
-            Paste it and press Return. Get one at build.nvidia.com.
+            Paste it and press Return. {key.service.keyFrom}
           </p>
         </div>
       )}

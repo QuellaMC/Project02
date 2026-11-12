@@ -5,6 +5,7 @@
 )]
 
 mod nvidia;
+mod responses;
 mod rounds;
 mod stub;
 mod support;

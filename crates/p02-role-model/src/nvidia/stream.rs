@@ -11,17 +11,8 @@ use p02_contracts::TokenUsage;
 use p02_shared::SseFrameSplitter;
 use serde_json::{Map, Value};
 
-use super::FailureCode;
-use super::transport::provider_error;
-
-/// A piece of a named tool call's arguments: when the name first arrives,
-/// everything so far, possibly nothing; after that, each piece.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) struct Fragment<'a> {
-    pub(super) index: u64,
-    pub(super) name: &'a str,
-    pub(super) text: &'a str,
-}
+use crate::draft::Fragment;
+use crate::transport::{FailureCode, StreamError, malformed, provider_error};
 
 /// A tool call as its pieces left it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -37,13 +28,6 @@ pub(super) struct Completion {
     pub(super) finish_reason: Option<String>,
     pub(super) calls: Vec<StreamedCall>,
     pub(super) usage: Option<TokenUsage>,
-}
-
-/// A chunk that is no part of a completion, or the provider's error.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub(super) struct StreamError {
-    pub(super) code: FailureCode,
-    pub(super) message: String,
 }
 
 /// Whether the stream said all it has to say.
@@ -97,9 +81,9 @@ impl StreamFold {
         heard: &mut impl FnMut(Fragment<'_>),
     ) -> Result<(), StreamError> {
         let chunk = serde_json::from_str::<Value>(data)
-            .map_err(|_| malformed("NVIDIA stream chunk must be JSON."))?;
+            .map_err(|_| malformed("stream chunk must be JSON."))?;
         let Value::Object(chunk) = chunk else {
-            return Err(malformed("NVIDIA stream chunk must be an object."));
+            return Err(malformed("stream chunk must be an object."));
         };
 
         // A 200 can still carry the provider's error, as a chunk of its own.
@@ -115,15 +99,13 @@ impl StreamFold {
         }
 
         let Some(Value::Array(choices)) = chunk.get("choices") else {
-            return Err(malformed("NVIDIA stream chunk must carry choices."));
+            return Err(malformed("stream chunk must carry choices."));
         };
         let Some(choice) = choices.first() else {
             return Ok(());
         };
         let Value::Object(choice) = choice else {
-            return Err(malformed(
-                "NVIDIA stream chunk choices[0] must be an object.",
-            ));
+            return Err(malformed("stream chunk choices[0] must be an object."));
         };
 
         if let Some(Value::String(reason)) = choice.get("finish_reason") {
@@ -133,7 +115,7 @@ impl StreamFold {
         match choice.get("delta") {
             None | Some(Value::Null) => Ok(()),
             Some(Value::Object(delta)) => self.take_delta(delta, heard),
-            Some(_) => Err(malformed("NVIDIA stream chunk delta must be an object.")),
+            Some(_) => Err(malformed("stream chunk delta must be an object.")),
         }
     }
 
@@ -153,9 +135,7 @@ impl StreamFold {
             Some(Value::Array(pieces)) => pieces
                 .iter()
                 .try_for_each(|piece| self.take_call(piece, heard)),
-            Some(_) => Err(malformed(
-                "NVIDIA stream chunk tool_calls must be an array.",
-            )),
+            Some(_) => Err(malformed("stream chunk tool_calls must be an array.")),
         }
     }
 
@@ -166,7 +146,7 @@ impl StreamFold {
     ) -> Result<(), StreamError> {
         let Some(index) = piece.get("index").and_then(Value::as_u64) else {
             return Err(malformed(
-                "NVIDIA stream chunk tool_calls[] must carry a numeric index.",
+                "stream chunk tool_calls[] must carry a numeric index.",
             ));
         };
         let call = self.calls.entry(index).or_default();
@@ -216,13 +196,6 @@ fn token_usage(usage: &Value) -> Option<TokenUsage> {
         prompt_tokens: usage.get("prompt_tokens")?.as_u64()?,
         completion_tokens: usage.get("completion_tokens")?.as_u64()?,
     })
-}
-
-fn malformed(message: &str) -> StreamError {
-    StreamError {
-        code: FailureCode::MalformedResponse,
-        message: message.to_owned(),
-    }
 }
 
 #[cfg(test)]
@@ -345,52 +318,52 @@ mod tests {
             (
                 "{oops",
                 FailureCode::MalformedResponse,
-                "NVIDIA stream chunk must be JSON.",
+                "stream chunk must be JSON.",
             ),
             (
                 "[]",
                 FailureCode::MalformedResponse,
-                "NVIDIA stream chunk must be an object.",
+                "stream chunk must be an object.",
             ),
             (
                 "{\"choices\":\"nope\"}",
                 FailureCode::MalformedResponse,
-                "NVIDIA stream chunk must carry choices.",
+                "stream chunk must carry choices.",
             ),
             (
                 "{\"object\":\"chat.completion.chunk\"}",
                 FailureCode::MalformedResponse,
-                "NVIDIA stream chunk must carry choices.",
+                "stream chunk must carry choices.",
             ),
             (
                 "{\"choices\":[7]}",
                 FailureCode::MalformedResponse,
-                "NVIDIA stream chunk choices[0] must be an object.",
+                "stream chunk choices[0] must be an object.",
             ),
             (
                 "{\"choices\":[{\"delta\":\"x\"}]}",
                 FailureCode::MalformedResponse,
-                "NVIDIA stream chunk delta must be an object.",
+                "stream chunk delta must be an object.",
             ),
             (
                 "{\"choices\":[{\"delta\":{\"tool_calls\":{}}}]}",
                 FailureCode::MalformedResponse,
-                "NVIDIA stream chunk tool_calls must be an array.",
+                "stream chunk tool_calls must be an array.",
             ),
             (
                 "{\"choices\":[{\"delta\":{\"tool_calls\":[{}]}}]}",
                 FailureCode::MalformedResponse,
-                "NVIDIA stream chunk tool_calls[] must carry a numeric index.",
+                "stream chunk tool_calls[] must carry a numeric index.",
             ),
             (
                 "{\"error\":{\"message\":\"model overloaded\",\"type\":\"server\"}}",
                 FailureCode::ProviderError,
-                "NVIDIA provider error: model overloaded",
+                "provider error: model overloaded",
             ),
             (
                 "{\"message\":\"slow down\",\"choices\":[]}",
                 FailureCode::ProviderError,
-                "NVIDIA provider error: slow down",
+                "provider error: slow down",
             ),
         ] {
             let frame = format!("data: {data}\n\n");

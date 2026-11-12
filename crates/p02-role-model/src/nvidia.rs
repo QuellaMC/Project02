@@ -2,35 +2,31 @@
 //! at the server the base URL setting names, streamed and read back into
 //! the model's answer: its calls and its text.
 
-mod draft;
 mod stream;
-mod transport;
 
 use std::fmt;
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use async_trait::async_trait;
 use p02_contracts::{
     ChatCompletionTool, ChatFunctionCall, ChatMessage, ChatToolCall, ChatToolFunction, Invocation,
-    ModelOutput, ProviderAnswer, ProviderFailure, ProviderName, RoleModelAdapter, TextCompletion,
+    ModelOutput, ProviderAnswer, ProviderName, RoleModelAdapter, TextCompletion,
     TextCompletionRequest, WrittenCall, scrub_reasoning_blocks,
 };
-use p02_shared::{BaseUrl, credential_header, http_client};
+use p02_shared::BaseUrl;
 use reqwest::Url;
-use reqwest::header::HeaderValue;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::draft::ReplyDrafts;
 use crate::prompt::{ToolNameMapping, json_text, provider_name, provider_names, runtime_name};
-use draft::ReplyDrafts;
+use crate::transport::{
+    self, Access, Answer, BuildAdapterError, Client, Failure, FailureCode, Fault, Silence, said,
+};
 use stream::{Completion, Flow, StreamFold};
-use transport::{Answer, Failure, Silence};
 
-/// How long the provider may say nothing, before the headers or between
-/// two chunks, unless the bound is shortened.
-const PROVIDER_SILENCE: Duration = Duration::from_secs(30);
-
+/// What the person and a failure's words call the service.
+const NVIDIA: &str = "NVIDIA";
 const CLOUD: &str = "https://integrate.api.nvidia.com/v1";
 const DEFAULT_MODEL: &str = "nvidia/nemotron-3-nano-30b-a3b";
 const MAX_TOKENS: u32 = 16_384;
@@ -61,94 +57,31 @@ impl fmt::Debug for NvidiaSettings {
     }
 }
 
-/// Why an adapter cannot be built from its settings, in the words a
-/// person reads where the settings page asks for them.
-#[derive(Debug, thiserror::Error)]
-pub enum BuildNvidiaAdapterError {
-    /// NVIDIA's cloud answers nothing without a key, and no server of the
-    /// person's own is named, which may ask for none.
-    #[error("add your NVIDIA API key")]
-    MissingKey,
-    #[error("paste your NVIDIA API key again: it holds characters that cannot be sent")]
-    Credential,
-}
-
-/// How a request proves who sends it.
-pub(crate) enum Access {
-    /// The key travels as a bearer token; no failure ever repeats it.
-    Key { header: HeaderValue, secret: String },
-    /// A server of one's own, which may ask for no key.
-    Open,
-}
-
-impl fmt::Debug for Access {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Key { .. } => "Key([redacted])",
-            Self::Open => "Open",
-        })
-    }
-}
-
-impl Access {
-    /// `message` without the key, wherever a provider or a transport
-    /// repeated it.
-    fn redact(&self, message: String) -> String {
-        match self {
-            Self::Key { secret, .. } => message.replace(secret.as_str(), "[redacted]"),
-            Self::Open => message,
-        }
-    }
-}
-
-/// How a round failed, as its record names it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum FailureCode {
-    HttpError,
-    MalformedResponse,
-    ProviderError,
-    RequestTimeout,
-}
-
-impl FailureCode {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::HttpError => "http_error",
-            Self::MalformedResponse => "malformed_response",
-            Self::ProviderError => "provider_error",
-            Self::RequestTimeout => "request_timeout",
-        }
-    }
-}
-
 /// The NVIDIA provider for one character.
 #[derive(Debug)]
 pub(crate) struct NvidiaAdapter {
     endpoint: Url,
     model: String,
     access: Access,
-    /// Made at the first request, not with the adapter: a character's
-    /// settings are judged by building one whenever they are read, and a
-    /// client reads the system's certificates.
-    http: OnceLock<reqwest::Client>,
+    http: Client,
     silence: Duration,
 }
 
 impl NvidiaAdapter {
-    /// An adapter that bounds the provider's silence at
-    /// [`PROVIDER_SILENCE`].
-    pub(crate) fn new(settings: &NvidiaSettings) -> Result<Self, BuildNvidiaAdapterError> {
+    /// An adapter that bounds the provider's silence at `silence`.
+    pub(crate) fn new(
+        settings: &NvidiaSettings,
+        silence: Duration,
+    ) -> Result<Self, BuildAdapterError> {
         let base = settings.base_url.clone().unwrap_or_else(|| {
             BaseUrl::parse(CLOUD).expect("NVIDIA's cloud address is a base URL")
         });
+        // NVIDIA's cloud answers nothing without a key; a server of the
+        // person's own may ask for none.
         let access = match settings.api_key.as_deref().filter(|key| !key.is_empty()) {
-            Some(key) => Access::Key {
-                header: credential_header(&format!("Bearer {key}"))
-                    .map_err(|_| BuildNvidiaAdapterError::Credential)?,
-                secret: key.to_owned(),
-            },
+            Some(key) => Access::bearer(NVIDIA, key)?,
             None if settings.base_url.is_some() => Access::Open,
-            None => return Err(BuildNvidiaAdapterError::MissingKey),
+            None => return Err(BuildAdapterError::MissingKey(NVIDIA)),
         };
 
         Ok(Self {
@@ -158,35 +91,8 @@ impl NvidiaAdapter {
                 .clone()
                 .unwrap_or_else(|| DEFAULT_MODEL.to_owned()),
             access,
-            http: OnceLock::new(),
-            silence: PROVIDER_SILENCE,
-        })
-    }
-
-    /// The adapter with the provider's silence bounded at `silence`, as a
-    /// test harness shortens it.
-    pub(crate) fn with_silence(mut self, silence: Duration) -> Self {
-        self.silence = silence;
-        self
-    }
-
-    /// The client its requests go by, made at the first; one that cannot
-    /// be made fails the request as a connection that breaks does.
-    fn http(&self) -> Result<&reqwest::Client, Failure> {
-        if let Some(http) = self.http.get() {
-            return Ok(http);
-        }
-
-        let made = http_client().build().map_err(Failure::Broken)?;
-
-        Ok(self.http.get_or_init(|| made))
-    }
-
-    fn failed(&self, fault: Fault) -> ProviderAnswer {
-        ProviderAnswer::Failed(ProviderFailure {
-            code: fault.code.as_str().to_owned(),
-            message: self.access.redact(fault.message),
-            status: fault.status,
+            http: Client::default(),
+            silence,
         })
     }
 
@@ -196,7 +102,7 @@ impl NvidiaAdapter {
         request: &TurnRequest,
         drafts: &mut ReplyDrafts<'_>,
     ) -> Result<ProviderAnswer, Fault> {
-        let http = self.http()?;
+        let http = self.http.get()?;
         let mut silence = Silence::start(self.silence);
         let mut response = match transport::send(
             http,
@@ -239,7 +145,7 @@ impl NvidiaAdapter {
 
     /// A plain completion's text, or why there is none.
     async fn completion(&self, request: &TextCompletionRequest) -> Result<String, String> {
-        let http = self.http().map_err(Failure::message)?;
+        let http = self.http.get().map_err(Failure::message)?;
         let mut silence = Silence::start(self.silence);
         let body = completion_request(&self.model, request);
         let response =
@@ -258,29 +164,6 @@ impl NvidiaAdapter {
     }
 }
 
-/// How a round ended without an answer.
-struct Fault {
-    code: FailureCode,
-    message: String,
-    /// The status that answered, when one did.
-    status: Option<u16>,
-}
-
-impl From<Failure> for Fault {
-    fn from(failure: Failure) -> Self {
-        let code = match failure {
-            Failure::TimedOut(_) => FailureCode::RequestTimeout,
-            Failure::Broken(_) => FailureCode::ProviderError,
-        };
-
-        Self {
-            code,
-            message: failure.message(),
-            status: None,
-        }
-    }
-}
-
 #[async_trait]
 impl RoleModelAdapter for NvidiaAdapter {
     async fn invoke(&self, invocation: &Invocation<'_>) -> ProviderAnswer {
@@ -292,7 +175,7 @@ impl RoleModelAdapter for NvidiaAdapter {
                 drafts.finish();
                 answer
             }
-            Err(fault) => self.failed(fault),
+            Err(fault) => fault.answer(NVIDIA, &self.access),
         }
     }
 
@@ -304,7 +187,7 @@ impl RoleModelAdapter for NvidiaAdapter {
                 model: Some(self.model.clone()),
             },
             Err(reason) => TextCompletion::Failed {
-                reason: self.access.redact(reason),
+                reason: said(NVIDIA, &self.access, &reason),
             },
         }
     }
@@ -451,7 +334,7 @@ pub(crate) fn completion_request(model: &str, request: &TextCompletionRequest) -
 /// The text of a completion that ended whole: a recollection cut off at
 /// the output limit would lose its newest part, which matters most.
 fn completion_text(body: &Value) -> Result<String, String> {
-    let no_text = || "NVIDIA completion returned no text.".to_owned();
+    let no_text = || "completion returned no text.".to_owned();
     let choice = body
         .get("choices")
         .and_then(|choices| choices.get(0))
@@ -472,7 +355,7 @@ fn completion_text(body: &Value) -> Result<String, String> {
             };
 
             return Err(format!(
-                "NVIDIA completion ended with finish_reason \"{reason}\" instead of finishing."
+                "completion ended with finish_reason \"{reason}\" instead of finishing."
             ));
         }
     }
@@ -497,14 +380,14 @@ fn answer(
         None => {
             return Err((
                 FailureCode::MalformedResponse,
-                "NVIDIA response choice.finish_reason is required.".to_owned(),
+                "response choice.finish_reason is required.".to_owned(),
             ));
         }
         Some(reason) if TERMINAL_FINISH_REASONS.contains(&reason.as_str()) => reason,
         Some(reason) => {
             return Err((
                 FailureCode::ProviderError,
-                format!("NVIDIA response finish_reason \"{reason}\" is not terminal."),
+                format!("response finish_reason \"{reason}\" is not terminal."),
             ));
         }
     };
@@ -516,10 +399,7 @@ fn answer(
             let name = call.name.ok_or_else(|| {
                 (
                     FailureCode::MalformedResponse,
-                    format!(
-                        "NVIDIA response message.tool_calls[{index}].function.name must be a \
-                         string."
-                    ),
+                    format!("response message.tool_calls[{index}].function.name must be a string."),
                 )
             })?;
 

@@ -3,7 +3,7 @@
  * takes, and a section's layout as its cards: what is typed or clicked
  * goes to the session, and what the daemon said of the field shows at it.
  */
-import type {ReactNode} from 'react';
+import {useState, type ReactNode} from 'react';
 
 import type {ConfigTarget} from '@project02/wire/contract';
 import type {Session} from './session.ts';
@@ -18,7 +18,6 @@ import {
   SelectBox,
   Switch,
   TextBox,
-  type Option,
 } from './settings-controls.tsx';
 import {
   cardsShown,
@@ -27,8 +26,10 @@ import {
   keyPlaceholder,
   labelOf,
   placeholderOf,
+  suggestedChoices,
   valueNow,
   type Findings,
+  type Option,
   type ShownCard,
 } from './settings-model.ts';
 import {
@@ -80,9 +81,10 @@ function optionsOf(field: Field): readonly Option[] {
 
 /**
  * One field as a row, by its control: a box with its label, a switch, a
- * segmented choice beside its label, or a row of pills under it. `leading`
- * goes before the label; `placeholder` says what an empty box shows when
- * the field's own hint is not the right one.
+ * segmented choice beside its label, a row of pills under it, or a select
+ * of the values it suggests. `leading` goes before the label;
+ * `placeholder` says what an empty box shows when the field's own hint is
+ * not the right one.
  */
 export function FieldRow({
   ctx,
@@ -188,6 +190,8 @@ export function FieldRow({
           />
         </Cell>
       );
+    case 'select':
+      return <SuggestedRow ctx={ctx} row={row} field={field} />;
     case 'text':
       return (
         <Cell kind="field" problems={problems}>
@@ -217,8 +221,13 @@ function checkProp(check: number | undefined): {readonly check?: number} {
   return check === undefined ? {} : {check};
 }
 
-/** The service a model runs on: a select whose first entry chooses none, saved at the choice. */
-export function ServiceRow({
+/**
+ * A field that suggests values while it takes any other: a select of them,
+ * saved at the choice, whose Other… turns the row into a box to type
+ * another into, saved as any box is; the box gives way to the select once
+ * it is left, the value typed then among the choices.
+ */
+function SuggestedRow({
   ctx,
   row,
   field,
@@ -226,6 +235,75 @@ export function ServiceRow({
   readonly ctx: Ctx;
   readonly row: Row;
   readonly field: Field;
+}) {
+  const {settings, session} = ctx;
+  const [typing, setTyping] = useState(false);
+  const id = domId(row);
+  const value = valueNow(settings, row, field);
+
+  return (
+    <Cell kind="field" problems={problemsAt(ctx, row)}>
+      <label htmlFor={id} className="field-label">
+        {labelOf(field)}
+      </label>
+      {typing ? (
+        <TextBox
+          id={id}
+          value={settings.edits.get(rowKey(row)) ?? ownText(field)}
+          placeholder={placeholderOf(field, row.target)}
+          focused
+          onChange={text => {
+            session.edit(row, text);
+          }}
+          onCommit={() => {
+            setTyping(false);
+            void session.save(row);
+          }}
+        />
+      ) : (
+        <SelectBox
+          id={id}
+          value={value}
+          options={suggestedChoices(field, value)}
+          {...(value === undefined
+            ? {none: placeholderOf(field, row.target)}
+            : {})}
+          other={{
+            label: 'Other…',
+            onChoose: () => {
+              setTyping(true);
+            },
+          }}
+          {...checkProp(checkAt(ctx, row))}
+          onChoose={chosen => {
+            void session.choose(row, chosen);
+          }}
+        />
+      )}
+    </Cell>
+  );
+}
+
+/**
+ * The service a character thinks with: a select of the services offered,
+ * whose first entry, `none`, chooses none, saved at the choice.
+ */
+export function ServiceRow({
+  ctx,
+  row,
+  field,
+  value,
+  options,
+  none,
+  onChoose,
+}: {
+  readonly ctx: Ctx;
+  readonly row: Row;
+  readonly field: Field;
+  readonly value: string | undefined;
+  readonly options: readonly Option[];
+  readonly none: string;
+  readonly onChoose: (value: string | undefined) => void;
 }) {
   const id = domId(row);
 
@@ -236,13 +314,11 @@ export function ServiceRow({
       </label>
       <SelectBox
         id={id}
-        value={valueNow(ctx.settings, row, field)}
-        options={optionsOf(field)}
-        none="Choose a Service"
+        value={value}
+        options={options}
+        none={none}
         {...checkProp(checkAt(ctx, row))}
-        onChoose={value => {
-          void ctx.session.choose(row, value);
-        }}
+        onChoose={onChoose}
       />
     </Cell>
   );

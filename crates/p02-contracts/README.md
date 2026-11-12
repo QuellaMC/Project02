@@ -8,7 +8,8 @@ A plugin's manifest exists only validated, and a `Registration` holds its
 code, a `RuntimePlugin`, to it. Beside its factory, a plugin has a
 `SetupCheck`: whether its settings are enough to build it. A manifest also
 says how a settings page draws the plugin: its row, the words for each
-field, and the cards its fields sit in, every field in one at least. The
+field and the values it offers first, and the cards its fields sit in,
+every field in one at least. The
 host calls only the hooks a plugin declares, under its budget and a
 cancellation token every capability call checks, and a hook that may only
 read, or has settled, changes none of the documents, logs and text files of

@@ -15,6 +15,7 @@ import {
   type IconName,
   type Tint,
 } from './look.ts';
+import type {Option} from './settings-model.ts';
 
 export function Icon({
   name,
@@ -418,13 +419,15 @@ export function Label({
 
 /**
  * A text box. It saves when the person presses Return or leaves it, which
- * `onCommit` is told; `check` shows once a change of it landed.
+ * `onCommit` is told; `check` shows once a change of it landed. `focused`
+ * takes the focus as it appears, for a box the person just asked for.
  */
 export function TextBox({
   id,
   value,
   placeholder,
   numeric = false,
+  focused = false,
   check,
   onChange,
   onCommit,
@@ -433,6 +436,7 @@ export function TextBox({
   readonly value: string;
   readonly placeholder: string;
   readonly numeric?: boolean;
+  readonly focused?: boolean;
   readonly check?: number;
   readonly onChange: (text: string) => void;
   readonly onCommit: () => void;
@@ -447,6 +451,7 @@ export function TextBox({
         placeholder={placeholder}
         inputMode={numeric ? 'numeric' : undefined}
         autoComplete="off"
+        autoFocus={focused}
         onChange={event => {
           onChange(event.currentTarget.value);
         }}
@@ -541,22 +546,25 @@ export function KeyBox({
   );
 }
 
-/** One of a choice's values and its words. */
-export type Option = {readonly value: string; readonly label: string};
-
-/** A select whose first entry chooses nothing; it saves at the choice. */
+/**
+ * A select; it saves at the choice. `none`, when given, is its first
+ * entry, which chooses nothing; `other`, when given, its last, which
+ * chooses nothing listed and is told so.
+ */
 export function SelectBox({
   id,
   value,
   options,
   none,
+  other,
   check,
   onChoose,
 }: {
   readonly id: string;
   readonly value: string | undefined;
   readonly options: readonly Option[];
-  readonly none: string;
+  readonly none?: string;
+  readonly other?: {readonly label: string; readonly onChoose: () => void};
   readonly check?: number;
   readonly onChoose: (value: string | undefined) => void;
 }) {
@@ -567,17 +575,30 @@ export function SelectBox({
         className="input select"
         value={value ?? ''}
         onChange={event => {
-          const chosen = event.currentTarget.value;
+          const select = event.currentTarget;
 
-          onChoose(chosen === '' ? undefined : chosen);
+          // Known by its place, so no value of the field is taken for it.
+          if (
+            other !== undefined &&
+            select.selectedIndex === select.options.length - 1
+          ) {
+            other.onChoose();
+
+            return;
+          }
+
+          onChoose(select.value === '' ? undefined : select.value);
         }}
       >
-        <option value="">{none}</option>
+        {none === undefined ? null : <option value="">{none}</option>}
         {options.map(option => (
           <option key={option.value} value={option.value}>
             {option.label}
           </option>
         ))}
+        {other === undefined ? null : (
+          <option value={other.label}>{other.label}</option>
+        )}
       </select>
       {check === undefined ? null : <Check key={check} select />}
       <Icon name="updown" size={14} weight={2} className="box-updown" />

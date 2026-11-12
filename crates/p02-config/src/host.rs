@@ -9,22 +9,12 @@ use std::sync::LazyLock;
 
 use p02_contracts::{ConfigField, ConfigScope, ConfigSection};
 use p02_core::{Participant, SpeakerName};
-use p02_shared::{BASE_URL_RULE, BaseUrl, vocabulary};
+use p02_shared::{BASE_URL_RULE, BaseUrl};
+use p02_wire::{ModelService, RoleModelProvider};
 use serde_json::{Map, Value, json};
 
 use crate::declaration::{Layer, expectation, outside_scope};
 use crate::resolve::Field;
-
-vocabulary! {
-    /// Who answers as a character. Only real providers are here: the test
-    /// provider is a test harness's switch, never a setting, and a home has
-    /// no provider until its person chooses one.
-    RoleModelProvider {
-        /// A model on NVIDIA's cloud, or on a server of the person's own
-        /// that speaks its wire.
-        Nvidia = "nvidia",
-    }
-}
 
 /// One of the host's own settings. A value it cannot read is one its
 /// field refuses; a blank text is never one, since unsetting is its own
@@ -67,20 +57,74 @@ const ROLE_MODEL_PROVIDER: HostSetting<RoleModelProvider> = HostSetting {
     field: || {
         json!({
             "label": "Service",
-            "description": "Who answers as the character: nvidia is a model on NVIDIA's cloud, \
-                or on the server nvidiaBaseUrl names. No character starts until one is chosen.",
+            "description": "Who answers as the character: openai is a model of the OpenAI API, \
+                on your key; nvidia is a model on NVIDIA's cloud, or on the server nvidiaBaseUrl \
+                names. No character starts until one is chosen.",
             "secret": false,
             "valueType": "enum",
             "allowedValues": RoleModelProvider::ALL
                 .iter()
                 .map(|provider| provider.as_str())
                 .collect::<Vec<_>>(),
-            "choices": {"nvidia": "NVIDIA"},
+            "choices": RoleModelProvider::ALL
+                .iter()
+                .map(|&provider| (provider.as_str().to_owned(), Value::from(service(provider).name)))
+                .collect::<Map<String, Value>>(),
             "redactionLabels": [],
         })
     },
     read: |value| value.as_str().and_then(RoleModelProvider::parse),
     must_be: None,
+};
+
+const OPENAI_API_KEY: HostSetting<String> = HostSetting {
+    name: "openaiApiKey",
+    field: || {
+        json!({
+            "label": "API Key",
+            "description": "Your OpenAI API key. Needed when the provider is openai; never shown \
+                back once saved.",
+            "placeholder": "Paste key",
+            "secret": true,
+            "valueType": "string",
+            "redactionLabels": ["secret"],
+        })
+    },
+    read: text,
+    must_be: Some("a non-empty string"),
+};
+
+/// OpenAI's current models, most capable first, each id with the name a
+/// person reads.
+const OPENAI_MODELS: [(&str, &str); 4] = [
+    ("gpt-6-astra", "GPT-6 Astra"),
+    ("gpt-6.1-sol", "GPT-6.1 Sol"),
+    ("gpt-6.1-terra", "GPT-6.1 Terra"),
+    ("gpt-6-luna", "GPT-6 Luna"),
+];
+
+/// The least costly of them: a person chooses a stronger one.
+const OPENAI_DEFAULT_MODEL: &str = "gpt-6-luna";
+
+const OPENAI_MODEL: HostSetting<String> = HostSetting {
+    name: "openaiModel",
+    field: || {
+        json!({
+            "label": "Model",
+            "description": "The OpenAI model to talk to: one of these, or the id of another.",
+            "secret": false,
+            "valueType": "string",
+            "defaultValue": OPENAI_DEFAULT_MODEL,
+            "suggestedValues": OPENAI_MODELS.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            "choices": OPENAI_MODELS
+                .iter()
+                .map(|(id, name)| ((*id).to_owned(), Value::from(*name)))
+                .collect::<Map<String, Value>>(),
+            "redactionLabels": [],
+        })
+    },
+    read: text,
+    must_be: Some("a non-empty string"),
 };
 
 const NVIDIA_API_KEY: HostSetting<String> = HostSetting {
@@ -219,11 +263,14 @@ fn text(value: &Value) -> Option<String> {
 }
 
 /// The host's settings in the order the settings page shows them: what a
-/// person decides first, then the knobs, then what is each character's own:
-/// her switch and her heartbeat.
-static SETTINGS: [&dyn Setting; 8] = [
+/// person decides first, the service and each service's own fields in the
+/// order the services are listed, then the knobs, then what is each
+/// character's own: her switch and her heartbeat.
+static SETTINGS: [&dyn Setting; 10] = [
     &USER_DISPLAY_NAME,
     &ROLE_MODEL_PROVIDER,
+    &OPENAI_API_KEY,
+    &OPENAI_MODEL,
     &NVIDIA_API_KEY,
     &NVIDIA_MODEL,
     &NVIDIA_BASE_URL,
@@ -231,6 +278,77 @@ static SETTINGS: [&dyn Setting; 8] = [
     &ENABLED,
     &HEARTBEAT,
 ];
+
+/// A service as the settings say it: what a page calls it, what it is and
+/// where a key for it comes from, its own fields in the order a page shows
+/// them, the one of them that names its model, and those that connect it
+/// while one holds a value in effect.
+struct Service {
+    name: &'static str,
+    summary: &'static str,
+    key_from: &'static str,
+    fields: &'static [&'static str],
+    model: &'static str,
+    credentials: &'static [&'static str],
+}
+
+fn service(provider: RoleModelProvider) -> Service {
+    match provider {
+        RoleModelProvider::Openai => Service {
+            name: "OpenAI API",
+            summary: "Pay as you go, with an API key",
+            key_from: "Get one at platform.openai.com.",
+            fields: &[OPENAI_API_KEY.name, OPENAI_MODEL.name],
+            model: OPENAI_MODEL.name,
+            credentials: &[OPENAI_API_KEY.name],
+        },
+        RoleModelProvider::Nvidia => Service {
+            name: "NVIDIA",
+            summary: "An API key, or a server of your own",
+            key_from: "Get one at build.nvidia.com.",
+            fields: &[NVIDIA_API_KEY.name, NVIDIA_MODEL.name, NVIDIA_BASE_URL.name],
+            model: NVIDIA_MODEL.name,
+            // A server of the person's own may ask for no key.
+            credentials: &[NVIDIA_API_KEY.name, NVIDIA_BASE_URL.name],
+        },
+    }
+}
+
+/// Every service, in the order a page lists them, each connected while a
+/// credential of it has a value in effect among the host's resolved
+/// `fields`.
+pub(crate) fn services(fields: &[Field<'_>]) -> Vec<ModelService> {
+    let resolved = |name: &str| {
+        fields
+            .iter()
+            .find(|field| field.declaration.name().as_str() == name)
+            .expect("a service's fields are the host's")
+    };
+
+    RoleModelProvider::ALL
+        .iter()
+        .map(|&provider| {
+            let service = service(provider);
+
+            ModelService {
+                id: provider,
+                name: service.name.to_owned(),
+                summary: service.summary.to_owned(),
+                key_from: service.key_from.to_owned(),
+                connected: service
+                    .credentials
+                    .iter()
+                    .any(|name| resolved(name).effective.value().is_some()),
+                model: resolved(service.model).declaration.name().clone(),
+                fields: service
+                    .fields
+                    .iter()
+                    .map(|name| resolved(name).declaration.name().clone())
+                    .collect(),
+            }
+        })
+        .collect()
+}
 
 /// A host setting, whatever the type of its value.
 trait Setting: fmt::Debug + Sync {
@@ -374,6 +492,9 @@ pub struct HostSettings {
     pub user_display_name: SpeakerName,
     /// None until the person chooses one, and no character starts before.
     pub role_model_provider: Option<RoleModelProvider>,
+    pub openai_api_key: Option<String>,
+    /// The OpenAI model to ask, the field's default unless one is set.
+    pub openai_model: String,
     pub nvidia_api_key: Option<String>,
     pub nvidia_model: Option<String>,
     pub nvidia_base_url: Option<BaseUrl>,
@@ -391,6 +512,8 @@ impl HostSettings {
         Self {
             user_display_name: USER_DISPLAY_NAME.value_or_default(fields),
             role_model_provider: ROLE_MODEL_PROVIDER.value(fields),
+            openai_api_key: OPENAI_API_KEY.value(fields),
+            openai_model: OPENAI_MODEL.value_or_default(fields),
             nvidia_api_key: NVIDIA_API_KEY.value(fields),
             nvidia_model: NVIDIA_MODEL.value(fields),
             nvidia_base_url: NVIDIA_BASE_URL.value(fields),
@@ -407,6 +530,11 @@ impl fmt::Debug for HostSettings {
             .debug_struct("HostSettings")
             .field("user_display_name", &self.user_display_name)
             .field("role_model_provider", &self.role_model_provider)
+            .field(
+                "openai_api_key",
+                &self.openai_api_key.as_ref().map(|_| "[redacted]"),
+            )
+            .field("openai_model", &self.openai_model)
             .field(
                 "nvidia_api_key",
                 &self.nvidia_api_key.as_ref().map(|_| "[redacted]"),

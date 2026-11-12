@@ -40,6 +40,8 @@ pub struct ConfigField {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) allowed_values: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) suggested_values: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) choices: Option<BTreeMap<String, String>>,
     pub(crate) agent_mutable: bool,
     pub(crate) redaction_labels: Vec<RedactionLabel>,
@@ -123,8 +125,16 @@ impl ConfigField {
         self.allowed_values.as_deref()
     }
 
-    /// The words for each allowed value, when the field has them: every
-    /// allowed value has its words, and nothing else does.
+    /// The values a page offers first, on a field that takes any other of
+    /// its type too.
+    #[must_use]
+    pub fn suggested_values(&self) -> Option<&[String]> {
+        self.suggested_values.as_deref()
+    }
+
+    /// The words for each allowed or suggested value, when the field has
+    /// them: every one of those values has its words, and nothing else
+    /// does.
     #[must_use]
     pub fn choices(&self) -> Option<&BTreeMap<String, String>> {
         self.choices.as_ref()
@@ -242,6 +252,7 @@ mod tests {
             value_type,
             default_value: None,
             allowed_values: allowed.map(|values| values.iter().map(|&v| v.to_owned()).collect()),
+            suggested_values: None,
             choices: None,
             agent_mutable: false,
             redaction_labels: Vec::new(),

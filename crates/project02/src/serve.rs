@@ -81,6 +81,7 @@ pub(crate) async fn run(
         plugins,
         app_catalog: switches.app_catalog,
         app_internet: switches.app_internet,
+        openai_api: switches.openai_api,
     };
 
     serve(home, claim, settings, &stop, console).await

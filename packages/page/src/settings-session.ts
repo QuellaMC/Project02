@@ -21,6 +21,7 @@ import {
   catalogRead,
   herPhoneRead,
 } from './her-apps.ts';
+import {welcomeKey} from './settings-model.ts';
 import {
   advancedSet,
   changeEnded,
@@ -158,12 +159,11 @@ function unanswered(error: unknown) {
   return {status: 'failed', message: problem(error)} as const;
 }
 
-/** The name row and the key row the welcome's steps save. */
+/** The name row the welcome's first step saves; its second saves the key of the service chosen. */
 const nameRow: Row = {
   target: home,
   place: {kind: 'host', name: 'userDisplayName'},
 };
-const keyRow: Row = {target: home, place: {kind: 'host', name: 'nvidiaApiKey'}};
 
 /** A read of every view, numbered as it began. */
 type Read = {
@@ -462,19 +462,26 @@ function welcomeVerbs(
 ): Pick<SettingsVerbs, 'welcomeNext' | 'welcomeBack'> {
   return {
     async welcomeNext() {
-      const screen = getState().settings?.screen;
+      const settings = getState().settings;
+      const screen = settings?.screen;
 
-      if (screen?.kind !== 'welcome' || screen.step === 3) {
+      if (
+        settings === undefined ||
+        screen?.kind !== 'welcome' ||
+        screen.step === 3
+      ) {
         return;
       }
 
-      const row = screen.step === 1 ? nameRow : keyRow;
+      const row = screen.step === 1 ? nameRow : welcomeKey(settings)?.row;
 
-      await save(row);
+      if (row !== undefined) {
+        await save(row);
 
-      // A step whose box the daemon refused stays, saying why at it.
-      if (getState().settings?.problems.has(rowKey(row)) === true) {
-        return;
+        // A step whose box the daemon refused stays, saying why at it.
+        if (getState().settings?.problems.has(rowKey(row)) === true) {
+          return;
+        }
       }
 
       apply(current => welcomeStepped(current, screen.step === 1 ? 2 : 3));

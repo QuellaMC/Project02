@@ -12,14 +12,15 @@ use p02_store::Home;
 use p02_wire::{
     ActivationStatus, Authored, CharacterConnectorEntry, ConfigTarget, ConfigView,
     ConnectorConfigView, ConnectorEntry, ConnectorRefusal, Diagnostic, EffectiveView, FieldView,
-    LayoutCard, Namespace, SectionActivation, SectionView, ValueSource, ViewRefusal,
+    LayoutCard, Namespace, RoleModelProvider, SectionActivation, SectionView, ValueSource,
+    ViewRefusal,
 };
 use serde::{Serialize, Serializer};
 use serde_json::{Map, Value};
 
 use crate::conceal::conceal;
 use crate::declaration::{Declared, Sections, Target, connector};
-use crate::host::{HostSettings, RoleModelProvider, host_fields};
+use crate::host::{HostSettings, host_fields, services};
 use crate::resolve::{
     Effective, Field, ReadSettingsError, Resolution, Section, Status, values_in_effect,
 };
@@ -71,10 +72,11 @@ impl ReadSettingsError {
 
 impl Resolution<'_> {
     /// The view of these settings: whether their host values give a
-    /// character a model, as `model` judges them, and every host field,
-    /// and every section, and of each section every field, that the target
-    /// may set; secrets never. A person looks a section up by its name, so
-    /// the screen lists the plugins' by id and then the connectors'.
+    /// character a model, as `model` judges them, every service and which
+    /// are connected, and every host field, and every section, and of each
+    /// section every field, that the target may set; secrets never. A
+    /// person looks a section up by its name, so the screen lists the
+    /// plugins' by id and then the connectors'.
     #[must_use]
     pub fn view(&self, model: impl FnOnce(&HostSettings) -> Result<(), String>) -> ConfigView {
         let mut sections: Vec<SectionView> = self
@@ -90,6 +92,7 @@ impl Resolution<'_> {
             fingerprint: self.fingerprint().clone(),
             diagnostics: self.diagnostics().to_vec(),
             model: model(&HostSettings::of(self.host())).into(),
+            services: services(self.host()),
             project02: host_fields()
                 .iter()
                 .zip(self.host())
@@ -176,6 +179,7 @@ fn field_view(field: &Field<'_>) -> FieldView {
         secret,
         value_type: declaration.value_type(),
         allowed_values: declaration.allowed_values().map(<[String]>::to_vec),
+        suggested_values: declaration.suggested_values().map(<[String]>::to_vec),
         choices: declaration.choices().cloned(),
         agent_mutable: declaration.agent_mutable() && !secret,
         authored: Authored {
@@ -349,6 +353,9 @@ pub struct HostReport {
     #[serde(skip_serializing_if = "Option::is_none")]
     role_model_provider: Option<RoleModelProvider>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    openai_api_key: Option<&'static str>,
+    openai_model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     nvidia_api_key: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     nvidia_model: Option<String>,
@@ -419,6 +426,8 @@ impl Resolution<'_> {
                     enabled: host.enabled,
                     user_display_name: host.user_display_name.clone(),
                     role_model_provider: host.role_model_provider,
+                    openai_api_key: host.openai_api_key.as_ref().map(|_| "[redacted]"),
+                    openai_model: host.openai_model.clone(),
                     nvidia_api_key: host.nvidia_api_key.as_ref().map(|_| "[redacted]"),
                     nvidia_model: host.nvidia_model.clone(),
                     nvidia_base_url: host

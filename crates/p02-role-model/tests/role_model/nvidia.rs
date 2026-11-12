@@ -8,7 +8,7 @@ use p02_contracts::{
     Invocation, ProviderAnswer, ProviderName, RoleModelAdapter, TextCompletion,
     TextCompletionRequest,
 };
-use p02_role_model::{NvidiaSettings, select_adapter};
+use p02_role_model::{NvidiaSettings, OpenaiSettings, ServiceSettings, select_adapter};
 use p02_shared::BaseUrl;
 use serde_json::{Value, json};
 use tokio::time::Instant;
@@ -23,9 +23,13 @@ type Adapter = Arc<dyn RoleModelAdapter>;
 /// The NVIDIA provider as `settings` choose it, its silence bounded at
 /// `shortened` when the harness shortens it.
 fn nvidia(settings: &NvidiaSettings, shortened: Option<Duration>) -> Adapter {
-    select_adapter(None, Some(settings), shortened)
-        .unwrap()
-        .unwrap()
+    select_adapter(
+        None,
+        Some(&ServiceSettings::Nvidia(settings.clone())),
+        shortened,
+    )
+    .unwrap()
+    .unwrap()
 }
 
 fn keyed(stub: &Stub) -> NvidiaSettings {
@@ -261,26 +265,44 @@ async fn a_plain_completion_asks_the_same_model_without_tools_or_thinking() {
 }
 
 /// Whether settings give a character a model is answered by building it:
-/// no service chosen makes none, NVIDIA's cloud without a key is refused
-/// saying what to add, and a server of the person's own needs no key.
+/// no service chosen makes none, a service without a key is refused saying
+/// what to add, and only a server of the person's own may go without one:
+/// the OpenAI API asks for its key wherever a harness puts it.
 #[test]
 fn a_model_is_built_from_a_chosen_service_with_a_key_or_a_server_of_ones_own() {
-    let built = |settings: Option<&NvidiaSettings>| {
-        select_adapter(None, settings, None).map(|adapter| adapter.is_some())
+    let built = |settings: Option<ServiceSettings>| {
+        select_adapter(None, settings.as_ref(), None)
+            .map(|adapter| adapter.is_some())
+            .map_err(|refused| refused.to_string())
     };
-    let own = NvidiaSettings {
-        base_url: Some(BaseUrl::parse("http://localhost:1234/v1").unwrap()),
-        ..NvidiaSettings::default()
+    let own = || Some(BaseUrl::parse("http://localhost:1234/v1").unwrap());
+    let openai = |base_url| {
+        ServiceSettings::Openai(OpenaiSettings {
+            api_key: None,
+            model: "gpt-6-luna".to_owned(),
+            base_url,
+        })
     };
 
-    assert!(matches!(built(None), Ok(false)));
+    assert_eq!(built(None), Ok(false));
     assert_eq!(
-        built(Some(&NvidiaSettings::default()))
-            .err()
-            .map(|refused| refused.to_string()),
-        Some("add your NVIDIA API key".to_owned())
+        built(Some(ServiceSettings::Nvidia(NvidiaSettings::default()))),
+        Err("add your NVIDIA API key".to_owned())
     );
-    assert!(matches!(built(Some(&own)), Ok(true)));
+    assert_eq!(
+        built(Some(ServiceSettings::Nvidia(NvidiaSettings {
+            base_url: own(),
+            ..NvidiaSettings::default()
+        }))),
+        Ok(true)
+    );
+
+    for base_url in [None, own()] {
+        assert_eq!(
+            built(Some(openai(base_url))),
+            Err("add your OpenAI API key".to_owned())
+        );
+    }
 }
 
 #[tokio::test(start_paused = true)]

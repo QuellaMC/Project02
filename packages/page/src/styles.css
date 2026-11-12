@@ -47,6 +47,8 @@
   --pink-glyph: #e7124d;
   --mint-tile: rgba(0, 200, 179, 0.14);
   --mint-glyph: #008575;
+  --teal-tile: rgba(0, 195, 208, 0.14);
+  --teal-glyph: #008198;
   --graphite-tile: rgba(28, 28, 30, 0.12);
   --graphite-glyph: #1c1c1e;
   --float-shadow:
@@ -116,6 +118,8 @@
     --pink-glyph: #ff375f;
     --mint-tile: rgba(0, 218, 195, 0.22);
     --mint-glyph: #00dac3;
+    --teal-tile: rgba(0, 210, 224, 0.22);
+    --teal-glyph: #00d2e0;
     --graphite-tile: rgba(229, 229, 234, 0.18);
     --graphite-glyph: #e5e5ea;
     --float-shadow:
@@ -1437,6 +1441,11 @@ code {
   color: var(--mint-glyph);
 }
 
+.tint-teal {
+  background: var(--teal-tile);
+  color: var(--teal-glyph);
+}
+
 .tint-graphite {
   background: var(--graphite-tile);
   color: var(--graphite-glyph);
@@ -1483,6 +1492,10 @@ code {
 
 .tile-solid.tint-mint {
   background: #008575;
+}
+
+.tile-solid.tint-teal {
+  background: #008198;
 }
 
 .tile-solid.tint-graphite {

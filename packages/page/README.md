@@ -120,6 +120,21 @@ app that uses it, and nowhere else. An account's page has the one field of
 its key, pasted and never shown back, and where a key comes from, and,
 opened from an app's page, goes back to it.
 
+AI Model lists the services a character can think with as the home's view
+says them, holding no list of its own: by a service's id it keeps only its
+tile. Once one is connected, the page offers what every character thinks
+with, a service among those connected and its model, picked from the
+models its field suggests or typed in through Other…, and lists the
+services connected, In Use on that one; under them, the services that can
+be added. Each opens a page of its own with its key, pasted and never
+shown back, where a key comes from, Remove Key once one is saved, and the
+service's other fields but its model under Advanced, as NVIDIA's server
+address. A character's own AI model, from her page, is Same as Everyone or
+a service connected with its model; Same as Everyone takes away her
+service and every model of hers. Whatever else of it she holds of her
+own, a key, a server or a context size, shows under them, each to be seen
+and taken away. The welcome asks for the key of the service chosen.
+
 While her settings give her a phone, her page has her apps, over the
 daemon's verbs for them: an icon for each app on her phone but the App
 Store, which has nothing to set, each opening the app's page; Get More

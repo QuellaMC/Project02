@@ -221,11 +221,16 @@ export type ConfigValueType = "string" | "number" | "boolean" | "object" | "arra
 /**
  * What a settings screen renders: the fingerprint a change must present,
  * the diagnostics, whether the target's settings give a character an AI
- * model, and the host's fields and every section the target may set, all
- * in one field shape. A target whose settings cannot be resolved is
- * refused with the reason, never shown as blank fields.
+ * model, the services she can think with, and the host's fields and every
+ * section the target may set, all in one field shape. A target whose
+ * settings cannot be resolved is refused with the reason, never shown as
+ * blank fields.
  */
-export type ConfigView = { "status": "ok", fingerprint: Fingerprint, diagnostics: ReadonlyArray<RuntimeConfigDiagnostic>, model: Setup, project02: ReadonlyArray<RuntimeConfigFieldInspectShape>, sections: ReadonlyArray<RuntimeConfigSectionInspectShape>, } | { "status": "refused", reason: ViewRefusal, message: string, };
+export type ConfigView = { "status": "ok", fingerprint: Fingerprint, diagnostics: ReadonlyArray<RuntimeConfigDiagnostic>, model: Setup, 
+/**
+ * Every service, in the order a page lists them.
+ */
+services: ReadonlyArray<ModelService>, project02: ReadonlyArray<RuntimeConfigFieldInspectShape>, sections: ReadonlyArray<RuntimeConfigSectionInspectShape>, } | { "status": "refused", reason: ViewRefusal, message: string, };
 
 export type ConfirmationCancelReason = "expired" | "stopped";
 
@@ -341,7 +346,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 13, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 14, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -367,7 +372,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 13, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 14, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -447,6 +452,38 @@ export type MaintenanceFailure = { at: Timestamp, message: string, };
  * not a count.
  */
 export type MessageId = string;
+
+/**
+ * A service as a settings page lists it: its name, what it is and where a
+ * key for it comes from, whether it is connected, and which of the host's
+ * fields are its own, its model's among them.
+ */
+export type ModelService = { id: RoleModelProvider, 
+/**
+ * What a page calls it.
+ */
+name: string, 
+/**
+ * What it is, in a line a page shows under its name.
+ */
+summary: string, 
+/**
+ * Where a key for it comes from, in a sentence.
+ */
+keyFrom: string, 
+/**
+ * Whether a credential of it is in effect for the target: its key,
+ * or for NVIDIA a server of the person's own too.
+ */
+connected: boolean, 
+/**
+ * The one of its fields that names the model she asks it for.
+ */
+model: Identifier, 
+/**
+ * Its own fields, in the order a page shows them.
+ */
+fields: ReadonlyArray<Identifier>, };
 
 /**
  * The character whose thread with the person to open.
@@ -659,6 +696,15 @@ export type RemoveCharacterOutcome = { "status": "removed" } | { "status": "refu
 export type RemoveCharacterRefusal = "built_in" | "unknown_character";
 
 /**
+ * The services a character can think with, each by the value of
+ * `roleModelProvider` that chooses it, in the order a page lists
+ * them. Only real services are here: the test provider is a test
+ * harness's switch, never a setting, and a home has none until its
+ * person chooses one.
+ */
+export type RoleModelProvider = "openai" | "nvidia";
+
+/**
  * Where an installed character stands as health reports her: her
  * runtime's state, or `not_started` until the daemon built it.
  */
@@ -703,8 +749,13 @@ label?: string, description: string,
  */
 placeholder?: string, secret: boolean, valueType?: ConfigValueType, allowedValues?: ReadonlyArray<string>, 
 /**
- * The words for each allowed value, which a page lists in the order
- * of `allowedValues`.
+ * The values a page offers first, while it takes any other of the
+ * field's type too.
+ */
+suggestedValues?: ReadonlyArray<string>, 
+/**
+ * The words for each allowed or suggested value, which a page lists
+ * in the order of `allowedValues` or `suggestedValues`.
  */
 choices?: { [key in string]: string }, agentMutable: boolean, authored: Authored, effectiveSource: Source, effective: EffectiveView, };
 

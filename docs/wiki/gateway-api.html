@@ -90,7 +90,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 13,
+  "protocolVersion": 14,
   "token": "…",
   "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -581,8 +581,9 @@
             </td>
             <td>
               → <code>ConfigView</code>: <code>ok</code> with the fingerprint a
-              write must present, the documents' diagnostics, the host fields
-              and every section the scope may set, in one field shape; or
+              write must present, the documents' diagnostics, the services a
+              character can think with, and the host fields and every section
+              the scope may set, in one field shape; or
               <code>refused</code> (<code>unknown_character</code>,
               <code>config_unloadable</code>). A query naming no such target is
               a 400. Described below.
@@ -745,7 +746,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":13,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":14,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -1382,8 +1383,9 @@ data: {…}</code></pre>
         <code>project02</code> fields, in the order a page shows them, and each
         plugin's fields share one shape — what this scope authored, what is in
         effect and which layer put it there, with the <code>label</code>,
-        <code>placeholder</code> and <code>choices</code> its declaration gives
-        it; a plugin's switch says the same of itself as
+        <code>placeholder</code>, <code>suggestedValues</code> and
+        <code>choices</code> its declaration gives it; a plugin's switch says
+        the same of itself as
         <code>enabledSource</code>. A section also carries its
         <code>layout</code>, the cards to draw its fields in; a plugin's
         carries its <code>page</code> too, how to draw its row, and the
@@ -1393,7 +1395,14 @@ data: {…}</code></pre>
         with a <code>message</code> saying what to fill in, judged by the code
         that builds the plugin; a connector's is always ready. The view's own
         <code>model</code> is the same shape for whether its scope's host
-        values give a character an AI model, as her start judges it.
+        values give a character an AI model, as her start judges it, and its
+        <code>services</code> list every service a character can think with,
+        in the order a page shows them, each with its <code>name</code>, its
+        <code>summary</code>, a line on what it is, its <code>keyFrom</code>,
+        a sentence on where a key for it comes from, its own
+        <code>fields</code> with the one that names its <code>model</code>,
+        and whether it is <code>connected</code>: a credential of it in
+        effect for the scope.
         Whatever a view offers, the scope can save: a host field is
         authorable at the home and
         per character unless its scope keeps it to one, as a character's own

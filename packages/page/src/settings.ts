@@ -45,6 +45,11 @@ export function characterTarget(characterId: string): ConfigTarget {
   return {scope: 'character', characterId};
 }
 
+/** A host field's row for a target. */
+export function hostRow(target: ConfigTarget, name: string): Row {
+  return {target, place: {kind: 'host', name}};
+}
+
 const characterPrefix = 'character:';
 
 /** A target's key among the views: `home`, or `character:<id>`. */

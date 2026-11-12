@@ -1,6 +1,6 @@
-//! A model server on the loopback interface for the NVIDIA adapter to
-//! call: it answers each request with the next answer the test scripted,
-//! and keeps every request it read.
+//! A model server on the loopback interface for the adapters to call, at
+//! any address under it: it answers each request with the next answer the
+//! test scripted, and keeps every request it read.
 
 use std::collections::VecDeque;
 use std::net::SocketAddr;
@@ -10,7 +10,8 @@ use std::sync::{Arc, Mutex};
 use axum::Router;
 use axum::body::Bytes;
 use axum::extract::State;
-use axum::http::StatusCode;
+use axum::http::header::AUTHORIZATION;
+use axum::http::{HeaderMap, StatusCode, Uri};
 use axum::response::{IntoResponse, Response};
 use axum::serve::Listener;
 use p02_shared::BaseUrl;
@@ -20,9 +21,12 @@ use tokio::sync::oneshot;
 
 use crate::support::event_text;
 
-/// A request as the stub read it.
+/// A request as the stub read it: where it was sent, who it said sent it,
+/// and its body.
 #[derive(Clone, Debug)]
 pub(crate) struct Request {
+    pub(crate) path: String,
+    pub(crate) authorization: Option<String>,
     pub(crate) body: Bytes,
 }
 
@@ -82,7 +86,12 @@ impl Stub {
     }
 
     pub(crate) fn base_url(&self) -> BaseUrl {
-        BaseUrl::parse(&format!("http://{}/v1", self.address)).unwrap()
+        self.at("v1")
+    }
+
+    /// A base under the stub at `path`.
+    pub(crate) fn at(&self, path: &str) -> BaseUrl {
+        BaseUrl::parse(&format!("http://{}/{path}", self.address)).unwrap()
     }
 
     /// The next request gets `answer`, after those scripted before it.
@@ -147,8 +156,20 @@ impl Listener for Dropping {
     }
 }
 
-async fn respond(State(shared): State<Arc<Shared>>, body: Bytes) -> Response {
-    shared.requests.lock().unwrap().push(Request { body });
+async fn respond(
+    State(shared): State<Arc<Shared>>,
+    uri: Uri,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Response {
+    shared.requests.lock().unwrap().push(Request {
+        path: uri.path().to_owned(),
+        authorization: headers
+            .get(AUTHORIZATION)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned),
+        body,
+    });
 
     let answer = shared.answers.lock().unwrap().pop_front();
 
