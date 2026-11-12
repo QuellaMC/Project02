@@ -6,6 +6,8 @@ import {createGatewayClient} from './client.ts';
 type Sent = {
   readonly url: string;
   readonly method: string | undefined;
+  /** Its content type; null for one with no body. */
+  readonly type: string | null;
   readonly body: unknown;
 };
 
@@ -21,7 +23,12 @@ describe('gateway client paths', () => {
     vi.stubGlobal(
       'fetch',
       vi.fn((input: string, init?: RequestInit) => {
-        requested.push({url: input, method: init?.method, body: init?.body});
+        requested.push({
+          url: input,
+          method: init?.method,
+          type: new Headers(init?.headers).get('content-type'),
+          body: init?.body,
+        });
 
         return Promise.resolve(
           new Response('{}', {
@@ -65,20 +72,27 @@ describe('gateway client paths', () => {
     ]);
   });
 
-  it('sends a character file as the file holds it', async () => {
+  it('sends a character file and an app file each as the file holds it, under its own type', async () => {
     const requested = recordRequests();
-    const file = '{\n  "format": "project02.character.v1"\n}\n';
+    const character = '{\n  "format": "project02.character.v1"\n}\n';
+    const app = 'export const manifest = {};\n';
+    const sent = (path: string, type: string, body: string) => ({
+      url: `http://127.0.0.1:7777${path}`,
+      method: 'POST',
+      type,
+      body,
+    });
 
-    await client().previewCharacter(file);
-    await client().addCharacter(file);
+    await client().previewCharacter(character);
+    await client().addCharacter(character);
+    await client().previewApp('mira', app);
+    await client().addApp('mira', app);
 
     expect(requested).toEqual([
-      {
-        url: 'http://127.0.0.1:7777/api/character-preview',
-        method: 'POST',
-        body: file,
-      },
-      {url: 'http://127.0.0.1:7777/api/characters', method: 'POST', body: file},
+      sent('/api/character-preview', 'application/json', character),
+      sent('/api/characters', 'application/json', character),
+      sent('/api/characters/mira/phone/app-preview', 'text/javascript', app),
+      sent('/api/characters/mira/phone/apps', 'text/javascript', app),
     ]);
   });
 });

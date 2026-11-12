@@ -90,7 +90,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 11,
+  "protocolVersion": 12,
   "token": "…",
   "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -287,7 +287,10 @@
           <tr>
             <td>413</td>
             <td><code>payload_too_large</code></td>
-            <td>Body over 64 KiB.</td>
+            <td>
+              Body over 64 KiB, or over 256 KiB for an app's file, what a text
+              file of her phone holds.
+            </td>
           </tr>
           <tr>
             <td>421</td>
@@ -425,6 +428,88 @@
               <code>unknown_view</code>, <code>app_failed</code>) in the
               phone's own sentence; or <code>failed</code>. It changes nothing
               of hers: what she has in front stays as it was.
+            </td>
+          </tr>
+          <tr>
+            <td>App Store</td>
+            <td><code>GET /api/characters/:id/phone/store</code></td>
+            <td>
+              → <code>StoreOutcome</code>: <code>ok</code> with the App
+              Store's <code>apps</code>, its catalog read anew, each as its
+              page there says it — <code>id</code>, <code>name</code>,
+              <code>summary</code>, <code>icon</code>, <code>tint</code>,
+              <code>version</code>, what <code>changes</code> in it, whether
+              it <code>wakes</code> her and <code>itMay</code>, what it may do,
+              a line each — and its <code>status</code> on her phone:
+              <code>not_on_phone</code>, <code>update</code> when her phone
+              holds an older version, or <code>installed</code> when it holds
+              this version or a newer one; <code>refused</code> as her phone
+              is; or <code>failed</code> with why the catalog or her phone
+              could not be read. Described below.
+            </td>
+          </tr>
+          <tr>
+            <td>give app</td>
+            <td><code>POST /api/characters/:id/phone/apps/:app</code></td>
+            <td>
+              No body → <code>AppInstallOutcome</code>: <code>ok</code> with
+              the <code>app</code> as her phone now lists it and, when it
+              replaced one, the version <code>replaced</code>;
+              <code>refused</code> (<code>unknown_character</code>,
+              <code>no_phone</code>, <code>not_in_store</code>,
+              <code>comes_with_phone</code>, <code>already_installed</code>
+              when its <code>status</code> is <code>installed</code>,
+              <code>not_as_listed</code>), nothing written; or
+              <code>failed</code>, her phone as it was. Described below.
+            </td>
+          </tr>
+          <tr>
+            <td>preview app file</td>
+            <td><code>POST /api/characters/:id/phone/app-preview</code></td>
+            <td>
+              An app's one file, the body being the file as the person's file
+              holds it → <code>AppPreviewOutcome</code>: <code>ok</code> with
+              what the app is — <code>id</code>, <code>name</code>,
+              <code>summary</code>, <code>icon</code>, <code>tint</code>,
+              <code>version</code>, <code>wakes</code> and
+              <code>itMay</code> — and <code>replaces</code>, the version of
+              it on her phone, when there is one; or <code>refused</code>
+              (<code>not_an_app</code>, <code>comes_with_phone</code>, and as
+              her phone is) in the sentence its judging gives. Nothing is
+              written.
+            </td>
+          </tr>
+          <tr>
+            <td>add app file</td>
+            <td><code>POST /api/characters/:id/phone/apps</code></td>
+            <td>
+              An app's one file, as a preview takes it →
+              <code>AppInstallOutcome</code>, as giving an app answers:
+              judged afresh, and replacing an app of its id on her phone,
+              whatever its version or source.
+            </td>
+          </tr>
+          <tr>
+            <td>remove app</td>
+            <td><code>DELETE /api/characters/:id/phone/apps/:app</code></td>
+            <td>
+              → <code>AppRemoveOutcome</code>: <code>ok</code>;
+              <code>refused</code> (<code>unknown_character</code>,
+              <code>no_phone</code>, <code>unknown_app</code>,
+              <code>comes_with_phone</code>), nothing removed; or
+              <code>failed</code>.
+            </td>
+          </tr>
+          <tr>
+            <td>app may wake her</td>
+            <td><code>POST /api/characters/:id/phone/apps/:app/wake</code></td>
+            <td>
+              <code>{allowed: true | false}</code> →
+              <code>AppWakeOutcome</code>: <code>ok</code>;
+              <code>refused</code> (<code>unknown_character</code>,
+              <code>no_phone</code>, <code>unknown_app</code>,
+              <code>cannot_wake</code>, for an app that does not say it wakes
+              her); or <code>failed</code>.
             </td>
           </tr>
           <tr>
@@ -656,7 +741,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":11,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":12,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -1025,11 +1110,16 @@ data: {…}</code></pre>
         data, whether she runs or not. Her <code>apps</code> come in her
         phone's order, those it comes with, then those installed on it by
         name, and last the App Store, each with its <code>id</code>,
-        <code>name</code>, the <code>icon</code> and the <code>tint</code> of
-        its tile — names of the page's own set, which falls back for one it
-        does not know — its <code>views</code>, each an <code>id</code>, a
-        <code>title</code> and an <code>icon</code>, and the view it
-        <code>opensOn</code>.
+        <code>name</code>, the <code>summary</code> she knows it by, its
+        <code>version</code>, where it came from as its
+        <code>source</code> (<code>built_in</code>, <code>catalog</code>,
+        <code>file</code>), the <code>icon</code> and the
+        <code>tint</code> of its tile — names of the page's own set, which
+        falls back for one it does not know — whether it says it
+        <code>wakes</code> her and whether the person lets it,
+        <code>mayWake</code>, its <code>views</code>, each an
+        <code>id</code>, a <code>title</code> and an <code>icon</code>, and
+        the view it <code>opensOn</code>.
         <code>front</code> is the app she has in front, by its
         <code>appId</code> and <code>viewId</code>, with that view's
         <code>screen</code>, or, when the app fails to show it, the
@@ -1070,12 +1160,37 @@ data: {…}</code></pre>
       </p>
 
       <p>
+        The person keeps her apps by the verbs above, each their own act,
+        which asks nobody and works whether she runs or not. The App Store's
+        catalog is read anew for them, and nothing is fetched while her
+        phone's store is held. Giving her an app of the App Store takes the
+        path her own ask takes: the app's file is fetched and taken only when
+        it is the file the catalog lists, of that id and version, and an
+        older version on her phone is replaced, keeping what it kept, which
+        is how an app is updated; one whose version on her phone is the
+        catalog's or newer is never given again, so nothing of the App
+        Store's goes over a newer version of it. An app from a file nobody
+        read is previewed first, with nothing written, then added, replacing
+        an app of its id whatever its version or source. Removing an app takes what
+        it kept, its rings and what the person said of it, and closes it when
+        she had it in front; an app the phone comes with is never removed.
+        Whether an app that says it wakes her may is the person's say, yes
+        unless they said otherwise, kept with her phone until the app goes:
+        while it may not, its rings stay set and nothing tells them to her,
+        and her note says so beside its name; allowed again, a ring whose
+        time passed rings, late. Nothing tells her the rings of an app that
+        does not say it wakes her either.
+      </p>
+
+      <p>
         <code>phone_changed</code> says her phone is to be read again: after a
         call of her phone's tools came back accepted, as a moment that a ring
         began begins, and once that moment's rings went to their apps, before
-        its <code>turn_completed</code>. A surface showing her phone reads it
-        again then, and on every <code>ready</code>. A call of one of her
-        phone's tools comes back as a <code>tool_call_completed</code> whose
+        its <code>turn_completed</code>; and once the person gave her an app,
+        removed one or said whether one may wake her. A surface showing her
+        phone reads it again then, and on every <code>ready</code>. A call of
+        one of her phone's tools comes back as a
+        <code>tool_call_completed</code> whose
         <code>pluginId</code> is <code>phone</code>, accepted or not: the page
         says she is using her phone from it until her next reply begins or
         the turn ends.

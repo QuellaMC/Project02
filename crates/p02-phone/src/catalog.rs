@@ -7,12 +7,14 @@
 use std::sync::Arc;
 
 use p02_shared::Identifier;
+use p02_wire::StoreAppStatus;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
 use crate::app::App;
 use crate::error::CatalogError;
+use crate::installed::Listed;
 use crate::manifest::{is_blank, is_lowercase, is_one_line, numbers};
 use crate::phone::Phone;
 
@@ -142,6 +144,22 @@ impl CatalogApp {
     #[must_use]
     pub fn wakes(&self) -> bool {
         self.wakes
+    }
+
+    /// How this app stands on her phone, whose apps are `on_phone`: not on
+    /// it; on it in an older version than this, versions ordered as their
+    /// three numbers, which this updates; or on it in this version or a
+    /// newer one. Whatever reads the App Store takes this one rule, so
+    /// nothing replaces an app with an older version of the store's.
+    #[must_use]
+    pub fn status(&self, on_phone: &[Listed]) -> StoreAppStatus {
+        match on_phone.iter().find(|listed| listed.id == self.id) {
+            None => StoreAppStatus::NotOnPhone,
+            Some(listed) if numbers(&listed.version) < numbers(&self.version) => {
+                StoreAppStatus::Update
+            }
+            Some(_) => StoreAppStatus::Installed,
+        }
     }
 }
 

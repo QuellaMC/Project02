@@ -281,7 +281,7 @@ function health(
   bots: GatewayHealth['connectors'][number]['bots'] = [],
 ): GatewayHealth {
   return {
-    protocolVersion: 11,
+    protocolVersion: 12,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},

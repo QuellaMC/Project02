@@ -1,18 +1,19 @@
 //! The App Store, the phone's own app: written here, with no script, since
 //! it needs what no app is given. It keeps the catalog it last read, which
 //! her opening it reads anew, and which app's page is open; its one view
-//! shows that page, or else the list of the catalog's apps. Whether an app
-//! is on her phone is read from her phone whenever the screen is made.
+//! shows that page, or else the list of the catalog's apps. How an app
+//! stands on her phone is read from her phone whenever the screen is made,
+//! by the one rule every reader of the App Store takes.
 
 use p02_contracts::{LeasedFiles, StoreError};
-use p02_wire::{Screen, ScreenItem, ScreenRow, ScreenTile};
+use p02_wire::{Screen, ScreenItem, ScreenRow, ScreenTile, StoreAppStatus};
 use serde_json::{Map, Value, json};
 
 use crate::app::App;
 use crate::catalog::{Catalog, CatalogApp};
 use crate::data::Kept;
 use crate::installed::Listed;
-use crate::manifest::{Manifest, numbers};
+use crate::manifest::Manifest;
 use crate::phone::Phone;
 
 /// The App Store's id: no app installs over it.
@@ -26,15 +27,6 @@ const PAGE: &str = "page";
 const REVIEWED_BY: &str = "Reviewed by Project02";
 const REVIEWED: &str = "Reviewed · Project02 Apps";
 const UNREAD: &str = "The App Store shows its apps once she opens it.";
-
-/// Whether an app of the catalog is on her phone.
-#[derive(Clone, Copy)]
-enum Held {
-    No,
-    /// In a version older than the catalog's.
-    Older,
-    Yes,
-}
 
 /// The App Store as an app: one view, its list or an app's page, and one
 /// action, which turns it to an app's page.
@@ -107,7 +99,7 @@ pub(crate) fn screen(kept: &Kept, on_phone: &[Listed]) -> Screen {
         .and_then(Value::as_str)
         .and_then(|id| apps.iter().find(|app| app.id().as_str() == id));
     let items = match open {
-        Some(app) => page(app, held(app, on_phone)),
+        Some(app) => page(app, app.status(on_phone)),
         None => vec![ScreenItem::List {
             header: Some(REVIEWED_BY.to_owned()),
             rows: apps
@@ -117,10 +109,10 @@ pub(crate) fn screen(kept: &Kept, on_phone: &[Listed]) -> Screen {
                     tile: Some(tile(app)),
                     title: Some(app.name().to_owned()),
                     subtitle: Some(app.summary().to_owned()),
-                    value: match held(app, on_phone) {
-                        Held::No => None,
-                        Held::Older => Some("Update".to_owned()),
-                        Held::Yes => Some("Installed".to_owned()),
+                    value: match app.status(on_phone) {
+                        StoreAppStatus::NotOnPhone => None,
+                        StoreAppStatus::Update => Some("Update".to_owned()),
+                        StoreAppStatus::Installed => Some("Installed".to_owned()),
                     },
                     ..ScreenRow::default()
                 })
@@ -170,17 +162,18 @@ pub(crate) fn show(
             "summary": app.summary(),
             "version": app.version(),
             "changes": app.changes(),
-            "itMay": may(app.wakes()),
-            "status": status(held(app, on_phone)),
+            "itMay": it_may(app.wakes()),
+            "status": words(app.status(on_phone)),
         }),
         after,
     ))
 }
 
-/// What an app may do, as the store says it, from what it asks for:
-/// keeping its own data is every app's, and waking her the one's that says
-/// it does.
-fn may(wakes: bool) -> Vec<&'static str> {
+/// What an app may do, a line each, as the App Store says it and the
+/// person is told it, from what the app asks for: keeping its own data is
+/// every app's, and waking her the one's that says it does.
+#[must_use]
+pub fn it_may(wakes: bool) -> Vec<&'static str> {
     let mut may = vec!["Keep its own data"];
 
     if wakes {
@@ -200,21 +193,21 @@ fn read(kept: &Kept) -> Option<Vec<CatalogApp>> {
 
 /// An app's page: its header, its summary, what it may do, and its version
 /// with what changed.
-fn page(app: &CatalogApp, held: Held) -> Vec<ScreenItem> {
+fn page(app: &CatalogApp, status: StoreAppStatus) -> Vec<ScreenItem> {
     vec![
         ScreenItem::App {
             id: app.id().to_string(),
             tile: tile(app),
             name: app.name().to_owned(),
             subtitle: REVIEWED.to_owned(),
-            status: status(held).to_owned(),
+            status: words(status).to_owned(),
         },
         ScreenItem::Text {
             text: app.summary().to_owned(),
         },
         ScreenItem::List {
             header: Some("It may".to_owned()),
-            rows: may(app.wakes())
+            rows: it_may(app.wakes())
                 .into_iter()
                 .map(|line| ScreenRow {
                     title: Some(line.to_owned()),
@@ -235,20 +228,11 @@ fn tile(app: &CatalogApp) -> ScreenTile {
     }
 }
 
-/// Whether `app` is on her phone, whose apps are `on_phone`.
-fn held(app: &CatalogApp, on_phone: &[Listed]) -> Held {
-    match on_phone.iter().find(|listed| listed.id == *app.id()) {
-        None => Held::No,
-        Some(listed) if numbers(&listed.version) < numbers(app.version()) => Held::Older,
-        Some(_) => Held::Yes,
-    }
-}
-
-/// Whether an app is on her phone, as its page says it.
-fn status(held: Held) -> &'static str {
-    match held {
-        Held::No => "Not on her phone",
-        Held::Older => "Update available",
-        Held::Yes => "Installed",
+/// How an app stands on her phone, as its page says it.
+fn words(status: StoreAppStatus) -> &'static str {
+    match status {
+        StoreAppStatus::NotOnPhone => "Not on her phone",
+        StoreAppStatus::Update => "Update available",
+        StoreAppStatus::Installed => "Installed",
     }
 }

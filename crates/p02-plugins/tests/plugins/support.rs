@@ -51,6 +51,7 @@ pub(crate) fn turn_in(session: &str, event: &str, visible: &[&str]) -> Turn {
             id: id("mira"),
             display_name: SpeakerName::new("Mira").unwrap(),
         },
+        person: None,
     })
     .with_text(TurnText {
         current_user_message: Some(VisibleText::normalize("hello").unwrap()),

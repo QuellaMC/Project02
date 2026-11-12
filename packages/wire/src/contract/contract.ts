@@ -5,7 +5,7 @@ import type {GatewayHealth} from './generated/contract.ts';
  * bumped there, it does not compile here until this follows. Health
  * carries it so an old frontend meets a clear message, not a mystery.
  */
-export const gatewayProtocolVersion: GatewayHealth['protocolVersion'] = 11;
+export const gatewayProtocolVersion: GatewayHealth['protocolVersion'] = 12;
 
 /**
  * The only hosts the daemon answers on, and the only ones a client may be

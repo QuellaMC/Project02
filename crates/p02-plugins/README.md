@@ -35,17 +35,24 @@ plugin's settings and, on the person's yes, changes a field the model may
 change in her own settings; session history; mem0, whose account is the
 home's to set up; character state; character memory; her phone, whose
 apps, those it comes with and those installed on it, the App Store last,
-she is told of before each call as her phone's store lists them, opens and
-acts in through two tools, and, while her settings' Ask to Install Apps is
-on, asks the person to install from the App Store through a third, which
-is prepared reading the catalog and fetching and judging the app, and
-installs the text judged on their yes; and reply-style, the tone she writes
-in and a signoff, each character's own.
+she is told of before each call as her phone's store lists them, each the
+person said may not wake her saying so beside its name, with the person's
+name as her notes say it; she opens and acts in them through two tools,
+and, while her settings' Ask to Install Apps is on, asks the person to
+install from the App Store through a third, which is prepared reading the
+catalog and fetching and judging the app, and installs the text judged on
+their yes; and reply-style, the tone she writes in and a signoff, each
+character's own.
 
 `AppCatalog` is the one reader of the App Store's catalog, which the daemon
 makes from the base the binary resolved: `catalog.json`, and one entry's
 app at `apps/<id>/<version>.js`, each request within 8 seconds, through the
 client every service is reached with, taking at most 256 KiB of the
-catalog and what a text file holds of an app. Nothing is fetched under a
-lease: her opening the App Store reads its catalog before her phone's store
-is leased.
+catalog and what a text file holds of an app. `installable` is the one path
+by which an app of the App Store is installed, her ask's preparation and
+the person's own hand alike: what it refuses, what it replaces, and the
+text it judged. It takes the phone's one rule of how an app of the store
+stands on her phone, so it never puts an older version over hers. Nothing
+is fetched under a lease: her opening the App Store reads its catalog
+before her phone's store is leased, and `installable` reads her phone
+between its requests.

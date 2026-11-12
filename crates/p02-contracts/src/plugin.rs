@@ -472,6 +472,7 @@ mod tests {
                     id: Identifier::new("mira").unwrap(),
                     display_name: SpeakerName::new("Mira").unwrap(),
                 },
+                person: None,
             })),
             Instant::now(),
             CancellationToken::new(),

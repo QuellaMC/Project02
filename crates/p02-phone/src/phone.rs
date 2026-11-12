@@ -260,16 +260,23 @@ impl Phone {
         })
     }
 
-    /// Every ring set on her phone, of all its apps, soonest first, read
-    /// without running any.
+    /// Every ring that may wake her, of all her phone's apps, soonest first,
+    /// read without running any: an app's rings while it says it wakes her
+    /// and the person did not say it may not. Any other app's stay set, and
+    /// nothing tells them to her.
     ///
     /// # Errors
     ///
     /// The store's, when it fails.
     pub fn rings(&self, files: &dyn LeasedFiles) -> Result<Vec<SetRing>, StoreError> {
+        let on_phone = self.apps(files)?;
         let mut set = Vec::new();
 
-        for app in self.apps(files)?.apps {
+        for app in on_phone
+            .apps
+            .iter()
+            .filter(|app| app.wakes && on_phone.may_wake(app))
+        {
             set.extend(
                 Kept::read(files, &app.id)?
                     .rings()

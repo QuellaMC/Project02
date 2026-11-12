@@ -18,11 +18,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use p02_app::{Daemon, HistoryPage, Message};
 use p02_config::connector;
+use p02_contracts::TEXT_FILE_KIB;
 use p02_core::SpeakerName;
 use p02_shared::DaemonToken;
 use p02_wire::{
-    AnswerBody, ConfigChange, ConfigTarget, ConnectorBotsBody, ErrorBody, GatewayMessage,
-    OpenConversationBody, PairingRequestBody, Refusal,
+    AnswerBody, AppWakeBody, ConfigChange, ConfigTarget, ConnectorBotsBody, ErrorBody,
+    GatewayMessage, OpenConversationBody, PairingRequestBody, Refusal,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -36,6 +37,10 @@ use crate::page;
 
 /// A message is a few KiB; a body past this is not a message.
 const BODY_LIMIT: usize = 64 * 1024;
+
+/// An app's one file, which the person adds from their disk, is a body of
+/// its own: what a text file of her phone's store holds.
+const APP_FILE_LIMIT: usize = TEXT_FILE_KIB * 1024;
 
 /// The host names a request may give: a page of another origin cannot make
 /// a browser name this host, which defends the daemon against DNS
@@ -120,6 +125,23 @@ pub(crate) fn router(app: App) -> Router {
         .route("/api/characters/{id}", delete(remove_character))
         .route("/api/characters/{id}/start", post(start))
         .route("/api/characters/{id}/phone", get(phone))
+        .route("/api/characters/{id}/phone/store", get(phone_store))
+        .route(
+            "/api/characters/{id}/phone/app-preview",
+            post(preview_app).layer(DefaultBodyLimit::max(APP_FILE_LIMIT)),
+        )
+        .route(
+            "/api/characters/{id}/phone/apps",
+            post(add_app).layer(DefaultBodyLimit::max(APP_FILE_LIMIT)),
+        )
+        .route(
+            "/api/characters/{id}/phone/apps/{app}",
+            post(install_app).delete(remove_app),
+        )
+        .route(
+            "/api/characters/{id}/phone/apps/{app}/wake",
+            post(let_app_wake),
+        )
         .route(
             "/api/characters/{id}/phone/apps/{app}/views/{view}",
             get(phone_screen),
@@ -287,6 +309,61 @@ async fn phone_screen(
     Path((id, phone_app, view)): Path<(String, String, String)>,
 ) -> Response {
     answer(&app.0.daemon.phone_screen(&id, &phone_app, &view).await)
+}
+
+async fn phone_store(State(app): State<App>, Path(id): Path<String>) -> Response {
+    answer(&app.0.daemon.phone_store(&id).await)
+}
+
+/// The body is an app's one file as the person's file holds it, which her
+/// phone judges.
+async fn preview_app(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    match within_cap(body) {
+        Ok(file) => answer(&app.0.daemon.preview_app(&id, file.to_vec()).await),
+        Err(refusal) => refusal.into_response(),
+    }
+}
+
+async fn add_app(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    match within_cap(body) {
+        Ok(file) => answer(&app.0.daemon.add_app(&id, file.to_vec()).await),
+        Err(refusal) => refusal.into_response(),
+    }
+}
+
+async fn install_app(
+    State(app): State<App>,
+    Path((id, phone_app)): Path<(String, String)>,
+) -> Response {
+    answer(&app.0.daemon.install_app(&id, &phone_app).await)
+}
+
+async fn remove_app(
+    State(app): State<App>,
+    Path((id, phone_app)): Path<(String, String)>,
+) -> Response {
+    answer(&app.0.daemon.remove_app(&id, &phone_app).await)
+}
+
+async fn let_app_wake(
+    State(app): State<App>,
+    Path((id, phone_app)): Path<(String, String)>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    match read::<AppWakeBody>("The say on waking her", body) {
+        Ok(AppWakeBody { allowed }) => {
+            answer(&app.0.daemon.let_app_wake(&id, &phone_app, allowed).await)
+        }
+        Err(refusal) => refusal.into_response(),
+    }
 }
 
 async fn open(State(app): State<App>, body: Result<Bytes, BytesRejection>) -> Response {

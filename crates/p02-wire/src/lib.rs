@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
+mod apps;
 mod bots;
 mod config;
 mod confirmation;
@@ -15,6 +16,10 @@ mod protocol;
 mod refusal;
 mod text;
 
+pub use apps::{
+    AppInstallOutcome, AppInstallRefusal, AppPreviewOutcome, AppRemoveOutcome, AppRemoveRefusal,
+    AppWakeBody, AppWakeOutcome, AppWakeRefusal, StoreApp, StoreAppStatus, StoreOutcome,
+};
 pub use bots::{
     BotState, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome, ConnectorBotsRefusal,
 };
@@ -51,8 +56,8 @@ pub use pairing::{
     PairingRequestBody, PairingSubject, PairingSubjectBody,
 };
 pub use phone::{
-    AppView, LiveReading, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing,
-    Screen, ScreenItem, ScreenOutcome, ScreenRefusal, ScreenRow, ScreenTile,
+    AppSource, AppView, LiveReading, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal,
+    PhoneRing, Screen, ScreenItem, ScreenOutcome, ScreenRefusal, ScreenRow, ScreenTile,
 };
 pub use protocol::{PROTOCOL_VERSION, ProtocolVersion};
 pub use refusal::{ErrorBody, Refusal};

@@ -17,6 +17,7 @@ use crate::error::PhoneError;
 use crate::front::PhoneState;
 use crate::manifest::View;
 use crate::phone::Phone;
+use crate::wake::Muted;
 
 const LIST: &str = "installed.json";
 const UNREAD_LIST: &str =
@@ -50,17 +51,27 @@ pub struct Listed {
 }
 
 /// What is on her phone: the apps it comes with, then those installed on
-/// it by name, then the App Store, and what of the list of the installed
-/// was passed over, a sentence each.
+/// it by name, then the App Store; which of them the person said may not
+/// wake her; and what of the lists her phone keeps was passed over, a
+/// sentence each.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OnPhone {
     pub apps: Vec<Listed>,
+    pub(crate) muted: Muted,
     pub passed_over: Vec<String>,
+}
+
+/// An app installed on her phone: as her phone now lists it, and the
+/// version of it that it replaced, none when it is new to her phone.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Installed {
+    pub app: Listed,
+    pub replaced: Option<String>,
 }
 
 /// The list of the apps installed on her phone, as `files` keep it.
 #[derive(Debug, Default)]
-struct Installed {
+struct List {
     apps: Vec<Listed>,
     passed_over: Vec<String>,
 }
@@ -82,7 +93,22 @@ impl Listed {
     }
 }
 
-impl Installed {
+impl OnPhone {
+    /// The app of `id` on her phone.
+    #[must_use]
+    pub fn app(&self, id: &str) -> Option<&Listed> {
+        self.apps.iter().find(|app| app.id.as_str() == id)
+    }
+
+    /// Whether the person lets `app` wake her: yes unless they said it may
+    /// not. Only an app that says it wakes her sets a ring at all.
+    #[must_use]
+    pub fn may_wake(&self, app: &Listed) -> bool {
+        !self.muted.holds(&app.id)
+    }
+}
+
+impl List {
     /// The list, read forgivingly: no file is none installed, and a list,
     /// or an entry of it, that does not read is passed over and said.
     fn read(files: &dyn LeasedFiles) -> Result<Self, StoreError> {
@@ -121,18 +147,21 @@ impl Installed {
 impl Phone {
     /// What is on her phone, as `files` keep it, without running anything:
     /// the apps compiled into the daemon, then those installed on it by
-    /// name, then the App Store.
+    /// name, then the App Store, and which of them the person said may not
+    /// wake her.
     ///
     /// # Errors
     ///
     /// The store's, when it fails.
     pub fn apps(&self, files: &dyn LeasedFiles) -> Result<OnPhone, StoreError> {
-        let Installed {
+        let List {
             apps: mut installed,
-            passed_over,
-        } = Installed::read(files)?;
+            mut passed_over,
+        } = List::read(files)?;
+        let (muted, unread) = Muted::read(files)?;
 
         installed.sort_by_cached_key(|app| app.name.to_lowercase());
+        passed_over.extend(unread);
 
         Ok(OnPhone {
             apps: self
@@ -142,6 +171,7 @@ impl Phone {
                 .chain(installed)
                 .chain(iter::once(Listed::of(&self.store, None)))
                 .collect(),
+            muted,
             passed_over,
         })
     }
@@ -153,7 +183,7 @@ impl Phone {
         files: &dyn LeasedFiles,
         id: &str,
     ) -> Result<Arc<App>, PhoneError> {
-        let listed = Installed::read(files)?
+        let listed = List::read(files)?
             .apps
             .into_iter()
             .find(|app| app.id.as_str() == id)
@@ -171,7 +201,8 @@ impl Phone {
 
     /// Installs on her phone, in `files`, the app `text` makes, which came
     /// from `source`. An app of its id already installed is replaced by it,
-    /// keeping what it keeps: that is an update.
+    /// whatever its version or source, keeping what it keeps and what the
+    /// person said of it: that is an update.
     ///
     /// # Errors
     ///
@@ -183,25 +214,49 @@ impl Phone {
         files: &mut dyn LeasedFiles,
         text: &str,
         source: Source,
-    ) -> Result<(), PhoneError> {
+    ) -> Result<Installed, PhoneError> {
         let app = self.made(text).map_err(PhoneError::NotAnApp)?;
 
-        if let Some(taken) = self.comes_with(app.id().as_str()) {
-            return Err(PhoneError::IdTaken(taken.name().to_owned()));
-        }
+        self.not_taken(&app)?;
 
-        let mut installed = Installed::read(files)?;
+        let mut list = List::read(files)?;
+        let replaced = list
+            .apps
+            .iter()
+            .find(|kept| kept.id == *app.id())
+            .map(|kept| kept.version.clone());
+        let listed = Listed::of(&app, Some(source));
 
         files.write_text(&script(app.id()), text)?;
-        installed.apps.retain(|kept| kept.id != *app.id());
-        installed.apps.push(Listed::of(&app, Some(source)));
-        Ok(installed.write(files)?)
+        list.apps.retain(|kept| kept.id != *app.id());
+        list.apps.push(listed.clone());
+        list.write(files)?;
+        Ok(Installed {
+            app: listed,
+            replaced,
+        })
+    }
+
+    /// The app `text` would put on her phone, judged as installing it judges
+    /// it, and neither written nor kept among the apps the phone made: a file
+    /// looked at is no app on anyone's phone.
+    ///
+    /// # Errors
+    ///
+    /// [`PhoneError::NotAnApp`] when `text` makes no app, and
+    /// [`PhoneError::IdTaken`] when the phone comes with an app of its id.
+    pub fn preview(&self, text: &str) -> Result<App, PhoneError> {
+        let app = App::new(text).map_err(|refusal| PhoneError::NotAnApp(refusal.to_string()))?;
+
+        self.not_taken(&app)?;
+        Ok(app)
     }
 
     /// Removes the app of `id` installed on her phone, in `files`: what it
-    /// keeps, with its rings, its file, and its place on the list. When she
-    /// had it in front, her home screen is. Each step can be taken again,
-    /// so a removal a crash cut short is finished by removing it again.
+    /// keeps, with its rings, what the person said of it, its file, and its
+    /// place on the list. When she had it in front, her home screen is. Each
+    /// step can be taken again, so a removal a crash cut short is finished
+    /// by removing it again.
     ///
     /// # Errors
     ///
@@ -212,19 +267,29 @@ impl Phone {
             return Err(PhoneError::ComesWithPhone(kept.name().to_owned()));
         }
 
-        let mut installed = Installed::read(files)?;
-        let place = installed
+        let mut list = List::read(files)?;
+        let place = list
             .apps
             .iter()
             .position(|app| app.id.as_str() == id)
             .ok_or_else(|| PhoneError::NoApp(id.to_owned()))?;
-        let removed = installed.apps.remove(place);
+        let removed = list.apps.remove(place);
 
         Kept::remove(files, &removed.id)?;
+        Muted::forget(files, &removed.id)?;
         files.remove(&script(&removed.id))?;
         PhoneState::close(files, &removed.id)?;
-        installed.write(files)?;
+        list.write(files)?;
         Ok(())
+    }
+
+    /// Refuses `app` when the phone comes with an app of its id, which
+    /// nothing installs over.
+    fn not_taken(&self, app: &App) -> Result<(), PhoneError> {
+        match self.comes_with(app.id().as_str()) {
+            Some(taken) => Err(PhoneError::IdTaken(taken.name().to_owned())),
+            None => Ok(()),
+        }
     }
 }
 

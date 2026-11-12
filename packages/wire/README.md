@@ -12,6 +12,7 @@ which the conformance suite holds every answer and frame to. A shape the
 two sides disagree on fails to compile here or fails the schema there.
 
 The client imports only the contract (arch rule
-`clients-see-only-the-wire`). A client renders what the daemon says and
-works out nothing: each `turn_running` frame replaces its copy of that
-turn whole.
+`clients-see-only-the-wire`), and has one verb for each route, a file the
+person picks, a character's or an app's, sent as the file holds it under
+its own type. A client renders what the daemon says and works out
+nothing: each `turn_running` frame replaces its copy of that turn whole.

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use p02_core::{CharacterProfile, EventIdentity, MessageId, SessionId, VisibleText};
+use p02_core::{CharacterProfile, EventIdentity, MessageId, SessionId, SpeakerName, VisibleText};
 use p02_shared::Identifier;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
@@ -18,6 +18,9 @@ pub struct TurnIdentity {
     pub session_id: SessionId,
     pub event: EventIdentity,
     pub character: CharacterProfile,
+    /// The name the person she talks with chose, as her notes name them:
+    /// none while they chose none.
+    pub person: Option<SpeakerName>,
 }
 
 /// What was said this turn, shown only to a plugin granted
@@ -290,6 +293,7 @@ mod tests {
                     id: mira,
                     display_name: SpeakerName::new("Mira").unwrap(),
                 },
+                person: None,
             })),
             Instant::now() + Duration::from_secs(10),
             cancellation,

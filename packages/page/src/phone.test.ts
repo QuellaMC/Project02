@@ -41,8 +41,13 @@ const mira: CharacterSummary = {
 const clock: PhoneApp = {
   id: 'clock',
   name: 'Clock',
+  summary: 'Alarms, timers, and the time anywhere',
+  version: '1.0.0',
+  source: 'built_in',
   icon: 'clock',
   tint: 'graphite',
+  wakes: true,
+  mayWake: true,
   views: [
     {id: 'world', title: 'World Clock', icon: 'globe'},
     {id: 'alarms', title: 'Alarms', icon: 'alarm'},
@@ -60,7 +65,7 @@ const now = Date.parse('2026-11-11T09:00:00.000Z');
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 11,
+    protocolVersion: 12,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},

@@ -115,6 +115,10 @@ pub enum PhoneError {
     /// An app the phone comes with, by its name.
     #[error("{0} comes with the phone and cannot be removed")]
     ComesWithPhone(String),
+    /// An app that does not say it wakes her, by its name: it sets no ring,
+    /// so there is nothing to let it do.
+    #[error("{0} cannot wake her, so there is nothing to change")]
+    CannotWake(String),
     #[error(transparent)]
     Store(#[from] StoreError),
 }

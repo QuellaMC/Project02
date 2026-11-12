@@ -5,6 +5,11 @@ import {
   type Answer,
   type AnswerBody,
   type AnswerOutcome,
+  type AppInstallOutcome,
+  type AppPreviewOutcome,
+  type AppRemoveOutcome,
+  type AppWakeBody,
+  type AppWakeOutcome,
   type CharacterPreviewOutcome,
   type ClientStamp,
   type ConfigChange,
@@ -29,6 +34,7 @@ import {
   type RemoveCharacterOutcome,
   type ScreenOutcome,
   type StartOutcome,
+  type StoreOutcome,
   type SubmitOutcome,
 } from '../contract/index.ts';
 import {createSseFrameSplitter} from './sse.ts';
@@ -127,6 +133,45 @@ export type GatewayClient = {
     viewId: string,
     options?: GatewayCallOptions,
   ): Promise<ScreenOutcome>;
+  /** The App Store's catalog read anew for the person to browse for her: each app as its page says it, with the version of it on her phone. */
+  phoneStore(
+    characterId: string,
+    options?: GatewayCallOptions,
+  ): Promise<StoreOutcome>;
+  /** Gives her an app of the App Store, judged as her own ask for it is; an older version on her phone is replaced, keeping what it keeps. */
+  installApp(
+    characterId: string,
+    appId: string,
+    options?: GatewayCallOptions,
+  ): Promise<AppInstallOutcome>;
+  /**
+   * What an app's file would put on her phone; nothing is written. `file`
+   * is the file's text, sent as it is.
+   */
+  previewApp(
+    characterId: string,
+    file: string,
+    options?: GatewayCallOptions,
+  ): Promise<AppPreviewOutcome>;
+  /** Gives her the app a file holds, which nobody read; `file` as for a preview. */
+  addApp(
+    characterId: string,
+    file: string,
+    options?: GatewayCallOptions,
+  ): Promise<AppInstallOutcome>;
+  /** Removes an app from her phone, with what it kept and its rings. */
+  removeApp(
+    characterId: string,
+    appId: string,
+    options?: GatewayCallOptions,
+  ): Promise<AppRemoveOutcome>;
+  /** The person's say on whether an app on her phone may wake her. */
+  letAppWake(
+    characterId: string,
+    appId: string,
+    allowed: boolean,
+    options?: GatewayCallOptions,
+  ): Promise<AppWakeOutcome>;
   openDirectConversation(
     characterId: string,
     options?: GatewayCallOptions,
@@ -206,6 +251,10 @@ export class GatewayClientError extends Error {
 }
 
 const defaultRetryMs = 1_000;
+/** A character file is one JSON document. */
+const characterFileType = 'application/json';
+/** An app's one file is a JavaScript module. */
+const appFileType = 'text/javascript';
 /** Every kind of event the contract declares: one it adds fails to compile here until it is named. */
 const eventKinds: Readonly<Record<GatewayEvent['kind'], true>> = {
   turn_progress: true,
@@ -250,11 +299,15 @@ export function createGatewayClient(
     previewCharacter: (file, callOptions) =>
       route.postFile<CharacterPreviewOutcome>(
         '/api/character-preview',
-        file,
+        {text: file, type: characterFileType},
         callOptions,
       ),
     addCharacter: (file, callOptions) =>
-      route.postFile<AddCharacterOutcome>('/api/characters', file, callOptions),
+      route.postFile<AddCharacterOutcome>(
+        '/api/characters',
+        {text: file, type: characterFileType},
+        callOptions,
+      ),
     removeCharacter: (characterId, callOptions) =>
       route.delete<RemoveCharacterOutcome>(
         `/api/characters/${segment(characterId)}`,
@@ -268,6 +321,40 @@ export function createGatewayClient(
     phoneScreen: (characterId, appId, viewId, callOptions) =>
       route.get<ScreenOutcome>(
         `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}/views/${segment(viewId)}`,
+        callOptions,
+      ),
+    phoneStore: (characterId, callOptions) =>
+      route.get<StoreOutcome>(
+        `/api/characters/${segment(characterId)}/phone/store`,
+        callOptions,
+      ),
+    installApp: (characterId, appId, callOptions) =>
+      route.post<AppInstallOutcome>(
+        `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}`,
+        undefined,
+        callOptions,
+      ),
+    previewApp: (characterId, file, callOptions) =>
+      route.postFile<AppPreviewOutcome>(
+        `/api/characters/${segment(characterId)}/phone/app-preview`,
+        {text: file, type: appFileType},
+        callOptions,
+      ),
+    addApp: (characterId, file, callOptions) =>
+      route.postFile<AppInstallOutcome>(
+        `/api/characters/${segment(characterId)}/phone/apps`,
+        {text: file, type: appFileType},
+        callOptions,
+      ),
+    removeApp: (characterId, appId, callOptions) =>
+      route.delete<AppRemoveOutcome>(
+        `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}`,
+        callOptions,
+      ),
+    letAppWake: (characterId, appId, allowed, callOptions) =>
+      route.post<AppWakeOutcome>(
+        `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}/wake`,
+        {allowed} satisfies AppWakeBody,
         callOptions,
       ),
     openDirectConversation: (characterId, callOptions) =>
@@ -397,6 +484,9 @@ export function createGatewayClient(
   return client;
 }
 
+/** A request's body: its text, and the media type it travels under. */
+type Sent = {readonly text: string; readonly type: string};
+
 /**
  * A verb's request, and its answer read: a 200 is the route's outcome as
  * the contract declares it, which the daemon's own types generate, and
@@ -415,10 +505,10 @@ function createRoutes(
     body: object | undefined,
     options?: GatewayCallOptions,
   ): Promise<Outcome>;
-  /** A JSON document a file holds, sent as the file holds it. */
+  /** A file's text, sent as the file holds it, under its media type. */
   postFile<Outcome>(
     path: string,
-    file: string,
+    file: Sent,
     options?: GatewayCallOptions,
   ): Promise<Outcome>;
   delete<Outcome>(path: string, options?: GatewayCallOptions): Promise<Outcome>;
@@ -426,16 +516,14 @@ function createRoutes(
   const send = async (
     method: 'GET' | 'POST' | 'DELETE',
     path: string,
-    json: string | undefined,
+    body: Sent | undefined,
     options: GatewayCallOptions | undefined,
   ): Promise<unknown> => {
     const response = await transport(`${baseUrl}${path}`, {
       method,
       headers:
-        json === undefined
-          ? headers
-          : {...headers, 'content-type': 'application/json'},
-      ...(json === undefined ? {} : {body: json}),
+        body === undefined ? headers : {...headers, 'content-type': body.type},
+      ...(body === undefined ? {} : {body: body.text}),
       ...(options?.signal === undefined ? {} : {signal: options.signal}),
     });
 
@@ -455,12 +543,14 @@ function createRoutes(
       (await send(
         'POST',
         path,
-        body === undefined ? undefined : JSON.stringify(body),
+        body === undefined
+          ? undefined
+          : {text: JSON.stringify(body), type: 'application/json'},
         options,
       )) as Outcome,
     postFile: async <Outcome>(
       path: string,
-      file: string,
+      file: Sent,
       options?: GatewayCallOptions,
     ) => (await send('POST', path, file, options)) as Outcome,
     delete: async <Outcome>(path: string, options?: GatewayCallOptions) =>

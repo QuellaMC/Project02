@@ -45,18 +45,38 @@ pub enum PhoneRefusal {
     NoPhone,
 }
 
-/// An app on her phone as her window draws it: its icon and the tint of
-/// its tile, names of the page's own set, which falls back for one it does
-/// not know; its views, in its order; and the view it opens on.
+/// An app on her phone as her window draws it and her settings show it:
+/// the line she knows it by, its version and where it came from; its icon
+/// and the tint of its tile, names of the page's own set, which falls back
+/// for one it does not know; whether it says it wakes her, and whether the
+/// person lets it; its views, in its order; and the view it opens on.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 pub struct PhoneApp {
     pub id: Identifier,
     pub name: String,
+    pub summary: String,
+    pub version: String,
+    pub source: AppSource,
     pub icon: String,
     pub tint: String,
+    /// Whether it says it wakes her: only such an app sets a ring.
+    pub wakes: bool,
+    /// Whether the person lets it wake her: yes unless they said it may
+    /// not.
+    pub may_wake: bool,
     pub views: Vec<AppView>,
     pub opens_on: Identifier,
+}
+
+/// Where an app on her phone came from: it comes with her phone, it is the
+/// App Store's, or the person added it from a file nobody read.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AppSource {
+    BuiltIn,
+    Catalog,
+    File,
 }
 
 /// A view of an app, which she opens it on: a tab, in the Clock.

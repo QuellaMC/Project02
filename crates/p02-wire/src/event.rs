@@ -89,7 +89,8 @@ pub enum Event {
         failure: MaintenanceFailure,
     },
     /// Her phone is to be read again: a call of hers to it came back
-    /// accepted, or a ring's moment of hers began or ended.
+    /// accepted, a ring's moment of hers began or ended, or the person gave
+    /// her an app, removed one, or said whether one may wake her.
     PhoneChanged {
         character_id: Identifier,
     },

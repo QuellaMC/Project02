@@ -15,6 +15,7 @@ mod phone;
 mod screen;
 mod store;
 mod time;
+mod wake;
 
 pub use app::App;
 pub use bundled::BundledAppError;
@@ -22,8 +23,8 @@ pub use catalog::{Catalog, CatalogApp};
 pub use data::Ring;
 pub use error::{CatalogError, PackageError, PhoneError};
 pub use front::{Did, Front, PhoneState};
-pub use installed::{Listed, OnPhone, Source};
+pub use installed::{Installed, Listed, OnPhone, Source};
 pub use manifest::{Action, View};
 pub use phone::{Acted, Opened, Phone, SetRing};
-pub use store::STORE;
+pub use store::{STORE, it_may};
 pub use time::Now;

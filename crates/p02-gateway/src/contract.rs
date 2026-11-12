@@ -17,21 +17,23 @@ use p02_core::{
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, SettingsDocument};
 use p02_wire::{
-    AddCharacterOutcome, AddCharacterRefusal, Answer, AnswerBody, AppView, BotState, BotUsername,
-    CancelReason, ChangeOutcome, ChangeRefusal, CharacterFeature, CharacterInstalled,
-    CharacterPreviewOutcome, CharacterPreviewRefusal, CharacterState, CharacterSummary,
-    ConfigChange, ConfigHealth, ConfigTarget, ConfigView, ConfirmationAnswer, ConfirmationId,
-    ConfirmationQuestion, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome,
-    ConnectorBotsRefusal, ConnectorConfigView, ConnectorPresence, ConnectorRefusal, ErrorBody,
-    Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome, HistoryRefusal, LiveReading,
-    MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport,
-    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
-    PairingRequestBody, PairingSubject, PendingConfirmation, PhoneApp, PhoneDid, PhoneFront,
-    PhoneOutcome, PhoneRefusal, PhoneRing, ProtocolVersion, Ready, Refusal, RemoveCharacterOutcome,
+    AddCharacterOutcome, AddCharacterRefusal, Answer, AnswerBody, AppInstallOutcome,
+    AppInstallRefusal, AppPreviewOutcome, AppRemoveOutcome, AppRemoveRefusal, AppSource, AppView,
+    AppWakeBody, AppWakeOutcome, AppWakeRefusal, BotState, BotUsername, CancelReason,
+    ChangeOutcome, ChangeRefusal, CharacterFeature, CharacterInstalled, CharacterPreviewOutcome,
+    CharacterPreviewRefusal, CharacterState, CharacterSummary, ConfigChange, ConfigHealth,
+    ConfigTarget, ConfigView, ConfirmationAnswer, ConfirmationId, ConfirmationQuestion,
+    ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome, ConnectorBotsRefusal,
+    ConnectorConfigView, ConnectorPresence, ConnectorRefusal, ErrorBody, Event, GatewayMessage,
+    Health, HistoryMessage, HistoryOutcome, HistoryRefusal, LiveReading, MaintenanceFailure,
+    OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport, PackagesHealth, PairingAnswer,
+    PairingDecision, PairingOutcome, PairingRefusal, PairingRequest, PairingRequestBody,
+    PairingSubject, PendingConfirmation, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome,
+    PhoneRefusal, PhoneRing, ProtocolVersion, Ready, Refusal, RemoveCharacterOutcome,
     RemoveCharacterRefusal, RosterState, RunningDraft, RunningTurn, Screen, ScreenItem,
     ScreenOutcome, ScreenRefusal, ScreenRow, ScreenTile, Settlement, StartOutcome, StartRefusal,
-    StorageFailure, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp,
-    TurnStatus, ViewRefusal,
+    StorageFailure, StoreApp, StoreAppStatus, StoreOutcome, SubmitOutcome, ToolCallStatus,
+    TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -69,6 +71,11 @@ fn walk(wire: &mut impl Wire) {
     wire.written::<PairingAnswer>();
     wire.written::<PhoneOutcome>();
     wire.written::<ScreenOutcome>();
+    wire.written::<StoreOutcome>();
+    wire.written::<AppPreviewOutcome>();
+    wire.written::<AppInstallOutcome>();
+    wire.written::<AppRemoveOutcome>();
+    wire.written::<AppWakeOutcome>();
     wire.written::<ErrorBody>();
     wire.written::<Ready>();
     wire.written::<Event>();
@@ -82,6 +89,7 @@ fn walk(wire: &mut impl Wire) {
     wire.read::<ConnectorBotsBody>();
     wire.read::<ConfigChange>();
     wire.read::<ConfigTarget>();
+    wire.read::<AppWakeBody>();
 }
 
 /// Every declaration the roots reach, by name.
@@ -345,6 +353,7 @@ fn read() -> Vec<(&'static str, Value)> {
                 "operation": {"kind": "section_enabled", "namespace": "plugins", "id": "mem0"},
             }),
         ),
+        reads::<AppWakeBody>("AppWakeBody", json!({"allowed": false})),
     ]
 }
 
@@ -726,7 +735,7 @@ fn written() -> Vec<(&'static str, Value)> {
         value(
             "PhoneOutcome",
             &PhoneOutcome::Ok {
-                apps: vec![clock],
+                apps: vec![clock.clone()],
                 front: Some(PhoneFront {
                     screen: None,
                     message: Some("Clock took too long and was stopped.".to_owned()),
@@ -761,6 +770,89 @@ fn written() -> Vec<(&'static str, Value)> {
             "ScreenOutcome",
             &ScreenOutcome::Failed {
                 message: "Her phone could not be read: the disk is gone.".to_owned(),
+            },
+        ),
+        value(
+            "StoreOutcome",
+            &StoreOutcome::Ok {
+                apps: vec![StoreApp {
+                    id: id("reminders"),
+                    name: "Reminders".to_owned(),
+                    summary: "Things to do, on a day and time".to_owned(),
+                    icon: "list".to_owned(),
+                    tint: "orange".to_owned(),
+                    version: "1.1.0".to_owned(),
+                    changes: "Repeats every other week.".to_owned(),
+                    wakes: true,
+                    it_may: vec![
+                        "Keep its own data".to_owned(),
+                        "Wake her when something is due".to_owned(),
+                    ],
+                    status: StoreAppStatus::Update,
+                }],
+            },
+        ),
+        value(
+            "StoreOutcome",
+            &StoreOutcome::Failed {
+                message: "The App Store cannot be reached right now.".to_owned(),
+            },
+        ),
+        value(
+            "AppPreviewOutcome",
+            &AppPreviewOutcome::Ok {
+                id: id("notes"),
+                name: "Notes".to_owned(),
+                summary: "What she writes down".to_owned(),
+                icon: "doc".to_owned(),
+                tint: "gray".to_owned(),
+                version: "2.0.0".to_owned(),
+                wakes: false,
+                it_may: vec!["Keep its own data".to_owned()],
+                replaces: Some("1.0.0".to_owned()),
+            },
+        ),
+        value(
+            "AppPreviewOutcome",
+            &AppPreviewOutcome::Refused {
+                reason: AppInstallRefusal::NotAnApp,
+                message: "Manifest name must not be blank.".to_owned(),
+            },
+        ),
+        value(
+            "AppInstallOutcome",
+            &AppInstallOutcome::Ok {
+                app: clock,
+                replaced: Some("0.9.0".to_owned()),
+            },
+        ),
+        value(
+            "AppInstallOutcome",
+            &AppInstallOutcome::Refused {
+                reason: AppInstallRefusal::AlreadyInstalled,
+                message: "Reminders 1.0.0 is on her phone already.".to_owned(),
+            },
+        ),
+        value(
+            "AppInstallOutcome",
+            &AppInstallOutcome::Failed {
+                message: "The App Store cannot be reached right now.".to_owned(),
+            },
+        ),
+        value("AppRemoveOutcome", &AppRemoveOutcome::Ok),
+        value(
+            "AppRemoveOutcome",
+            &AppRemoveOutcome::Refused {
+                reason: AppRemoveRefusal::ComesWithPhone,
+                message: "Clock comes with the phone and cannot be removed.".to_owned(),
+            },
+        ),
+        value("AppWakeOutcome", &AppWakeOutcome::Ok),
+        value(
+            "AppWakeOutcome",
+            &AppWakeOutcome::Refused {
+                reason: AppWakeRefusal::CannotWake,
+                message: "Notes cannot wake her, so there is nothing to change.".to_owned(),
             },
         ),
         read_back(
@@ -799,8 +891,13 @@ fn phone() -> (PhoneApp, Screen) {
         PhoneApp {
             id: id("clock"),
             name: "Clock".to_owned(),
+            summary: "Alarms, timers, and the time anywhere".to_owned(),
+            version: "1.0.0".to_owned(),
+            source: AppSource::BuiltIn,
             icon: "clock".to_owned(),
             tint: "graphite".to_owned(),
+            wakes: true,
+            may_wake: false,
             views: vec![AppView {
                 id: id("alarms"),
                 title: "Alarms".to_owned(),

@@ -102,6 +102,7 @@ fn spoken(
             id: id("mira"),
             display_name: SpeakerName::new("Mira").unwrap(),
         },
+        person: None,
     })
     .with_text(TurnText {
         current_user_message: line.map(|(_, text)| VisibleText::normalize(text).unwrap()),

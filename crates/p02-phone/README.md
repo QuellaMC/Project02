@@ -56,10 +56,17 @@ the blocking pool.
   reads, and puts nothing in front. It is read forgivingly: no file, or a
   part that names an app or a view no longer on the phone, is her home
   screen with nothing done.
-- **Rings.** The phone lists every app's rings, soonest first. For a ring
-  told to her and still set for its time, the app's `rang` runs as a call of
-  its own, and the ring leaves unless `rang` set it for another time; a
-  `rang` that fails, or an app that cannot run, lets it go too.
+- **Rings.** The phone lists the rings that may wake her, soonest first:
+  an app's while it says it `wakes` her and the person did not say it may
+  not. Any other app's rings stay set, and nothing tells them to her. For a
+  ring told to her and still set for its time, the app's `rang` runs as a
+  call of its own, and the ring leaves unless `rang` set it for another
+  time; a `rang` that fails, or an app that cannot run, lets it go too.
+- **Whether an app may wake her** is the person's say, kept with her phone
+  in `muted.json`, the apps they said may not: every other may. It is said
+  only of an app that says it wakes her, an update keeps it, and it goes
+  when the app is removed. A list that does not read is passed over and
+  said, and every app may wake her.
 - **Her apps** are the apps her phone comes with, then those installed on
   it by name, then the App Store, each character her own. An installed app
   is its one file, kept as text in `apps/<app-id>.txt`, and
@@ -69,14 +76,16 @@ the blocking pool.
   catalog or a file.
   Installing makes the app first, so a broken one is refused and writes
   nothing; an id the phone comes with is refused; an id already installed
-  is replaced, keeping what it keeps. Removing an app
-  takes what it keeps, with its rings, its file and its place on the list,
-  and closes it when it is in front; an app the phone comes with cannot be
-  removed. A list, or an entry of it, that does not read is passed over and
-  said. An app is made from its file at the first call that runs it and
-  kept while the file is unchanged; one whose file is gone or no longer
-  makes it cannot run, which each call that runs it says, while the rest of
-  her phone works.
+  is replaced, whatever its version or source, keeping what it keeps, and
+  installing says the version it replaced. A preview judges a file as
+  installing it does, and neither writes it nor keeps the app it makes.
+  Removing an app takes what it keeps, with its rings, what the person said
+  of it, its file and its place on the list, and closes it when it is in
+  front; an app the phone comes with cannot be removed. A list, or an entry
+  of it, that does not read is passed over and said. An app is made from
+  its file at the first call that runs it and kept while the file is
+  unchanged; one whose file is gone or no longer makes it cannot run, which
+  each call that runs it says, while the rest of her phone works.
 - **What a phone comes with**: the apps in `apps/`, compiled in, today the
   Clock, `apps/clock.js`: alarms, timers, a stopwatch and a world clock. A
   bundled app that is refused fails the bundled phone at its first use, as
@@ -87,18 +96,25 @@ the blocking pool.
   names and rules of a manifest, one line on what `changes` in this
   version, and the `sha256` of its one file. An entry that breaks a rule
   is passed over. An app's text is taken only as the file of that SHA-256,
-  making an app, of the id and the version listed. Reaching the catalog is
-  the caller's; what goes wrong is said in plain words naming no address.
+  making an app, of the id and the version listed. How an app of the
+  catalog stands on her phone is one rule, `CatalogApp::status`, which
+  everything that reads the catalog takes: not on it; on it in an older
+  version than the catalog's, versions ordered as their three numbers,
+  which the catalog's updates; or on it in the catalog's version or a
+  newer one, which nothing of the catalog's replaces. Reaching the catalog
+  is the caller's; what goes wrong is said in plain words naming no
+  address.
 - **The App Store** is the phone's own app, written here with no script,
   since it needs what no app is given. Its id is taken as a bundled app's
   is: nothing installs over it or removes it, and it sets no ring. In
   `apps/store.json`, as its own data, it keeps the catalog it last read,
   which its caller reads anew as she opens it, and which app's page is
   open. Its one view shows that page, or else the catalog's apps under
-  "Reviewed by Project02", each with its tile, name and summary and whether
-  her phone holds it ("Installed", or "Update" for an older version), read
-  from her phone whenever the screen is made. `show_app {app}` answers what
-  the app is and may do and opens its page: its header, its summary, what
-  it may do ("Keep its own data", and "Wake her when something is due" for
-  one that wakes her), and its version with what changed. Opened again, it
+  "Reviewed by Project02", each with its tile, name and summary and how it
+  stands on her phone ("Update", "Installed", or nothing when it is not on
+  it), read from her phone whenever the screen is made. `show_app {app}`
+  answers what the app is and may do and opens its page: its header, its
+  summary, what it may do ("Keep its own data", and "Wake her when
+  something is due" for one that wakes her, the lines `it_may` makes for
+  the person too), and its version with what changed. Opened again, it
   shows its list; before it read anything, a line says so.

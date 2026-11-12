@@ -18,12 +18,16 @@ use p02_contracts::{
     EvidenceStatus, FactoryInput, FileStore, HookContext, LeasedFiles, LeasedStore, PluginError,
     ProvidedTool, RuntimePlugin, StoreError, ToolCall, ToolCallOutcome, ToolPreparation,
 };
-use p02_phone::{Acted, Action, Catalog, Now, Opened, Phone, PhoneError, STORE, View};
+use p02_core::SpeakerName;
+use p02_phone::{
+    Acted, Action, Catalog, Listed, Now, OnPhone, Opened, Phone, PhoneError, STORE, View,
+};
 use p02_shared::{Identifier, error_chain, sentence};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 pub use self::catalog::AppCatalog;
+pub use self::install::{Installable, NotInstallable, installable};
 use crate::host::Factory;
 use crate::package::{FilesError, admitted, leased, rejected, tool};
 
@@ -153,21 +157,23 @@ impl RuntimePlugin for PhonePlugin {
         &self.tools
     }
 
-    /// Names her apps, as her phone lists them without running any; what
-    /// of the list of her installed apps does not read is passed over and
-    /// said in the note's record.
+    /// Names her apps, as her phone lists them without running any, each
+    /// that the person said may not wake her saying so; what of the lists
+    /// her phone keeps does not read is passed over and said in the note's
+    /// record.
     async fn before_role_model_call(
         &self,
         context: &HookContext,
     ) -> Result<BeforeRoleModelCallOutput, PluginError> {
         let phone = self.phone;
+        let person = context.turn()?.person.clone();
         let on_phone = leased(store(context)?, move |files| Ok(phone.apps(files)?)).await?;
         let note = Identifier::new("apps")
             .map_err(|error| PluginError::with_source("the note of her apps needs an id", error))?;
         let apps: Vec<String> = on_phone
             .apps
             .iter()
-            .map(|app| format!("{} — {}", named(&app.name, &app.id), app.summary))
+            .map(|app| noted(app, &on_phone, person.as_ref()))
             .collect();
         let evidence = match on_phone.passed_over.as_slice() {
             [] => EvidenceNote::new(
@@ -343,6 +349,25 @@ fn store(context: &HookContext) -> Result<FileStore, PluginError> {
 /// An app as she is told of it: by its name, and its id.
 fn named(name: &str, id: &Identifier) -> String {
     format!("{name} (\"{id}\")")
+}
+
+/// `app`, on her phone as `on_phone` has it, as her note names it: by its
+/// name and id, beside them that `person` said it may not wake her when
+/// they did, since she would otherwise set a ring in it and trust it, and
+/// the line she knows it by.
+fn noted(app: &Listed, on_phone: &OnPhone, person: Option<&SpeakerName>) -> String {
+    let id = &app.id;
+    let named = if app.wakes && !on_phone.may_wake(app) {
+        format!(
+            "{} (\"{id}\", which {} said may not wake you)",
+            app.name,
+            person.map_or("they", SpeakerName::as_str)
+        )
+    } else {
+        named(&app.name, id)
+    };
+
+    format!("{named} — {}", app.summary)
 }
 
 /// What she reads of an app she opened: which it is, the view it shows,
