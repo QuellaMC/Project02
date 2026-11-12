@@ -220,7 +220,7 @@ it("services.own-service: a character whose own settings choose the other servic
   ]);
 });
 
-it("services.listed: a view lists every service in a page's order with its name and its own fields, each connected while a credential of it is in effect, a server of the person's own among NVIDIA's; the OpenAI key set connects it and gives her a model, and cleared takes both away, saying what to add", async () => {
+it("services.listed: a view lists every service in a page's order with its name, what it is, where its key comes from and its own fields, its model's named, each connected while a credential of it is in effect, a server of the person's own among NVIDIA's; the OpenAI key set connects it and gives her a model, and cleared takes both away, saying what to add", async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({
@@ -251,13 +251,19 @@ it("services.listed: a view lists every service in a page's order with its name 
       {
         id: 'openai',
         name: 'OpenAI API',
+        summary: 'Pay as you go, with an API key',
+        keyFrom: 'Get one at platform.openai.com.',
         connected: false,
+        model: 'openaiModel',
         fields: ['openaiApiKey', 'openaiModel'],
       },
       {
         id: 'nvidia',
         name: 'NVIDIA',
+        summary: 'An API key, or a server of your own',
+        keyFrom: 'Get one at build.nvidia.com.',
         connected: true,
+        model: 'nvidiaModel',
         fields: ['nvidiaApiKey', 'nvidiaModel', 'nvidiaBaseUrl'],
       },
     ],

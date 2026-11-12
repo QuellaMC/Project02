@@ -25,6 +25,7 @@ import type {
   PairingSettleOutcome,
   PendingConfirmation,
   PhoneOutcome,
+  RoleModelProvider,
   RunningTurn,
   RuntimeConfigSectionNamespace,
   StoreOutcome,
@@ -100,6 +101,8 @@ export type SettingsPage =
   | {readonly kind: 'you'}
   | {readonly kind: 'character'; readonly characterId: string}
   | {readonly kind: 'model'}
+  /** A service a character can think with, from AI Model. */
+  | {readonly kind: 'service'; readonly serviceId: RoleModelProvider}
   | {readonly kind: 'telegram'}
   /** A plugin's account, set up once for everyone. */
   | {readonly kind: 'connection'; readonly pluginId: string}

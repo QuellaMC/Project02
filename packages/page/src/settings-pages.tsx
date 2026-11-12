@@ -1,13 +1,15 @@
 /**
- * The window's pages of the home: the person, the AI model, a plugin's
- * account, an account her apps use, Advanced, and what the app knows of
- * one plugin. Each draws the home's view; a view the daemon refuses takes
- * the page's place with the daemon's sentence.
+ * The window's pages of the home: the person, the AI model and each
+ * service it can be, a plugin's account, an account her apps use,
+ * Advanced, and what the app knows of one plugin. Each draws the home's
+ * view; a view the daemon refuses takes the page's place with the
+ * daemon's sentence.
  */
 import type {ReactNode} from 'react';
 
 import type {
   ConfigTarget,
+  ModelService,
   RuntimeConfigSectionNamespace,
 } from '@project02/wire/contract';
 import {accountKeyRow, herApp} from './her-apps.ts';
@@ -34,20 +36,26 @@ import {
 import {
   accessLines,
   artOf,
+  keyOf,
   nameInEffect,
   sectionsListed,
+  serviceArt,
+  serviceChoice,
+  servicesListed,
   switchedOn,
   usedBy,
-  valueNow,
+  type ListedService,
 } from './settings-model.ts';
 import {
   characterTarget,
   fieldAt,
   home,
+  hostRow,
   sectionKey,
   sectionOf,
   targetKey,
   viewOf,
+  type Field,
   type OkView,
   type Row,
 } from './settings.ts';
@@ -97,8 +105,25 @@ export function SectionProblems({
   );
 }
 
-function hostRow(name: string, target: ConfigTarget = home): Row {
-  return {target, place: {kind: 'host', name}};
+/**
+ * The home's field of this name, while the page shows it: one of what
+ * most people never need shows while the Advanced switch is on, and
+ * whenever it holds a value of its own or something is said at it, since
+ * a value in effect is never hidden.
+ */
+function advancedField(
+  ctx: Ctx,
+  view: OkView,
+  name: string,
+): Field | undefined {
+  const field = fieldAt(view, hostRow(home, name).place);
+
+  return field !== undefined &&
+    (ctx.state.advanced ||
+      field.authored.configured ||
+      problemsAt(ctx, hostRow(home, name)).length > 0)
+    ? field
+    : undefined;
 }
 
 export function YouPage({ctx}: {readonly ctx: Ctx}) {
@@ -113,7 +138,7 @@ export function YouPage({ctx}: {readonly ctx: Ctx}) {
       />
       <HomeView ctx={ctx}>
         {view => {
-          const row = hostRow('userDisplayName');
+          const row = hostRow(home, 'userDisplayName');
           const field = fieldAt(view, row.place);
 
           return field === undefined ? null : (
@@ -136,74 +161,217 @@ export function ModelPage({ctx}: {readonly ctx: Ctx}) {
         subtitle="What your characters think with."
       />
       <HomeView ctx={ctx}>
-        {view => <ModelCards ctx={ctx} view={view} />}
+        {view => <ServiceGroups ctx={ctx} view={view} />}
       </HomeView>
     </>
   );
 }
 
 /**
- * The service; once one is chosen, its key and model; and under Advanced
- * the server address and the context size. A row that holds a value of
- * its own shows whatever the rules say: a value in effect is never hidden.
+ * Once a service is connected, what every character thinks with and the
+ * services connected; the services that can be added; and under Advanced
+ * the context size, which is every service's.
  */
-function ModelCards({ctx, view}: {readonly ctx: Ctx; readonly view: OkView}) {
-  const field = (name: string) => fieldAt(view, hostRow(name).place);
-  const service = field('roleModelProvider');
-  const shown = (name: string, when: boolean) => {
-    const found = field(name);
-
-    return found !== undefined &&
-      (when ||
-        found.authored.configured ||
-        problemsAt(ctx, hostRow(name)).length > 0)
-      ? found
-      : undefined;
-  };
-  const chosen =
-    service !== undefined &&
-    valueNow(ctx.settings, hostRow('roleModelProvider'), service) !== undefined;
-  const key = shown('nvidiaApiKey', chosen);
-  const model = shown('nvidiaModel', chosen);
-  const server = shown('nvidiaBaseUrl', ctx.state.advanced);
-  const context = shown('contextWindowTokens', ctx.state.advanced);
+function ServiceGroups({
+  ctx,
+  view,
+}: {
+  readonly ctx: Ctx;
+  readonly view: OkView;
+}) {
+  const {connected, others} = servicesListed(ctx.settings);
+  const context = advancedField(ctx, view, 'contextWindowTokens');
 
   return (
     <>
-      {service === undefined ? null : (
-        <Group
-          footer={chosen ? view.model.message : 'Choose a service to start.'}
-        >
-          <ServiceRow
+      {connected.length === 0 ? null : (
+        <>
+          <ThinksWith ctx={ctx} view={view} />
+          <Group title="Connected">
+            {connected.map(listed => (
+              <ServiceLink key={listed.service.id} ctx={ctx} listed={listed} />
+            ))}
+          </Group>
+        </>
+      )}
+      {others.services.length === 0 ? null : (
+        <Group title={others.title} footer={others.footer}>
+          {others.services.map(listed => (
+            <ServiceLink key={listed.service.id} ctx={ctx} listed={listed} />
+          ))}
+        </Group>
+      )}
+      {context === undefined ? null : (
+        <Group title="Advanced">
+          <FieldRow
             ctx={ctx}
-            row={hostRow('roleModelProvider')}
-            field={service}
+            row={hostRow(home, context.name)}
+            field={context}
           />
         </Group>
       )}
-      {key === undefined && model === undefined ? null : (
-        <Group footer="Paste a key and press Return; it is never shown again. Get one at build.nvidia.com.">
-          {key === undefined ? null : (
-            <FieldRow ctx={ctx} row={hostRow(key.name)} field={key} />
-          )}
-          {model === undefined ? null : (
-            <FieldRow ctx={ctx} row={hostRow(model.name)} field={model} />
-          )}
-        </Group>
+    </>
+  );
+}
+
+/**
+ * What every character thinks with: the service, chosen among those
+ * connected, and its model, each saved at the choice; under them, while
+ * the settings give a character no model, what is missing.
+ */
+function ThinksWith({ctx, view}: {readonly ctx: Ctx; readonly view: OkView}) {
+  const row = hostRow(home, 'roleModelProvider');
+  const field = fieldAt(view, row.place);
+  const {chosen, options, model} = serviceChoice(ctx.settings, home);
+
+  return field === undefined ? null : (
+    <Group
+      title="Characters Think With"
+      footer={
+        view.model.ready
+          ? 'Every character uses this, unless her own page says otherwise.'
+          : view.model.message
+      }
+    >
+      <ServiceRow
+        ctx={ctx}
+        row={row}
+        field={field}
+        value={chosen?.id}
+        options={options}
+        none="Choose a Service"
+        onChoose={value => {
+          void ctx.session.choose(row, value);
+        }}
+      />
+      {model === undefined ? null : (
+        <FieldRow ctx={ctx} row={hostRow(home, model.name)} field={model} />
       )}
-      {server === undefined && context === undefined ? null : (
+    </Group>
+  );
+}
+
+/** A service's row: its tile, its name and the line under it, and In Use on the one every character thinks with; it opens the service's page. */
+function ServiceLink({
+  ctx,
+  listed,
+}: {
+  readonly ctx: Ctx;
+  readonly listed: ListedService;
+}) {
+  const {service, art} = listed;
+
+  return (
+    <LinkCell
+      tall
+      {...(listed.inUse ? {value: 'In Use'} : {})}
+      onClick={() => {
+        ctx.session.goTo({kind: 'service', serviceId: service.id});
+      }}
+    >
+      <Tile icon={art.icon} tint={art.tint} />
+      <Label name={service.name} detail={listed.line} strong />
+    </LinkCell>
+  );
+}
+
+/**
+ * A service a character can think with, from AI Model: its tile, its name
+ * and what it is; its key, pasted and never shown back, with where a key
+ * comes from; under Advanced its other fields but its model, which AI
+ * Model chooses; and Remove Key once a key is saved.
+ */
+export function ServicePage({
+  ctx,
+  serviceId,
+}: {
+  readonly ctx: Ctx;
+  readonly serviceId: string;
+}) {
+  const service = viewOf(ctx.settings, home)?.services.find(
+    listed => listed.id === serviceId,
+  );
+  const art = serviceArt(serviceId);
+
+  return (
+    <>
+      <div className="sub-header">
+        <BackButton
+          label="AI Model"
+          onClick={() => {
+            ctx.session.goTo({kind: 'model'});
+          }}
+        />
+        {service === undefined ? null : (
+          <PageHeader
+            art={<Tile icon={art.icon} tint={art.tint} size="page" />}
+            title={service.name}
+            subtitle={`${service.summary}.`}
+          />
+        )}
+      </div>
+      <HomeView ctx={ctx}>
+        {view =>
+          service === undefined ? null : (
+            <ServiceCards ctx={ctx} view={view} service={service} />
+          )
+        }
+      </HomeView>
+    </>
+  );
+}
+
+function ServiceCards({
+  ctx,
+  view,
+  service,
+}: {
+  readonly ctx: Ctx;
+  readonly view: OkView;
+  readonly service: ModelService;
+}) {
+  const key = keyOf(view, service);
+  const others = service.fields.flatMap(name => {
+    const field =
+      name === key?.name || name === service.model
+        ? undefined
+        : advancedField(ctx, view, name);
+
+    return field === undefined ? [] : [field];
+  });
+
+  return (
+    <>
+      {key === undefined ? null : (
         <Group
-          title="Advanced"
-          footer="A server address runs the model on a computer of your own."
+          footer={`Paste a key and press Return; it is never shown again. ${service.keyFrom}`}
         >
-          {server === undefined ? null : (
-            <FieldRow ctx={ctx} row={hostRow(server.name)} field={server} />
-          )}
-          {context === undefined ? null : (
-            <FieldRow ctx={ctx} row={hostRow(context.name)} field={context} />
-          )}
+          <FieldRow ctx={ctx} row={hostRow(home, key.name)} field={key} />
         </Group>
       )}
+      {others.length === 0 ? null : (
+        <Group title="Advanced">
+          {others.map(field => (
+            <FieldRow
+              key={field.name}
+              ctx={ctx}
+              row={hostRow(home, field.name)}
+              field={field}
+            />
+          ))}
+        </Group>
+      )}
+      {key?.authored.configured === true ? (
+        <button
+          type="button"
+          className="button-danger"
+          onClick={() => {
+            void ctx.session.choose(hostRow(home, key.name), undefined);
+          }}
+        >
+          Remove Key
+        </button>
+      ) : null}
     </>
   );
 }

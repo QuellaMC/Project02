@@ -13,6 +13,7 @@ import type {
   ConfigTarget,
   GatewayHealth,
   LayoutWhen,
+  ModelService,
   Placement,
   RuntimeConfigDiagnostic,
   RuntimeConfigSectionNamespace,
@@ -22,6 +23,8 @@ import {
   characterTarget,
   fieldAt,
   home,
+  hostRow,
+  ownText,
   rowKey,
   sectionKey,
   sectionOf,
@@ -37,12 +40,17 @@ import {
 import type {Settings, SettingsPage} from './store.ts';
 
 /** How a row changes its field. */
-export type Control = 'key' | 'switch' | 'segmented' | 'pills' | 'text';
+export type Control =
+  'key' | 'switch' | 'segmented' | 'pills' | 'select' | 'text';
+
+/** One of a choice's values and its words. */
+export type Option = {readonly value: string; readonly label: string};
 
 /**
  * A secret is typed into a key box, a boolean is a switch, and a choice is
  * a segmented control while its words fit one, three at most, and a row of
- * pills under its label beyond that. Everything else is a text box.
+ * pills under its label beyond that. A field that suggests values while it
+ * takes any other is a select of them. Everything else is a text box.
  */
 export function controlOf(field: Field): Control {
   if (field.secret) {
@@ -57,7 +65,25 @@ export function controlOf(field: Field): Control {
     return field.allowedValues.length <= 3 ? 'segmented' : 'pills';
   }
 
-  return 'text';
+  return field.suggestedValues === undefined ? 'text' : 'select';
+}
+
+/**
+ * What a select of a field's suggested values offers: each in its words,
+ * then the value in effect, as it is, when it is none of them, so a value
+ * typed in is one of the choices.
+ */
+export function suggestedChoices(
+  field: Field,
+  value: string | undefined,
+): readonly Option[] {
+  const suggested = field.suggestedValues ?? [];
+  const typed = value === undefined || suggested.includes(value) ? [] : [value];
+
+  return [...suggested, ...typed].map(choice => ({
+    value: choice,
+    label: choiceWords(field, choice),
+  }));
 }
 
 /** What a page calls a field: its label, or its name when it declares none. */
@@ -627,7 +653,211 @@ function placeOf(
 
   return host === undefined
     ? undefined
-    : {kind: 'row', key: rowKey({target, place: {kind: 'host', name: host}})};
+    : {kind: 'row', key: rowKey(hostRow(target, host))};
+}
+
+/**
+ * What the target's own document holds for the field now: what was just
+ * typed or chosen there, else its own value; none once it was emptied.
+ */
+function ownNow(
+  settings: Settings,
+  row: Row,
+  field: Field,
+): string | undefined {
+  const text = settings.edits.get(rowKey(row)) ?? ownText(field);
+
+  return text === '' ? undefined : text;
+}
+
+/** A service's tile, as the design gives it, or the plainest for one it gives none. */
+export function serviceArt(serviceId: string): Art {
+  switch (serviceId) {
+    case 'openai':
+      return {icon: 'key', tint: 'graphite'};
+    case 'nvidia':
+      return {icon: 'grid', tint: 'teal'};
+    default:
+      return {icon: 'grid', tint: 'gray'};
+  }
+}
+
+/** A service's key: the one of its fields the view marks secret. */
+export function keyOf(view: OkView, service: ModelService): Field | undefined {
+  return service.fields
+    .map(name => fieldAt(view, {kind: 'host', name}))
+    .find(field => field?.secret === true);
+}
+
+/** A target's choice of the service a character thinks with, as its page offers it. */
+export type ServiceChoice = {
+  /** The service its own settings choose now; none while they choose none. */
+  readonly chosen?: ModelService;
+  /** The services to choose from: each one connected for the target, and the one chosen while it is not. */
+  readonly options: readonly Option[];
+  /** The field of the model the chosen service is asked for. */
+  readonly model?: Field;
+};
+
+/**
+ * The service a target's own settings choose, the services its page offers
+ * and the model of the one chosen. What was just chosen decides, else what
+ * its own settings hold; and a character who chose none but holds a model
+ * of her own for the service she thinks with has that service as her own,
+ * since a value in effect is never hidden.
+ */
+export function serviceChoice(
+  settings: Settings,
+  target: ConfigTarget,
+): ServiceChoice {
+  const view = viewOf(settings, target);
+
+  if (view === undefined) {
+    return {options: []};
+  }
+
+  const chosen = chosenService(settings, target, view);
+  const model =
+    chosen === undefined
+      ? undefined
+      : fieldAt(view, {kind: 'host', name: chosen.model});
+
+  return {
+    ...(chosen === undefined ? {} : {chosen}),
+    options: view.services
+      .filter(service => service.connected || service.id === chosen?.id)
+      .map(service => ({value: service.id, label: service.name})),
+    ...(model === undefined ? {} : {model}),
+  };
+}
+
+function chosenService(
+  settings: Settings,
+  target: ConfigTarget,
+  view: OkView,
+): ModelService | undefined {
+  const row = hostRow(target, 'roleModelProvider');
+  const provider = fieldAt(view, row.place);
+
+  if (provider === undefined) {
+    return undefined;
+  }
+
+  if (settings.edits.has(rowKey(row)) || provider.authored.configured) {
+    const own = ownNow(settings, row, provider);
+
+    return view.services.find(service => service.id === own);
+  }
+
+  const thinking = view.services.find(
+    service => service.id === provider.effective.value,
+  );
+  const model =
+    thinking === undefined
+      ? undefined
+      : fieldAt(view, {kind: 'host', name: thinking.model});
+
+  return model !== undefined &&
+    ownNow(settings, hostRow(target, model.name), model) !== undefined
+    ? thinking
+    : undefined;
+}
+
+/**
+ * What choosing Same as Everyone takes away of her own AI model: the
+ * service she chose and every model of her own, each service's, so none of
+ * them stands in for what everyone uses once the home's service is its.
+ */
+export function ownModelRows(
+  settings: Settings,
+  characterId: string,
+): readonly Row[] {
+  const target = characterTarget(characterId);
+  const view = viewOf(settings, target);
+
+  if (view === undefined) {
+    return [];
+  }
+
+  return ['roleModelProvider', ...view.services.map(service => service.model)]
+    .map(name => hostRow(target, name))
+    .filter(row => {
+      const field = fieldAt(view, row.place);
+
+      return field !== undefined && ownNow(settings, row, field) !== undefined;
+    });
+}
+
+/** A service as a row of the AI Model page: its tile, the line under its name, and whether every character thinks with it. */
+export type ListedService = {
+  readonly service: ModelService;
+  readonly art: Art;
+  readonly line: string;
+  readonly inUse: boolean;
+};
+
+/**
+ * The AI Model page's services: those connected, each saying it has its
+ * key, or a server of the person's own when it has none, and In Use on the
+ * one every character thinks with; and the rest, each saying what it is,
+ * under Add a Service, or Services while none is connected, saying more
+ * than one can be.
+ */
+export function servicesListed(settings: Settings): {
+  readonly connected: readonly ListedService[];
+  readonly others: {
+    readonly title: string;
+    readonly footer?: string;
+    readonly services: readonly ListedService[];
+  };
+} {
+  const view = viewOf(settings, home);
+  const {chosen} = serviceChoice(settings, home);
+  const listed = (view?.services ?? []).map(service => ({
+    service,
+    art: serviceArt(service.id),
+    line: !service.connected
+      ? service.summary
+      : view !== undefined &&
+          keyOf(view, service)?.effective.value !== undefined
+        ? 'Key saved'
+        : 'Your server',
+    inUse: service.connected && service.id === chosen?.id,
+  }));
+  const connected = listed.filter(entry => entry.service.connected);
+
+  return {
+    connected,
+    others: {
+      services: listed.filter(entry => !entry.service.connected),
+      ...(connected.length === 0
+        ? {
+            title: 'Services',
+            footer: 'Connect one to start. You can connect more than one.',
+          }
+        : {title: 'Add a Service'}),
+    },
+  };
+}
+
+/** The key the welcome asks for: the one of the chosen service's fields the home's view marks secret, with that service. */
+export function welcomeKey(settings: Settings):
+  | {
+      readonly row: Row;
+      readonly field: Field;
+      readonly service: ModelService;
+    }
+  | undefined {
+  const view = viewOf(settings, home);
+  const {chosen} = serviceChoice(settings, home);
+  const field =
+    view === undefined || chosen === undefined
+      ? undefined
+      : keyOf(view, chosen);
+
+  return field === undefined || chosen === undefined
+    ? undefined
+    : {row: hostRow(home, field.name), field, service: chosen};
 }
 
 /**
@@ -637,26 +867,14 @@ function placeOf(
  */
 export function welcomeReady(settings: Settings): boolean {
   const view = viewOf(settings, home);
-  const service = view?.project02.find(
-    field => field.name === 'roleModelProvider',
-  );
-  const key = view?.project02.find(field => field.name === 'nvidiaApiKey');
-  const typed = settings.edits.get(
-    rowKey({target: home, place: {kind: 'host', name: 'nvidiaApiKey'}}),
-  );
-
-  if (view === undefined || service === undefined) {
-    return false;
-  }
+  const key = welcomeKey(settings);
 
   return (
-    view.model.ready ||
-    (valueNow(
-      settings,
-      {target: home, place: {kind: 'host', name: 'roleModelProvider'}},
-      service,
-    ) !== undefined &&
-      (key?.authored.configured === true || (typed ?? '').trim() !== ''))
+    view !== undefined &&
+    (view.model.ready ||
+      (key !== undefined &&
+        (key.field.authored.configured ||
+          (settings.edits.get(rowKey(key.row)) ?? '').trim() !== '')))
   );
 }
 
@@ -680,14 +898,15 @@ export type Sidebar = {
 
 /**
  * The sidebar: the person by their name; each character health lists, off
- * when she is switched off; AI Model by the service it thinks with, or Set
- * Up; Telegram on or off; each plugin set up once for everyone by its
- * first choice, or on, or Set Up while a character has it switched on
- * before it is set up; each account of the person's her apps use, on, once
- * health says its key is set, and none before, since the app that needs it
- * leads to it; and a dot wherever a section has an error, on its entry, on
- * her row for a section of hers, or on Advanced for a plugin with no entry
- * of its own.
+ * when she is switched off; AI Model by the one service connected, or by
+ * how many when there are more, and Set Up with a dot while the home's
+ * settings give a character no model; Telegram on or off; each plugin set
+ * up once for everyone by its first choice, or on, or Set Up while a
+ * character has it switched on before it is set up; each account of the
+ * person's her apps use, on, once health says its key is set, and none
+ * before, since the app that needs it leads to it; and a dot wherever a
+ * section has an error, on its entry, on her row for a section of hers, or
+ * on Advanced for a plugin with no entry of its own.
  */
 export function sidebarOf(
   settings: Settings,
@@ -783,16 +1002,20 @@ function modelEntry(view: OkView | undefined): {
     return {value: '', dot: false};
   }
 
-  const provider = view.project02.find(
-    field => field.name === 'roleModelProvider',
-  );
-  const chosen = provider?.effective.value;
+  const connected = view.services.filter(service => service.connected);
+  const [only] = connected;
 
-  return view.model.ready &&
-    provider !== undefined &&
-    typeof chosen === 'string'
-    ? {value: choiceWords(provider, chosen), dot: false}
-    : {value: 'Set Up', dot: true};
+  if (!view.model.ready || only === undefined) {
+    return {value: 'Set Up', dot: !view.model.ready};
+  }
+
+  return {
+    value:
+      connected.length === 1
+        ? only.name
+        : `${String(connected.length)} Services`,
+    dot: false,
+  };
 }
 
 /** A plugin's entry: its first choice, or on, once set up; Set Up while a character has it on before that; off otherwise. */
@@ -873,6 +1096,8 @@ export function parentOf(page: SettingsPage): SettingsPage | undefined {
         : {kind: 'character', characterId: page.target.characterId};
     case 'plugin':
       return {kind: 'advanced'};
+    case 'service':
+      return {kind: 'model'};
     case 'account':
       return page.from === undefined
         ? undefined

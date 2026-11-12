@@ -29,6 +29,7 @@ import {
   ConnectionPage,
   ModelPage,
   PluginPage,
+  ServicePage,
   YouPage,
 } from './settings-pages.tsx';
 import {BotPage, TelegramPage} from './settings-telegram.tsx';
@@ -97,6 +98,8 @@ function PageShown({
       );
     case 'model':
       return <ModelPage ctx={ctx} />;
+    case 'service':
+      return <ServicePage ctx={ctx} serviceId={page.serviceId} />;
     case 'telegram':
       return <TelegramPage ctx={ctx} />;
     case 'connection':

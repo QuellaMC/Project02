@@ -15,10 +15,14 @@ import {
   reply,
   startModelServer,
 } from '../conformance/harness/model-server.ts';
+import {responded, replying} from '../conformance/harness/responses.ts';
 import {startTelegramServer} from '../conformance/harness/telegram-server.ts';
 import {test} from './fixture.ts';
 
-/** Mira on the model server, the home's config.json holding these settings beside the model's. */
+/**
+ * Mira on the model server as NVIDIA, which also stands in for the OpenAI
+ * API, the home's config.json holding these settings beside the model's.
+ */
 async function miraHome(
   config: {readonly project02?: object; readonly [section: string]: unknown},
   seed: Parameters<typeof createHome>[0] = {},
@@ -32,7 +36,7 @@ async function miraHome(
     ...seed,
   });
 
-  return {model, home, daemon: await startDaemon(home)};
+  return {model, home, daemon: await startDaemon(home, model.openai.env)};
 }
 
 /** The home's config.json as it stands. */
@@ -88,6 +92,18 @@ function entry(page: Page, name: string): Locator {
   return page
     .getByRole('navigation', {name: 'Settings'})
     .getByRole('button', {name: new RegExp(`^${name}`, 'u')});
+}
+
+/** A group of the page the window is on, by its title. */
+function group(page: Page, title: string): Locator {
+  return page
+    .locator('.group')
+    .filter({has: page.getByRole('heading', {name: title, exact: true})});
+}
+
+/** A row of the page the window is on that opens another page, by the start of its name. */
+function link(within: Page | Locator, name: string): Locator {
+  return within.getByRole('button', {name: new RegExp(`^${name}`, 'u')});
 }
 
 /** The green check in the box of this field. */
@@ -218,6 +234,7 @@ test('page.settings-saves-as-typed: a box saves on Return with a check and no Sa
   expect(homeConfig(home)).not.toHaveProperty(['project02', 'userDisplayName']);
 
   await entry(page, 'AI Model').click();
+  await link(group(page, 'Connected'), 'NVIDIA').click();
 
   const key = page.getByLabel('API Key', {exact: true});
 
@@ -247,6 +264,7 @@ test('page.settings-key-removed: a stored key is taken away by the button its ow
   await page.goto(daemon.url);
   await page.getByRole('button', {name: 'Settings', exact: true}).click();
   await entry(page, 'AI Model').click();
+  await link(group(page, 'Connected'), 'NVIDIA').click();
 
   const key = page.getByLabel('API Key', {exact: true});
 
@@ -268,7 +286,9 @@ test('page.settings-close-keeps-saves: a box left by the very click that closes 
 
   const release = await holdNextChange(page);
 
+  // Leaving the model's box for NVIDIA's page sends it, held at the door.
   await page.getByRole('textbox', {name: 'Model'}).fill('nvidia/small');
+  await link(group(page, 'Connected'), 'NVIDIA').click();
   await page.getByLabel('API Key', {exact: true}).fill('nvapi-second');
   await page.getByRole('button', {name: 'Back to Chat'}).click();
   release();
@@ -278,6 +298,164 @@ test('page.settings-close-keeps-saves: a box left by the very click that closes 
     .toMatchObject({
       project02: {nvidiaModel: 'nvidia/small', nvidiaApiKey: 'nvapi-second'},
     });
+});
+
+test('page.settings-services: beside NVIDIA, the OpenAI API added by pasting its key on its own page is listed under Connected; chosen at the top with a model from its list or typed in, the next reply comes through it; and its key removed puts it back under Add a Service, the page saying what every character needs', async ({
+  page,
+}) => {
+  const {model, home, daemon} = await miraHome({});
+  const {openaiApiKey} = model.openai.settings;
+  const connected = group(page, 'Connected');
+  const others = group(page, 'Add a Service');
+  const thinksWith = group(page, 'Characters Think With');
+  const service = thinksWith.getByRole('combobox', {name: 'Service'});
+  const choice = thinksWith.getByRole('combobox', {name: 'Model'});
+  const back = page
+    .getByRole('main')
+    .getByRole('button', {name: 'AI Model', exact: true});
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'AI Model').click();
+  await expect(link(connected, 'NVIDIA')).toContainText('In Use');
+  await link(others, 'OpenAI API').click();
+  await expect(page.getByRole('heading', {name: 'OpenAI API'})).toBeVisible();
+  await expect(
+    page.getByText(
+      'Paste a key and press Return; it is never shown again. Get one at platform.openai.com.',
+    ),
+  ).toBeVisible();
+
+  const key = page.getByLabel('API Key', {exact: true});
+
+  await key.fill(openaiApiKey);
+  await key.press('Enter');
+  await expect(page.getByRole('button', {name: 'Remove Key'})).toBeVisible();
+  await back.click();
+  await expect(link(connected, 'OpenAI API')).toContainText('Key saved');
+  await expect(entry(page, 'AI Model')).toContainText('2 Services');
+
+  await service.selectOption('openai');
+  await choice.selectOption('gpt-6.1-sol');
+  await expect(link(connected, 'OpenAI API')).toContainText('In Use');
+  await expect
+    .poll(() => homeConfig(home))
+    .toMatchObject({
+      project02: {roleModelProvider: 'openai', openaiModel: 'gpt-6.1-sol'},
+    });
+
+  // Another model typed in is then one of the choices.
+  await choice.selectOption('Other…');
+
+  const typed = thinksWith.getByRole('textbox', {name: 'Model'});
+
+  await typed.fill('gpt-7-preview');
+  await typed.press('Enter');
+  await expect(choice).toHaveValue('gpt-7-preview');
+  await expect
+    .poll(() => homeConfig(home))
+    .toMatchObject({project02: {openaiModel: 'gpt-7-preview'}});
+
+  model.answer(responded(replying('Through OpenAI.')));
+  await page.getByRole('button', {name: 'Back to Chat'}).click();
+  await say(page, 'Hello.');
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Through OpenAI.',
+  ]);
+  expect(model.requests.at(-1)).toMatchObject({
+    path: '/openai/v1/responses',
+    authorization: `Bearer ${openaiApiKey}`,
+    body: {model: 'gpt-7-preview'},
+  });
+  expect(await page.content()).not.toContain(openaiApiKey);
+
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'AI Model').click();
+  await link(connected, 'OpenAI API').click();
+  await page.getByRole('button', {name: 'Remove Key'}).click();
+  await expect(page.getByRole('button', {name: 'Remove Key'})).toHaveCount(0);
+  await back.click();
+  await expect(link(others, 'OpenAI API')).toBeVisible();
+  await expect(service).toHaveValue('openai');
+  await expect(thinksWith).toContainText('Add your OpenAI API key.');
+  expect(homeConfig(home)).not.toHaveProperty(['project02', 'openaiApiKey']);
+});
+
+test("page.settings-her-service: a character given a service of her own on her AI Model page answers through it while another keeps everyone's, and Same as Everyone gives her everyone's again", async ({
+  page,
+}) => {
+  const {model, home, daemon} = await miraHome(
+    {project02: {openaiApiKey: 'sk-home'}},
+    {
+      characters: {
+        nova: {'project02.character.json': characterJson('nova', 'Nova')},
+      },
+    },
+  );
+  const roster = page.getByRole('complementary', {name: 'Characters'});
+  const service = page.getByRole('combobox', {name: 'Service'});
+
+  await page.goto(daemon.url);
+  await roster.getByRole('button', {name: 'Settings for Nova'}).click();
+  await entry(page, 'Advanced').click();
+  await page.getByRole('switch', {name: 'Show Advanced Settings'}).click();
+  await entry(page, 'Nova').click();
+  await link(page.getByRole('main'), 'AI Model').click();
+  await expect(service.locator('option:checked')).toHaveText(
+    'Same as Everyone (NVIDIA)',
+  );
+  await service.selectOption('openai');
+  await page
+    .getByRole('combobox', {name: 'Model'})
+    .selectOption('gpt-6.1-terra');
+  await expect(
+    page.getByText(
+      'Only for Nova. Everyone else keeps the one on the AI Model page.',
+    ),
+  ).toBeVisible();
+  await expect
+    .poll(() => characterConfig(home, 'nova'))
+    .toMatchObject({
+      project02: {roleModelProvider: 'openai', openaiModel: 'gpt-6.1-terra'},
+    });
+
+  model.answer(
+    responded(replying('Through my own.')),
+    reply("Through everyone's."),
+  );
+  await page.getByRole('button', {name: 'Back to Chat'}).click();
+  await link(roster, 'Nova').click();
+  await say(page, 'Hi, Nova.', 'Nova');
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Through my own.',
+  ]);
+  await link(roster, 'Mira').click();
+  await say(page, 'Hi, Mira.');
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    "Through everyone's.",
+  ]);
+  expect(model.requests.map(request => request.path)).toEqual([
+    '/openai/v1/responses',
+    '/v1/chat/completions',
+  ]);
+  expect(model.requests[0]).toMatchObject({
+    authorization: 'Bearer sk-home',
+    body: {model: 'gpt-6.1-terra'},
+  });
+
+  await roster.getByRole('button', {name: 'Settings for Nova'}).click();
+  await link(page.getByRole('main'), 'AI Model').click();
+  await service.selectOption('');
+  await expect
+    .poll(() => characterConfig(home, 'nova'))
+    .not.toHaveProperty(['project02', 'openaiModel']);
+  expect(characterConfig(home, 'nova')).not.toHaveProperty([
+    'project02',
+    'roleModelProvider',
+  ]);
+  await expect(service.locator('option:checked')).toHaveText(
+    'Same as Everyone (NVIDIA)',
+  );
 });
 
 test('page.settings-feature-switch: Reply Style switched on from her page, with a tone and a sign-off, takes effect in her next reply', async ({
@@ -477,9 +655,10 @@ test('page.settings-advanced: the Advanced switch shows what most people never n
   await page.goto(daemon.url);
   await page.getByRole('button', {name: 'Settings', exact: true}).click();
   await entry(page, 'AI Model').click();
-  // The model server's address is set, so it shows.
-  await expect(page.getByLabel('Server Address')).toBeVisible();
   await expect(contextSize).toHaveCount(0);
+  // The model server's address is set, so NVIDIA's page shows it.
+  await link(group(page, 'Connected'), 'NVIDIA').click();
+  await expect(page.getByLabel('Server Address')).toBeVisible();
 
   await entry(page, 'Advanced').click();
   await advanced.click();

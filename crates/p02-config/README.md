@@ -24,9 +24,10 @@ under the store's locks, and its views and changes are p02-wire's types.
   field's words and the values it offers first, a plugin's row, and a
   section's cards with the rows of the fields its target may set.
 - **Services.** Each service a character can think with is described once
-  beside the host's fields: its name, its own fields, and those that
-  connect it, its key or for NVIDIA a server of the person's own. A view
-  lists every service and whether one of those is in effect for its
+  beside the host's fields: its name, what it is and where a key for it
+  comes from, its own fields with the one that names its model, and those
+  that connect it, its key or for NVIDIA a server of the person's own. A
+  view lists every service and whether one of those is in effect for its
   target, so a page lists them without deciding anything itself.
 - **Reading.** For the home a value is the home's, else its default; for
   a character it is hers, else the home's, else the default. A value its

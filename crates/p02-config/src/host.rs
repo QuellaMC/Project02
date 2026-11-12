@@ -279,12 +279,16 @@ static SETTINGS: [&dyn Setting; 10] = [
     &HEARTBEAT,
 ];
 
-/// A service as the settings say it: what a page calls it, its own fields
-/// in the order a page shows them, and those of them that connect it while
-/// one holds a value in effect.
+/// A service as the settings say it: what a page calls it, what it is and
+/// where a key for it comes from, its own fields in the order a page shows
+/// them, the one of them that names its model, and those that connect it
+/// while one holds a value in effect.
 struct Service {
     name: &'static str,
+    summary: &'static str,
+    key_from: &'static str,
     fields: &'static [&'static str],
+    model: &'static str,
     credentials: &'static [&'static str],
 }
 
@@ -292,12 +296,18 @@ fn service(provider: RoleModelProvider) -> Service {
     match provider {
         RoleModelProvider::Openai => Service {
             name: "OpenAI API",
+            summary: "Pay as you go, with an API key",
+            key_from: "Get one at platform.openai.com.",
             fields: &[OPENAI_API_KEY.name, OPENAI_MODEL.name],
+            model: OPENAI_MODEL.name,
             credentials: &[OPENAI_API_KEY.name],
         },
         RoleModelProvider::Nvidia => Service {
             name: "NVIDIA",
+            summary: "An API key, or a server of your own",
+            key_from: "Get one at build.nvidia.com.",
             fields: &[NVIDIA_API_KEY.name, NVIDIA_MODEL.name, NVIDIA_BASE_URL.name],
+            model: NVIDIA_MODEL.name,
             // A server of the person's own may ask for no key.
             credentials: &[NVIDIA_API_KEY.name, NVIDIA_BASE_URL.name],
         },
@@ -323,10 +333,13 @@ pub(crate) fn services(fields: &[Field<'_>]) -> Vec<ModelService> {
             ModelService {
                 id: provider,
                 name: service.name.to_owned(),
+                summary: service.summary.to_owned(),
+                key_from: service.key_from.to_owned(),
                 connected: service
                     .credentials
                     .iter()
                     .any(|name| resolved(name).effective.value().is_some()),
+                model: resolved(service.model).declaration.name().clone(),
                 fields: service
                     .fields
                     .iter()

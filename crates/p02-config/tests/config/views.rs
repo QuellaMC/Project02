@@ -136,10 +136,11 @@ fn a_view_draws_only_what_its_target_may_set_in_the_cards_and_words_its_declarat
     assert_eq!(host_field(&home_view, "userDisplayName")["label"], "Name");
 }
 
-/// A page lists the services from the view alone: each one's name and
-/// own fields, connected while a credential of it is in effect for the
-/// target, a server of the person's own among NVIDIA's; and the OpenAI
-/// model offers its models, the default in effect until one is chosen.
+/// A page lists the services from the view alone: each one's name, what it
+/// is and where its key comes from, its own fields and its model's among
+/// them, connected while a credential of it is in effect for the target, a
+/// server of the person's own among NVIDIA's; and the OpenAI model offers
+/// its models, the default in effect until one is chosen.
 #[test]
 fn a_view_lists_every_service_each_connected_by_a_credential_in_effect_for_its_target() {
     let world = World::new();
@@ -168,13 +169,19 @@ fn a_view_lists_every_service_each_connected_by_a_credential_in_effect_for_its_t
             {
                 "id": "openai",
                 "name": "OpenAI API",
+                "summary": "Pay as you go, with an API key",
+                "keyFrom": "Get one at platform.openai.com.",
                 "connected": true,
+                "model": "openaiModel",
                 "fields": ["openaiApiKey", "openaiModel"],
             },
             {
                 "id": "nvidia",
                 "name": "NVIDIA",
+                "summary": "An API key, or a server of your own",
+                "keyFrom": "Get one at build.nvidia.com.",
                 "connected": false,
+                "model": "nvidiaModel",
                 "fields": ["nvidiaApiKey", "nvidiaModel", "nvidiaBaseUrl"],
             },
         ])

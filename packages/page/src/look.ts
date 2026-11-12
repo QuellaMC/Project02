@@ -73,6 +73,7 @@ const tints = [
   'cyan',
   'pink',
   'mint',
+  'teal',
   'graphite',
 ] as const;
 

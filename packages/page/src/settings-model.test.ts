@@ -19,19 +19,26 @@ import {
   labelOf,
   marks,
   offerOf,
+  ownModelRows,
   parentOf,
   placeholderOf,
   readinessOf,
   sectionsListed,
+  serviceArt,
+  serviceChoice,
+  servicesListed,
   setupPage,
   sidebarOf,
+  suggestedChoices,
   switchedOn,
   telegramNotRunning,
   telegramOn,
   usedBy,
   valueNow,
+  welcomeKey,
   welcomeReady,
   type CharacterPreview,
+  type ListedService,
 } from './settings-model.ts';
 import {characterTarget, home, rowKey, type Row} from './settings.ts';
 import type {Settings, SettingsPage} from './store.ts';
@@ -40,6 +47,7 @@ import type {
   ConfigView,
   GatewayHealth,
   JsonValue,
+  ModelService,
   RuntimeConfigDiagnostic,
   RuntimeConfigFieldInspectShape,
   RuntimeConfigSectionInspectShape,
@@ -178,21 +186,96 @@ const phone = section('phone', {
   fields: [field('askToInstall', {valueType: 'boolean'}, true)],
 });
 
+/** The services as a view lists them, the OpenAI API's and NVIDIA's each connected or not. */
+function services(openai: boolean, nvidia: boolean): ModelService[] {
+  return [
+    {
+      id: 'openai',
+      name: 'OpenAI API',
+      summary: 'Pay as you go, with an API key',
+      keyFrom: 'Get one at platform.openai.com.',
+      connected: openai,
+      model: 'openaiModel',
+      fields: ['openaiApiKey', 'openaiModel'],
+    },
+    {
+      id: 'nvidia',
+      name: 'NVIDIA',
+      summary: 'An API key, or a server of your own',
+      keyFrom: 'Get one at build.nvidia.com.',
+      connected: nvidia,
+      model: 'nvidiaModel',
+      fields: ['nvidiaApiKey', 'nvidiaModel', 'nvidiaBaseUrl'],
+    },
+  ];
+}
+
+const openaiModels = {
+  'gpt-6-astra': 'GPT-6 Astra',
+  'gpt-6.1-sol': 'GPT-6.1 Sol',
+  'gpt-6.1-terra': 'GPT-6.1 Terra',
+  'gpt-6-luna': 'GPT-6 Luna',
+};
+
+/** The OpenAI model as its declaration shapes it: its models suggested, in their words. */
+const openaiModel: Partial<Field> = {
+  label: 'Model',
+  suggestedValues: Object.keys(openaiModels),
+  choices: openaiModels,
+};
+
+/** Each field of the services, as its declaration shapes it. */
+const serviceShapes: Readonly<Record<string, Partial<Field>>> = {
+  roleModelProvider: {
+    label: 'Service',
+    valueType: 'enum',
+    allowedValues: ['openai', 'nvidia'],
+    choices: {openai: 'OpenAI API', nvidia: 'NVIDIA'},
+  },
+  openaiApiKey: {label: 'API Key', secret: true},
+  openaiModel,
+  nvidiaApiKey: {label: 'API Key', secret: true},
+  nvidiaModel: {label: 'Model', placeholder: "NVIDIA's Default"},
+  nvidiaBaseUrl: {label: 'Server Address'},
+};
+
+/**
+ * The fields of the services as a view shows them: the target's own value
+ * where `held` names one, else the value it takes from beneath where
+ * `beneath` names one, the OpenAI model's default otherwise; a key's
+ * values are [redacted].
+ */
+function serviceFields(
+  held: Readonly<Record<string, string>>,
+  beneath: Readonly<Record<string, string>> = {},
+): Field[] {
+  return Object.entries(serviceShapes).map(([name, shape]) => {
+    const value = held[name];
+
+    return value === undefined
+      ? field(
+          name,
+          shape,
+          beneath[name] ?? (name === 'openaiModel' ? 'gpt-6-luna' : undefined),
+        )
+      : own(name, value, shape);
+  });
+}
+
+/** The home on NVIDIA with its key, unless `shape` says otherwise. */
 function homeView(shape: Partial<OkView> = {}): OkView {
   return {
     status: 'ok',
     fingerprint: 'f1',
     diagnostics: [],
     model: {ready: true},
-    services: [],
+    services: services(false, true),
     project02: [
       field('userDisplayName', {}, 'You'),
-      own('roleModelProvider', 'nvidia', {
-        valueType: 'enum',
-        allowedValues: ['nvidia'],
-        choices: {nvidia: 'NVIDIA'},
+      ...serviceFields({
+        roleModelProvider: 'nvidia',
+        nvidiaApiKey: '[redacted]',
       }),
-      own('nvidiaApiKey', '[redacted]', {secret: true}),
     ],
     sections: [memory(), telegram],
     ...shape,
@@ -315,13 +398,14 @@ function tavily(hasKey: boolean): GatewayHealth['accounts'][number] {
 const nothingFound = {rows: new Map(), sections: new Map(), notes: []};
 
 describe('settings model', () => {
-  it('gives each field the control its shape takes: a key box, a switch, a segmented choice of up to three, pills beyond, a text box otherwise', () => {
+  it('gives each field the control its shape takes: a key box, a switch, a segmented choice of up to three, pills beyond, a select of the values it suggests, a text box otherwise', () => {
     expect(controlOf(field('apiKey', {secret: true}))).toBe('key');
     expect(controlOf(field('mirror', {valueType: 'boolean'}))).toBe('switch');
     expect(controlOf(kept)).toBe('segmented');
     expect(
       controlOf(field('tone', {allowedValues: ['a', 'b', 'c', 'd']})),
     ).toBe('pills');
+    expect(controlOf(field('openaiModel', openaiModel))).toBe('select');
     expect(controlOf(field('model'))).toBe('text');
     expect(labelOf(kept)).toBe('Kept At');
     expect(labelOf(field('model'))).toBe('model');
@@ -460,7 +544,7 @@ describe('settings model', () => {
     });
   });
 
-  it('says the sidebar: the name in effect, each character off or not, AI Model by its service or Set Up, Telegram on or off, a plugin that says it is an account set up once by its first choice, Set Up while a character wants it, off otherwise, an account her apps use on once its key is set and not at all before, and a dot on what has a problem', () => {
+  it('says the sidebar: the name in effect, each character off or not, AI Model by the service connected and Set Up with a dot while the home gives no model, Telegram on or off, a plugin that says it is an account set up once by its first choice, Set Up while a character wants it, off otherwise, an account her apps use on once its key is set and not at all before, and a dot on what has a problem', () => {
     const sidebar = (
       views: Readonly<Record<string, ConfigView>>,
       found: Parameters<typeof sidebarOf>[2] = nothingFound,
@@ -543,6 +627,179 @@ describe('settings model', () => {
     expect(wrong.characters.map(entry => entry.dot)).toEqual([true, false]);
     expect(wrong.advanced.dot).toBe(true);
     expect(sidebar({}).connections.map(entry => entry.value)).toEqual(['', '']);
+  });
+
+  it("lists the services on AI Model: once one is connected, what every character thinks with over those connected, each by its key or a server of the person's own and In Use on the one chosen; then the rest by what each is, under Add a Service, or Services while none is; and the sidebar says the one connected or how many, and Set Up while a character has no model", () => {
+    const rows = (listed: readonly ListedService[]) =>
+      listed.map(entry => [entry.service.name, entry.line, entry.inUse]);
+    const page = (view: OkView) => {
+      const {connected, others} = servicesListed(settingsOf({home: view}));
+
+      return {
+        connected: rows(connected),
+        others: {...others, services: rows(others.services)},
+      };
+    };
+    const word = (view: OkView) =>
+      sidebarOf(settingsOf({home: view}), health(true), nothingFound, false)
+        .connections[0];
+    const offer = {
+      openai: ['OpenAI API', 'Pay as you go, with an API key', false],
+      nvidia: ['NVIDIA', 'An API key, or a server of your own', false],
+    };
+    const none = homeView({
+      model: {ready: false, message: 'Choose an AI service.'},
+      services: services(false, false),
+      project02: serviceFields({}),
+    });
+
+    expect(page(none)).toEqual({
+      connected: [],
+      others: {
+        title: 'Services',
+        footer: 'Connect one to start. You can connect more than one.',
+        services: [offer.openai, offer.nvidia],
+      },
+    });
+    expect(word(none)).toMatchObject({value: 'Set Up', dot: true});
+
+    expect(page(homeView())).toEqual({
+      connected: [['NVIDIA', 'Key saved', true]],
+      others: {title: 'Add a Service', services: [offer.openai]},
+    });
+    expect(word(homeView())).toMatchObject({value: 'NVIDIA', dot: false});
+
+    const both = homeView({
+      services: services(true, true),
+      project02: serviceFields({
+        roleModelProvider: 'openai',
+        openaiApiKey: '[redacted]',
+        nvidiaBaseUrl: 'http://localhost:1234/v1',
+      }),
+    });
+    const everyone = serviceChoice(settingsOf({home: both}), home);
+
+    expect(page(both)).toEqual({
+      connected: [
+        ['OpenAI API', 'Key saved', true],
+        ['NVIDIA', 'Your server', false],
+      ],
+      others: {title: 'Add a Service', services: []},
+    });
+    expect(word(both)).toMatchObject({value: '2 Services', dot: false});
+    expect(everyone.chosen?.id).toBe('openai');
+    expect(everyone.options).toEqual([
+      {value: 'openai', label: 'OpenAI API'},
+      {value: 'nvidia', label: 'NVIDIA'},
+    ]);
+    expect(everyone.model?.name).toBe('openaiModel');
+
+    // The key of the service in use taken away: it is no longer In Use or
+    // connected, yet still what is chosen, and the sidebar says a model is
+    // to be set up.
+    const keyless = homeView({
+      model: {ready: false, message: 'Add your OpenAI API key.'},
+      services: services(false, true),
+      project02: serviceFields({
+        roleModelProvider: 'openai',
+        nvidiaBaseUrl: 'http://localhost:1234/v1',
+      }),
+    });
+
+    expect(page(keyless)).toEqual({
+      connected: [['NVIDIA', 'Your server', false]],
+      others: {title: 'Add a Service', services: [offer.openai]},
+    });
+    expect(
+      serviceChoice(settingsOf({home: keyless}), home).options.map(
+        option => option.value,
+      ),
+    ).toEqual(['openai', 'nvidia']);
+    expect(word(keyless)).toMatchObject({value: 'Set Up', dot: true});
+    expect([serviceArt('openai'), serviceArt('nvidia')]).toEqual([
+      {icon: 'key', tint: 'graphite'},
+      {icon: 'grid', tint: 'teal'},
+    ]);
+    expect(serviceArt('elsewhere')).toEqual({icon: 'grid', tint: 'gray'});
+  });
+
+  it('offers a model from the list its service suggests, in their words, and one typed in among them as it is', () => {
+    const model = field('openaiModel', openaiModel, 'gpt-6-luna');
+    const listed = Object.entries(openaiModels).map(([value, label]) => ({
+      value,
+      label,
+    }));
+
+    expect(suggestedChoices(model, 'gpt-6-luna')).toEqual(listed);
+    expect(suggestedChoices(model, undefined)).toEqual(listed);
+    expect(suggestedChoices(model, 'gpt-7-preview')).toEqual([
+      ...listed,
+      {value: 'gpt-7-preview', label: 'gpt-7-preview'},
+    ]);
+  });
+
+  it("gives her a service of her own: the one she chose, else the one she thinks with while she holds its model of her own, else everyone's; offers those connected for her and hers while it is not; and Same as Everyone takes away her service and every model of hers", () => {
+    const fromHome = {
+      roleModelProvider: 'nvidia',
+      openaiApiKey: '[redacted]',
+      nvidiaApiKey: '[redacted]',
+    };
+    const hers = (
+      held: Readonly<Record<string, string>>,
+      connected: readonly ModelService[] = services(true, true),
+    ) =>
+      herView({
+        services: [...connected],
+        project02: [
+          own('enabled', true, {valueType: 'boolean'}),
+          ...serviceFields(held, fromHome),
+        ],
+      });
+    const choice = (
+      view: OkView,
+      edits: Readonly<Record<string, string>> = {},
+    ) =>
+      serviceChoice(
+        settingsOf({home: homeView(), 'character:mira': view}, edits),
+        characterTarget('mira'),
+      );
+    const terra = hers({
+      roleModelProvider: 'openai',
+      openaiModel: 'gpt-6.1-terra',
+      nvidiaModel: 'meta/llama',
+    });
+
+    expect(choice(hers({}))).toEqual({
+      options: [
+        {value: 'openai', label: 'OpenAI API'},
+        {value: 'nvidia', label: 'NVIDIA'},
+      ],
+    });
+    expect(choice(terra)).toMatchObject({
+      chosen: {id: 'openai'},
+      model: {name: 'openaiModel', effective: {value: 'gpt-6.1-terra'}},
+    });
+    expect(choice(hers({nvidiaModel: 'meta/llama'})).chosen?.id).toBe('nvidia');
+    expect(choice(hers({openaiModel: 'gpt-6.1-terra'})).chosen).toBeUndefined();
+    // Same as Everyone just chosen is what she shows at once.
+    expect(
+      choice(terra, {'character:mira/project02.roleModelProvider': ''}).chosen,
+    ).toBeUndefined();
+    expect(
+      choice(
+        hers({roleModelProvider: 'openai'}, services(false, true)),
+      ).options.map(option => option.value),
+    ).toEqual(['openai', 'nvidia']);
+    expect(
+      ownModelRows(settingsOf({'character:mira': terra}), 'mira').map(rowKey),
+    ).toEqual([
+      'character:mira/project02.roleModelProvider',
+      'character:mira/project02.openaiModel',
+      'character:mira/project02.nvidiaModel',
+    ]);
+    expect(
+      ownModelRows(settingsOf({'character:mira': hers({})}), 'mira'),
+    ).toEqual([]);
   });
 
   it('says how a character stands: off, needing an AI model with what to do, ready with any warning, or her state with why she failed', () => {
@@ -775,7 +1032,7 @@ describe('settings model', () => {
     ]);
   });
 
-  it("reads a row as it shows now: a click not yet landed, else the view; and opens the welcome's next step once a service is chosen and a key is stored or typed", () => {
+  it("reads a row as it shows now: a click not yet landed, else the view; and opens the welcome's next step once a service is chosen and its own key is stored or typed", () => {
     const service: Row = {
       target: home,
       place: {kind: 'host', name: 'roleModelProvider'},
@@ -808,18 +1065,37 @@ describe('settings model', () => {
     const unready = homeView({model: {ready: false}});
     const keyless = homeView({
       model: {ready: false},
-      project02: [
-        homeView().project02[0] ?? field('userDisplayName'),
-        provider,
-        field('nvidiaApiKey', {secret: true}),
-      ],
+      services: services(false, false),
+      project02: serviceFields({roleModelProvider: 'nvidia'}),
     });
+    const openai = {'home/project02.roleModelProvider': 'openai'};
 
     expect(welcomeReady(settingsOf({home: unready}))).toBe(true);
     expect(welcomeReady(settingsOf({home: keyless}))).toBe(false);
     expect(
       welcomeReady(
         settingsOf({home: keyless}, {'home/project02.nvidiaApiKey': 'nvapi-1'}),
+      ),
+    ).toBe(true);
+    // Another service chosen asks for a key of its own, with where to get one.
+    expect(welcomeKey(settingsOf({home: keyless}, openai))).toMatchObject({
+      row: {target: home, place: {kind: 'host', name: 'openaiApiKey'}},
+      service: {keyFrom: 'Get one at platform.openai.com.'},
+    });
+    expect(
+      welcomeReady(
+        settingsOf(
+          {home: keyless},
+          {...openai, 'home/project02.nvidiaApiKey': 'nvapi-1'},
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      welcomeReady(
+        settingsOf(
+          {home: keyless},
+          {...openai, 'home/project02.openaiApiKey': 'sk-1'},
+        ),
       ),
     ).toBe(true);
     expect(welcomeReady(settingsOf({home: homeView()}))).toBe(true);
@@ -853,6 +1129,9 @@ describe('settings model', () => {
       parentOf({kind: 'plugin', namespace: 'plugins', id: 'mem0'}),
     ).toEqual({
       kind: 'advanced',
+    });
+    expect(parentOf({kind: 'service', serviceId: 'openai'})).toEqual({
+      kind: 'model',
     });
     expect(parentOf({kind: 'remove', characterId: 'nova'})).toEqual({
       kind: 'character',
@@ -1003,7 +1282,7 @@ describe('settings model', () => {
     expect(iconOf('rocket')).toBe('grid');
     expect(iconOf(undefined)).toBe('grid');
     expect(tintOf('mint')).toBe('mint');
-    expect(tintOf('teal')).toBe('gray');
+    expect(tintOf('chartreuse')).toBe('gray');
     expect(avatarColor('mira')).toBe(avatarColor('mira'));
     expect(avatarColor('mira')).not.toBe(avatarColor('nova'));
     expect(initialOf(' mira')).toBe('M');

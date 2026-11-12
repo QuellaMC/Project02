@@ -2123,9 +2123,21 @@
           "type": "string",
           "description": "What a page calls it."
         },
+        "summary": {
+          "type": "string",
+          "description": "What it is, in a line a page shows under its name."
+        },
+        "keyFrom": {
+          "type": "string",
+          "description": "Where a key for it comes from, in a sentence."
+        },
         "connected": {
           "type": "boolean",
           "description": "Whether a credential of it is in effect for the target: its key,\nor for NVIDIA a server of the person's own too."
+        },
+        "model": {
+          "$ref": "#/$defs/Identifier",
+          "description": "The one of its fields that names the model she asks it for."
         },
         "fields": {
           "type": "array",
@@ -2138,10 +2150,13 @@
       "required": [
         "id",
         "name",
+        "summary",
+        "keyFrom",
         "connected",
+        "model",
         "fields"
       ],
-      "description": "A service as a settings page lists it: its name, whether it is\nconnected, and which of the host's fields are its own."
+      "description": "A service as a settings page lists it: its name, what it is and where a\nkey for it comes from, whether it is connected, and which of the host's\nfields are its own, its model's among them."
     },
     "OpenConversationBody": {
       "type": "object",

@@ -59,16 +59,24 @@ vocabulary! {
     }
 }
 
-/// A service as a settings page lists it: its name, whether it is
-/// connected, and which of the host's fields are its own.
+/// A service as a settings page lists it: its name, what it is and where a
+/// key for it comes from, whether it is connected, and which of the host's
+/// fields are its own, its model's among them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
 pub struct ModelService {
     pub id: RoleModelProvider,
     /// What a page calls it.
     pub name: String,
+    /// What it is, in a line a page shows under its name.
+    pub summary: String,
+    /// Where a key for it comes from, in a sentence.
+    pub key_from: String,
     /// Whether a credential of it is in effect for the target: its key,
     /// or for NVIDIA a server of the person's own too.
     pub connected: bool,
+    /// The one of its fields that names the model she asks it for.
+    pub model: Identifier,
     /// Its own fields, in the order a page shows them.
     pub fields: Vec<Identifier>,
 }

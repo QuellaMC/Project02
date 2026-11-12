@@ -454,8 +454,9 @@ export type MaintenanceFailure = { at: Timestamp, message: string, };
 export type MessageId = string;
 
 /**
- * A service as a settings page lists it: its name, whether it is
- * connected, and which of the host's fields are its own.
+ * A service as a settings page lists it: its name, what it is and where a
+ * key for it comes from, whether it is connected, and which of the host's
+ * fields are its own, its model's among them.
  */
 export type ModelService = { id: RoleModelProvider, 
 /**
@@ -463,10 +464,22 @@ export type ModelService = { id: RoleModelProvider,
  */
 name: string, 
 /**
+ * What it is, in a line a page shows under its name.
+ */
+summary: string, 
+/**
+ * Where a key for it comes from, in a sentence.
+ */
+keyFrom: string, 
+/**
  * Whether a credential of it is in effect for the target: its key,
  * or for NVIDIA a server of the person's own too.
  */
 connected: boolean, 
+/**
+ * The one of its fields that names the model she asks it for.
+ */
+model: Identifier, 
 /**
  * Its own fields, in the order a page shows them.
  */
