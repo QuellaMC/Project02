@@ -233,6 +233,10 @@ it('chatgpt.unreadable: a sign-in whose file does not read is no sign-in: health
   const home = createHome();
   const first = await startDaemon(home, auth.env);
 
+  // Signed in first: the daemon alone keeps this file, in a folder it has
+  // made a home, and a file that does not read is one it kept and that
+  // was damaged since.
+  await signIn(wireOf(first), await openEvents(first), auth);
   first.signal('SIGINT');
   expect(await first.exit()).toBe(0);
   writeFileSync(signInFile(home), '{"accessToken": "cut sho');
@@ -560,9 +564,12 @@ it('chatgpt.refresh-refused: a renewal OpenAI refuses ends the sign-in: the turn
   });
   const first = await startDaemon(home, env);
 
+  // Signed in first, so the folder is a home that keeps a sign-in; then
+  // its tokens are planted over: run out long ago, on a refresh token
+  // OpenAI never gave.
+  await signIn(wireOf(first), await openEvents(first), auth);
   first.signal('SIGINT');
   expect(await first.exit()).toBe(0);
-  // Run out long ago, on a refresh token the sign-in never gave.
   writeFileSync(
     signInFile(home),
     JSON.stringify({
@@ -600,11 +607,12 @@ it('chatgpt.refresh-refused: a renewal OpenAI refuses ends the sign-in: the turn
   );
   expect(existsSync(signInFile(home))).toBe(false);
   expect(model.requests).toEqual([]);
-  expect(auth.requests).toMatchObject([
-    {
-      path: '/oauth/token',
-      fields: {grant_type: 'refresh_token', refresh_token: 'refresh-planted'},
-    },
+  expect(
+    auth.requests.filter(
+      request => request.fields['grant_type'] === 'refresh_token',
+    ),
+  ).toMatchObject([
+    {path: '/oauth/token', fields: {refresh_token: 'refresh-planted'}},
   ]);
 });
 
