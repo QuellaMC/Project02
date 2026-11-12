@@ -167,6 +167,9 @@ describe('what the card that asks says', () => {
     expect(said({reachesInternet: true, account: 'Tavily'})).toBe(
       'From the App Store. It keeps its own data, can wake her up, reaches the internet and uses your Tavily account.',
     );
+    expect(said({wakes: false, connection: 'ChatGPT'})).toBe(
+      'From the App Store. It keeps its own data and asks ChatGPT with a connection of yours, once you allow it.',
+    );
     expect(
       confirmationWords(
         pending(install({replaces: '1.0.0'}), {
@@ -192,6 +195,49 @@ describe('what the card that asks says', () => {
         'Mira',
       ).where,
     ).toBeUndefined();
+  });
+
+  it("her ask to sign an app in: on the app's own tile, with which connection of the person's and what each question there costs them, the ChatGPT plan's limits or the OpenAI account the API key bills; a connection the page has no words for is said as the tool, with what it would do behind Details", () => {
+    /** Her ask to sign ChatGPT in with `connection`, as her phone prepares it. */
+    const signIn = (
+      connection: Readonly<Record<string, JsonValue>>,
+    ): Readonly<Record<string, JsonValue>> => ({
+      kind: 'phone_app_sign_in',
+      app: {id: 'chatgpt', name: 'ChatGPT', icon: 'bulb', tint: 'indigo'},
+      connection,
+    });
+    const said = (preview: Readonly<Record<string, JsonValue>>) =>
+      confirmationWords(
+        pending(preview, {
+          request: {
+            pluginId: 'phone',
+            toolName: 'phone.sign_in',
+            summary:
+              "Sign in to an app on your phone with one of the person's AI connections.",
+            preview,
+          },
+        }),
+        'Mira',
+      );
+    const unknown = signIn({id: 'nvidia', name: 'NVIDIA'});
+
+    expect(said(signIn({id: 'chatgpt', name: 'ChatGPT Plan'}))).toEqual({
+      tile: {icon: 'bulb', tint: 'indigo'},
+      asker: {id: 'mira', name: 'Mira'},
+      title: 'Mira wants to sign in to ChatGPT',
+      sentence:
+        "With your ChatGPT plan. Each question she asks there uses your plan's limits.",
+    });
+    expect(said(signIn({id: 'openai', name: 'OpenAI API'}))).toMatchObject({
+      title: 'Mira wants to sign in to ChatGPT',
+      sentence:
+        'With your OpenAI API key. Each question she asks there is billed to your OpenAI account.',
+    });
+    expect(said(unknown)).toMatchObject({
+      tile: {icon: 'grid', tint: 'gray'},
+      title: 'Mira wants to use phone.sign_in',
+      details: JSON.stringify(unknown, null, 2),
+    });
   });
 
   it("her ask to change one of her settings: on the tile of the feature it belongs to, by the feature's name and in the words her settings page shows for the field and each value, not set for none; until her settings are read, in the preview's own", () => {

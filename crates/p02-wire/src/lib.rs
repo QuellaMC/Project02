@@ -59,9 +59,9 @@ pub use pairing::{
     PairingRequestBody, PairingSubject, PairingSubjectBody,
 };
 pub use phone::{
-    AppAccount, AppConnection, AppModel, AppSignIn, AppSignedIn, AppSource, AppView, LiveReading,
-    PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing, Screen, ScreenCell,
-    ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow, ScreenTile,
+    AppAccount, AppConnection, AppModel, AppSignIn, AppSignedIn, AppSource, AppView, BubbleFrom,
+    LiveReading, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing, Screen,
+    ScreenCell, ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow, ScreenTile,
 };
 pub use protocol::{PROTOCOL_VERSION, ProtocolVersion};
 pub use refusal::{ErrorBody, Refusal};

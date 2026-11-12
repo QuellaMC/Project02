@@ -62,7 +62,8 @@ the blocking pool.
   list's row has a title or a time, and its `url` is an `https://` or
   `http://` address of 2,048 characters at most; a strip has 2 to 8 cells;
   ranges have 1 to 10 rows, each a bar `from` no greater than its `to`, and
-  neither past 100. A screen that breaks one is refused, saying which.
+  neither past 100; a bubble's text is not blank. A screen that breaks one
+  is refused, saying which.
 - **`net.fetch({url, method, headers, body})`**, in an action alone: in a
   screen, in `rang` and as the app is made it throws a `TypeError`, so
   looking at her phone never reaches the internet. The `url` is an

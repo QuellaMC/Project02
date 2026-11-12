@@ -807,6 +807,14 @@
       "type": "string",
       "description": "The name a bot goes by on its connector's service, without the `@`: 1\nto 32 ASCII letters, digits or underscores, as Telegram spells one."
     },
+    "BubbleFrom": {
+      "type": "string",
+      "enum": [
+        "her",
+        "them"
+      ],
+      "description": "Whom a bubble's words are from: her, or the one she talks with there."
+    },
     "ChangeRefusal": {
       "oneOf": [
         {
@@ -3925,6 +3933,28 @@
             "text"
           ],
           "description": "A small quiet line under what it follows: a credit, or what\nsomething costs."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "from": {
+              "$ref": "#/$defs/BubbleFrom"
+            },
+            "text": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "bubble"
+            }
+          },
+          "required": [
+            "kind",
+            "from",
+            "text"
+          ],
+          "description": "One turn of a conversation, as a chat draws it: words that are not\nblank, and whom they are from."
         }
       ],
       "description": "A piece of a screen."

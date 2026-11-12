@@ -2925,6 +2925,36 @@ body:has(> #root > .phone-window) {
   overflow-wrap: anywhere;
 }
 
+/* A turn of a conversation: hers at the end in the accent colour, the other's at the start on a card. */
+.phone-bubble {
+  margin: 0;
+  border-radius: 18px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* One conversation's bubbles sit closer than other pieces, as the design draws them. */
+.phone-pieces > .phone-bubble + .phone-bubble {
+  margin-top: -6px;
+}
+
+.phone-bubble-her {
+  align-self: flex-end;
+  max-width: 84%;
+  padding: 9px 13px;
+  background: var(--link);
+  color: #ffffff;
+}
+
+.phone-bubble-them {
+  align-self: flex-start;
+  max-width: 90%;
+  padding: 10px 13px;
+  line-height: 1.4;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+
 .phone-tabs {
   flex: none;
   display: grid;

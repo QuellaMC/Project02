@@ -31,6 +31,8 @@ The one that expires first is in front, with up to two more as edges
 behind it, and its card says who asks and what, in words `ask-words.ts`
 makes, pure and tested in Node: her ask to install an app, from its
 preview, with what the app may do, a clause each, or to update one; her
+ask to sign an app in, on its tile, with the connection of the person's
+it would sign in with and what each question then costs them; her
 ask to change one of her settings, in the words her
 settings page uses, which are read for it; someone new on a connector; and
 for a preview the page cannot read, the tool and what it would do behind
@@ -151,16 +153,25 @@ daemon's verbs for them: an icon for each app on her phone but the App
 Store, which has nothing to set, each opening the app's page; Get More
 Apps; and, among her permissions, Ask to Install Apps, her phone's own
 field, saved as any field is. A page about her apps reads her phone when
-the window comes to it and again on every `phone_changed` naming her, and
+the window comes to it and again on every `phone_changed` naming her and
+every `health_changed`, which the person's connections moving sends, and
 Get More Apps and an app's page read the App Store's apps for her; only
 the newest read of each lands. An app's page says whose phone it is on,
 its version and where it came from; offers Update while the App Store
 says it has a newer version, since the page compares no versions; Can
 Wake Her Up for an app that says it wakes her; and Remove App, which asks
 first, for one her phone does not come with. It says what the app may do,
-a line each, and for an app that uses an account of the person's, the
-account: by its name once her phone has its key, else Set Up, either
-opening the account's page. One her phone no longer lists, removed here
+a line each, and for an app that uses an account of the person's by a
+key, the account: by its name once her phone has its key, else Set Up,
+either opening the account's page. For an app that asks a model it has
+Signed In With in its place, as the design draws it: Not Signed In, or one
+of the person's connections it can sign in with now, and while it is
+signed in, the model it asks, each saved at the choice over the daemon's
+verb for it, the choice showing until her phone says it; and under them
+what each question uses, or, not signed in, that she asks first, or what
+it needs while nothing is connected. One signed in with a connection no
+longer connected shows not signed in, as the design draws it. One her
+phone no longer lists, removed here
 or anywhere, gives way to her page. Get More Apps
 narrows the App Store's apps by a search of their names and summaries,
 each row ending in Get, Update or Installed; Get and Update give her the
@@ -189,11 +200,14 @@ marked New until the next read, and another page of a view, as the App
 Store's page of an app is to its list, marks none; the
 view on screen is read again at each minute's turn, and a reading that
 moves is counted on the page from the moments it carries. A glance, a
-strip, ranges whose bars share one track, a field and a note are drawn as
-the design draws them, each piece keeping its height while the view
-scrolls; a glance at the head of a screen stands where the view's title
-would; and a row that names the page it is about draws its title as a
-link that opens nothing: the person watches her phone. The App Store's
+strip, ranges whose bars share one track, a field, a note and a
+conversation's bubbles, hers at the line's end in the accent colour and
+the other's at its start on a card, are drawn as the design draws them,
+each piece keeping its height while the view scrolls; a glance at the
+head of a screen stands where the view's title would; a screen of
+bubbles shows its end, the newest, as a chat does, as it opens and as
+what it says changes; and a row that names the page it is about draws
+its title as a link that opens nothing: the person watches her phone. The App Store's
 rows carry an app's tile and its page an app's header, and while her ask
 to install an app waits for the person, the row and the header with that
 app's id say so in place of their status: "Waiting", and "Waiting for

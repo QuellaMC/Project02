@@ -3,10 +3,12 @@
  * tile of what it is about, who asks, a title and one sentence, where it
  * was raised, and the time it has left. Her ask to install an app is read
  * from its preview here for her phone's window too, which lays it over
- * that app in the store until it is settled. A preview the page cannot
- * read is said as a tool she wants to use, with what it would do behind
- * Details, so nothing the person approves is hidden. Pure, so every
- * sentence is tested in Node.
+ * that app in the store until it is settled. Her ask to sign an app in
+ * says the connection of the person's it would sign in with, and what
+ * each question then costs them. A preview the page cannot read is said
+ * as a tool she wants to use, with what it would do behind Details, so
+ * nothing the person approves is hidden. Pure, so every sentence is
+ * tested in Node.
  */
 import type {
   JsonValue,
@@ -27,17 +29,30 @@ import {webSource} from './store.ts';
 /** What the preview of her ask to install an app says it is. */
 const installKind = 'phone_app_install';
 
+/** What the preview of her ask to sign an app in says it is. */
+const signInKind = 'phone_app_sign_in';
+
 /** What the preview of her ask to change one of her settings says it is. */
 const settingKind = 'runtime_plugin_config_change';
 
 /** The tile of a tool the page knows nothing of. */
 const plainArt: Art = {icon: 'grid', tint: 'gray'};
 
+/** What her app signing in with each connection of the person's means for them, by the connection's id. */
+const signInWith = {
+  chatgpt:
+    "With your ChatGPT plan. Each question she asks there uses your plan's limits.",
+  openai:
+    'With your OpenAI API key. Each question she asks there is billed to your OpenAI account.',
+} as const;
+
 export type InstallAsk = {
   /**
    * The app as the App Store lists it: its id, name, tile and version,
-   * whether it says it wakes her, whether it reaches the internet, and the
-   * name of the person's account it uses there, when it uses one.
+   * whether it says it wakes her, whether it reaches the internet, the
+   * name of the person's account it uses there, when it uses one, and the
+   * name of the connection of theirs it asks a model through, when it
+   * asks one.
    */
   readonly app: {
     readonly id: string;
@@ -48,9 +63,20 @@ export type InstallAsk = {
     readonly wakes: boolean;
     readonly reachesInternet: boolean;
     readonly account?: string;
+    readonly connection?: string;
   };
   /** The version of it on her phone that installing it updates, when there is one. */
   readonly replaces?: string;
+};
+
+/** Her ask to sign an app in: the app, by its name and tile, and the connection of the person's it would sign in with. */
+type SignInAsk = {
+  readonly app: {
+    readonly name: string;
+    readonly icon: string;
+    readonly tint: string;
+  };
+  readonly connection: keyof typeof signInWith;
 };
 
 /** A field's value as her own settings hold it: set, or not. */
@@ -119,34 +145,46 @@ export function settingAskOf(
 
 /**
  * A confirmation of the character named `name`: her ask to install or
- * update an app, to change one of her settings, worded as her settings
- * page words it once `settings`, her settings, are read, or else to use a
- * tool.
+ * update an app, to sign an app in, to change one of her settings, worded
+ * as her settings page words it once `settings`, her settings, are read,
+ * or else to use a tool.
  */
 export function confirmationWords(
   pending: PendingConfirmation,
   name: string,
   settings?: OkView,
 ): AskWords {
-  const {preview} = pending.request;
-  const install = installAskOf(preview);
-  const setting = settingAskOf(preview);
   const where = whereRaised(pending);
-  let said: Said;
-
-  if (install !== undefined) {
-    said = installSaid(name, install);
-  } else if (setting === undefined) {
-    said = toolSaid(name, pending);
-  } else {
-    said = settingSaid(name, setting, settings);
-  }
 
   return {
-    ...said,
+    ...confirmationSaid(pending, name, settings),
     asker: {id: pending.characterId, name},
     ...(where === undefined ? {} : {where}),
   };
+}
+
+/** What a confirmation says, by what its preview is. */
+function confirmationSaid(
+  pending: PendingConfirmation,
+  name: string,
+  settings: OkView | undefined,
+): Said {
+  const {preview} = pending.request;
+  const install = installAskOf(preview);
+  const signIn = signInAskOf(preview);
+  const setting = settingAskOf(preview);
+
+  if (install !== undefined) {
+    return installSaid(name, install);
+  }
+
+  if (signIn !== undefined) {
+    return signInSaid(name, signIn);
+  }
+
+  return setting === undefined
+    ? toolSaid(name, pending)
+    : settingSaid(name, setting, settings);
 }
 
 /** Someone new on a connector, asking to be let in: who, on which, where they wrote and the code. */
@@ -192,7 +230,21 @@ function mayDo(app: InstallAsk['app']): readonly string[] {
     ...(app.wakes ? ['can wake her up'] : []),
     ...(app.reachesInternet ? ['reaches the internet'] : []),
     ...(app.account === undefined ? [] : [`uses your ${app.account} account`]),
+    ...(app.connection === undefined
+      ? []
+      : [
+          `asks ${app.connection} with a connection of yours, once you allow it`,
+        ]),
   ];
+}
+
+/** Her ask to sign an app in, on the app's own tile: the connection it would sign in with, and what each question then costs. */
+function signInSaid(name: string, {app, connection}: SignInAsk): Said {
+  return {
+    tile: {icon: iconOf(app.icon), tint: tintOf(app.tint)},
+    title: `${name} wants to sign in to ${app.name}`,
+    sentence: signInWith[connection],
+  };
 }
 
 /** Clauses joined as a sentence joins them: the last by "and", the rest by commas. */
@@ -286,26 +338,59 @@ function appOf(app: JsonValue | undefined): InstallAsk['app'] | undefined {
     return undefined;
   }
 
-  const {id, name, icon, tint, version, wakes, reachesInternet, account} = app;
+  const {id, version, wakes, reachesInternet, account, connection} = app;
+  const tiled = tiledOf(app);
 
-  return typeof id === 'string' &&
-    typeof name === 'string' &&
-    typeof icon === 'string' &&
-    typeof tint === 'string' &&
+  return tiled !== undefined &&
+    typeof id === 'string' &&
     typeof version === 'string' &&
     typeof wakes === 'boolean' &&
     typeof reachesInternet === 'boolean' &&
-    (account === undefined || typeof account === 'string')
+    (account === undefined || typeof account === 'string') &&
+    (connection === undefined || typeof connection === 'string')
     ? {
         id,
-        name,
-        icon,
-        tint,
+        ...tiled,
         version,
         wakes,
         reachesInternet,
         ...(account === undefined ? {} : {account}),
+        ...(connection === undefined ? {} : {connection}),
       }
+    : undefined;
+}
+
+/** Her ask, when `preview` is one of signing an app in with a connection the page has words for. */
+function signInAskOf(
+  preview: Readonly<Record<string, JsonValue>>,
+): SignInAsk | undefined {
+  const {kind, app, connection} = preview;
+  const tiled = isFields(app) ? tiledOf(app) : undefined;
+  const id = isFields(connection) ? connection['id'] : undefined;
+
+  return kind === signInKind &&
+    tiled !== undefined &&
+    typeof id === 'string' &&
+    hasWords(id)
+    ? {app: tiled, connection: id}
+    : undefined;
+}
+
+/** Whether the page has words for signing an app in with the connection of `id`. */
+function hasWords(id: string): id is SignInAsk['connection'] {
+  return Object.hasOwn(signInWith, id);
+}
+
+/** An app's name and the tile it names, when a preview holds each as text. */
+function tiledOf(
+  app: Readonly<Record<string, JsonValue>>,
+): SignInAsk['app'] | undefined {
+  const {name, icon, tint} = app;
+
+  return typeof name === 'string' &&
+    typeof icon === 'string' &&
+    typeof tint === 'string'
+    ? {name, icon, tint}
     : undefined;
 }
 

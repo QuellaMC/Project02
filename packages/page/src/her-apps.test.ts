@@ -1,7 +1,9 @@
 import {describe, expect, it} from 'vitest';
 
 import type {
+  AppConnection,
   AppPreviewOutcome,
+  AppSignIn,
   ConfigView,
   PhoneApp,
   PhoneOutcome,
@@ -273,6 +275,113 @@ describe('her apps in the settings window', () => {
     );
 
     expect(appShownOf(unread, mira, 'reminders')).not.toHaveProperty('update');
+  });
+
+  it("draws the page of an app that signs in with a connection of the person's: Signed In With offers Not Signed In and each connection it can sign in with now, as the person's own; while it is signed in, the model it asks among those its connection offers, one no longer offered among them too; and under them what each question uses, or, not signed in, that she asks first, or what it needs while nothing is connected; signed in with a connection no longer connected, it is drawn not signed in", () => {
+    const plan: AppConnection = {
+      id: 'chatgpt',
+      name: 'ChatGPT Plan',
+      models: [
+        {id: 'gpt-6.1-sol', name: 'GPT-6.1 Sol'},
+        {id: 'gpt-6.1-terra', name: 'GPT-6.1 Terra'},
+      ],
+      defaultModel: 'gpt-6.1-sol',
+    };
+    const api: AppConnection = {
+      id: 'openai',
+      name: 'OpenAI API',
+      models: [
+        {id: 'gpt-6-astra', name: 'GPT-6 Astra'},
+        {id: 'gpt-6-luna', name: 'GPT-6 Luna'},
+      ],
+      defaultModel: 'gpt-6-luna',
+    };
+    const shown = (signIn: AppSignIn) =>
+      appShownOf(
+        settingsOf(
+          windowOn(herPage, {
+            phone: {
+              ...phone,
+              apps: [
+                clock,
+                app('chatgpt', 'ChatGPT', {
+                  icon: 'bulb',
+                  tint: 'indigo',
+                  itMay: [
+                    'Keep its own data',
+                    'Ask ChatGPT with a connection of yours, once you allow it',
+                  ],
+                  signIn,
+                }),
+                appStore,
+              ],
+            },
+          }),
+        ),
+        mira,
+        'chatgpt',
+      )?.signIn;
+    const yours = {
+      plan: {value: 'chatgpt', label: 'Your ChatGPT Plan'},
+      api: {value: 'openai', label: 'Your OpenAI API'},
+    } as const;
+    const asksFirst =
+      'Mira asks you the first time she wants to sign in. You can also choose here.';
+
+    expect(shown({connections: []})).toEqual({
+      connections: [],
+      line: 'It needs a ChatGPT plan or an OpenAI API key, connected under AI Model. Then Mira asks you before she signs in with it.',
+    });
+    expect(shown({connections: [api]})).toEqual({
+      connections: [yours.api],
+      line: asksFirst,
+    });
+    expect(
+      shown({
+        connections: [plan, api],
+        signedIn: {connection: 'chatgpt', model: 'gpt-6.1-sol'},
+      }),
+    ).toEqual({
+      connections: [yours.plan, yours.api],
+      signedIn: {
+        connection: 'chatgpt',
+        model: 'gpt-6.1-sol',
+        models: [
+          {value: 'gpt-6.1-sol', label: 'GPT-6.1 Sol'},
+          {value: 'gpt-6.1-terra', label: 'GPT-6.1 Terra'},
+        ],
+      },
+      line: "Each question she asks uses your ChatGPT Plan's limits.",
+    });
+    expect(
+      shown({
+        connections: [plan, api],
+        signedIn: {connection: 'openai', model: 'gpt-6-astra'},
+      }),
+    ).toEqual({
+      connections: [yours.plan, yours.api],
+      signedIn: {
+        connection: 'openai',
+        model: 'gpt-6-astra',
+        models: [
+          {value: 'gpt-6-astra', label: 'GPT-6 Astra'},
+          {value: 'gpt-6-luna', label: 'GPT-6 Luna'},
+        ],
+      },
+      line: 'Each question she asks uses your OpenAI API account.',
+    });
+    expect(
+      shown({
+        connections: [plan],
+        signedIn: {connection: 'chatgpt', model: 'gpt-6-sol'},
+      })?.signedIn?.models.at(-1),
+    ).toEqual({value: 'gpt-6-sol', label: 'gpt-6-sol'});
+    expect(
+      shown({
+        connections: [plan],
+        signedIn: {connection: 'openai', model: 'gpt-6-luna'},
+      }),
+    ).toEqual({connections: [yours.plan], line: asksFirst});
   });
 
   it('ends each row of Get More Apps in Get, Update or Installed as the App Store says the app stands on her phone, and finds apps by their names and summaries whatever their case, every one while the search is empty', () => {

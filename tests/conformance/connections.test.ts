@@ -495,7 +495,7 @@ it('connections.person-chooses: the person signs her app in with a connection of
   });
 });
 
-it("connections.gone: her app signed in with a connection that is no longer connected asks nothing: once Sam takes away the OpenAI API's key, her question is not asked, and her app tells her Sam's OpenAI API is no longer connected and to ask Sam; her phone still says what it is signed in with, and no connection it can sign in with", async () => {
+it("connections.gone: her app signed in with a connection that is no longer connected asks nothing: once Sam takes away the OpenAI API's key, her question is not asked, and her app tells her Sam's OpenAI API is no longer connected and to ask Sam; her phone still says what it is signed in with, and no connection it can sign in with; and her ask to sign in is then judged as for an app not signed in", async () => {
   const {model, wire} = await connected({key: true, plan: false});
 
   await wire.addApp('mira', fileOf(asker));
@@ -534,6 +534,19 @@ it("connections.gone: her app signed in with a connection that is no longer conn
       },
     }),
   );
+
+  model.answer(
+    calling(['phone_sign_in', {app: 'asker'}]),
+    reply('Nothing to sign in with.'),
+  );
+  await say('Sign in again.', 'again');
+  expect(toolResults(model.requests.at(-1)).at(-1)).toMatchObject({
+    status: 'rejected',
+    toolName: 'phone.sign_in',
+    reason: 'not_connected',
+    message:
+      "This needs Sam's ChatGPT plan or OpenAI API key, connected under AI Model in Settings.",
+  });
 });
 
 it('connections.stop: her stop while her app waits for its answer does not wait for it: the question in flight ends at once, her app reads that it was stopped, her turn ends as a stop lets it, and the daemon exits', async () => {

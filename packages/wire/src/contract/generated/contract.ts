@@ -157,6 +157,11 @@ export type BotState = "on" | "refused" | "unreachable" | "conflict" | "webhook"
 export type BotUsername = string;
 
 /**
+ * Whom a bubble's words are from: her, or the one she talks with there.
+ */
+export type BubbleFrom = "her" | "them";
+
+/**
  * Why a change was refused.
  */
 export type ChangeRefusal = "conflict" | "invalid" | "unknown_character";
@@ -933,7 +938,7 @@ caption?: string,
 /**
  * A quieter line under the caption.
  */
-detail?: string, } | { "kind": "strip", cells: ReadonlyArray<ScreenCell>, } | { "kind": "ranges", rows: ReadonlyArray<ScreenRange>, } | { "kind": "field", text: string, icon?: string, } | { "kind": "note", text: string, };
+detail?: string, } | { "kind": "strip", cells: ReadonlyArray<ScreenCell>, } | { "kind": "ranges", rows: ReadonlyArray<ScreenRange>, } | { "kind": "field", text: string, icon?: string, } | { "kind": "note", text: string, } | { "kind": "bubble", from: BubbleFrom, text: string, };
 
 /**
  * One view of an app on her phone, as a person looking around it sees it:

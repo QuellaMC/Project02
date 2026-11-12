@@ -4,6 +4,7 @@
  * the store. Browser-only like session.ts; the browser suite is its cover.
  */
 import type {
+  AppSignInBody,
   ChatgptOutcome,
   ConfigChangeOutcome,
   ConfigTarget,
@@ -111,6 +112,12 @@ export type SettingsVerbs = {
     appId: string,
     allowed: boolean,
   ) => Promise<void>;
+  /** The person's say on how an app of hers that asks a model is signed in: whether her phone kept it. */
+  readonly signInApp: (
+    characterId: string,
+    appId: string,
+    signIn: AppSignInBody,
+  ) => Promise<boolean>;
   /** Starts signing the home in to a ChatGPT plan: health says the code to approve, and moves on once it is. */
   readonly startChatgptSignIn: () => Promise<void>;
   /** Calls off the wait for the person to approve the code. */
@@ -140,6 +147,7 @@ export const noSettingsVerbs: SettingsVerbs = {
   addAppFile: () => Promise.resolve(),
   removeApp: () => Promise.resolve(),
   letAppWake: () => Promise.resolve(),
+  signInApp: () => Promise.resolve(false),
   startChatgptSignIn: () => Promise.resolve(),
   cancelChatgptSignIn: () => Promise.resolve(),
   signOutOfChatgpt: () => Promise.resolve(),
@@ -362,14 +370,19 @@ function herAppReads(tab: Tab): {
   };
 }
 
-/** Her apps: given from the App Store, added from a file, removed, and let wake her or not. */
+/** Her apps: given from the App Store, added from a file, removed, let wake her or not, and signed in or out. */
 function appVerbs({
   client,
   getState,
   apply,
 }: Tab): Pick<
   SettingsVerbs,
-  'giveApp' | 'chooseAppFile' | 'addAppFile' | 'removeApp' | 'letAppWake'
+  | 'giveApp'
+  | 'chooseAppFile'
+  | 'addAppFile'
+  | 'removeApp'
+  | 'letAppWake'
+  | 'signInApp'
 > {
   /** Files chosen, numbered as they are: only the newest one's preview is shown. */
   let chosen = 0;
@@ -461,6 +474,21 @@ function appVerbs({
       if (outcome.status !== 'ok') {
         apply(current => noticed(current, outcome.message));
       }
+    },
+    async signInApp(characterId, appId, signIn) {
+      apply(noticeSpent);
+
+      const outcome = await client
+        .signInApp(characterId, appId, signIn)
+        .catch(unanswered);
+
+      // Kept, its page shows it once her phone is read again, which the
+      // stream's word that her phone changed asks for.
+      if (outcome.status !== 'ok') {
+        apply(current => noticed(current, outcome.message));
+      }
+
+      return outcome.status === 'ok';
     },
   };
 }

@@ -1252,7 +1252,12 @@ data: {…}</code></pre>
         <code>text</code> with an optional <code>icon</code> at its start, a
         name of the page's own set; a <code>note</code> is a small quiet
         line of <code>text</code> under what it follows, a credit or what
-        something costs. Any view is read on request with
+        something costs; a <code>bubble</code> is one turn of a
+        conversation, its <code>text</code>, which is not blank, and whom
+        it is <code>from</code>, <code>her</code> or <code>them</code>, the
+        one she talks with there, which a client draws as a chat draws its
+        lines, hers at one side and theirs at the other, a screen of them
+        from its end. Any view is read on request with
         <code>GET /api/characters/:id/phone/apps/:app/views/:view</code>,
         which puts nothing in front of her.
       </p>
@@ -1341,9 +1346,11 @@ data: {…}</code></pre>
         first connected in the AI Model page's order, by its
         <code>id</code> and <code>name</code>. Allowed, the app is signed in
         with it, asking the model it starts with. An app her phone lacks,
-        one that signs in to nothing, one signed in already, and one with
+        one that signs in to nothing, one signed in already with a connection still
+        connected, and one with
         none of the person's connections connected are refused before anyone
-        is asked.
+        is asked. The web page words its card from the app and the
+        connection's <code>id</code>.
       </p>
 
       <p>

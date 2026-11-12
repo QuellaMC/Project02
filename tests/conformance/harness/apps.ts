@@ -4,8 +4,8 @@
  * SHA-256, and a catalog of apps published where its rule puts each file;
  * with the apps the tests publish, Reminders and quiet ones, Lookup, which
  * reaches the internet, Asker, which asks a model through a connection of
- * the person's, and Sampler, which shows the pieces Weather and Web Search
- * are drawn with.
+ * the person's and shows what it asked as a conversation, and Sampler,
+ * which shows the pieces Weather and Web Search are drawn with.
  */
 import {createHash} from 'node:crypto';
 
@@ -145,7 +145,9 @@ export function fetch_all({requests}) {
  * Asker, which asks a model through the person's ChatGPT, a connection of
  * theirs, and reaches no host. `ask` asks its question, with instructions
  * of its own, and answers what came of it, the answer or the sentence of
- * its failure, which it keeps; its screen shows what it kept.
+ * its failure, which it keeps with the question, its last ten; its screen
+ * shows them as a conversation, each question hers and what came of it
+ * the other's.
  */
 export const asker: App = {
   manifest: {
@@ -175,7 +177,14 @@ export const asker: App = {
     ],
   },
   script: `export function screen() {
-  return {items: [{kind: 'text', text: phone.storage.get('asked') ?? 'Nothing yet'}]};
+  const asked = phone.storage.get('asked') ?? [];
+
+  return {items: asked.length === 0
+    ? [{kind: 'text', text: 'Nothing yet'}]
+    : asked.flatMap(({question, answer}) => [
+      {kind: 'bubble', from: 'her', text: question},
+      {kind: 'bubble', from: 'them', text: answer},
+    ])};
 }
 
 export function ask({question}) {
@@ -191,7 +200,9 @@ export function ask({question}) {
     came = {error: error.message};
   }
 
-  phone.storage.set('asked', JSON.stringify(came));
+  const asked = phone.storage.get('asked') ?? [];
+
+  phone.storage.set('asked', [...asked, {question, answer: came.text ?? came.error}].slice(-10));
 
   return came;
 }`,

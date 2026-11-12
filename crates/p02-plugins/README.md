@@ -98,7 +98,8 @@ to sign one in: prepared reading her phone and the connections, its
 preview `{kind: "phone_app_sign_in", app: {id, name, icon, tint},
 connection: {id, name}}` names the first of the person's connected, and
 their yes signs the app in with it, no model chosen. An app her phone
-lacks, one that signs in to nothing, one signed in already, and one with
-none of the person's connections connected are refused unasked. The
+lacks, one that signs in to nothing, one signed in already with a
+connection still connected, and one with none of the person's
+connections connected are refused unasked. The
 phone's budget, 4 minutes, holds a call that asks its two questions and
 makes its requests.

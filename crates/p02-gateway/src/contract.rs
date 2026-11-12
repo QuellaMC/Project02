@@ -21,7 +21,7 @@ use p02_wire::{
     AppInstallOutcome, AppInstallRefusal, AppModel, AppPreviewOutcome, AppRemoveOutcome,
     AppRemoveRefusal, AppSignIn, AppSignInBody, AppSignInOutcome, AppSignInRefusal, AppSignedIn,
     AppSource, AppView, AppWakeBody, AppWakeOutcome, AppWakeRefusal, BotState, BotUsername,
-    CancelReason, ChangeOutcome, ChangeRefusal, CharacterFeature, CharacterInstalled,
+    BubbleFrom, CancelReason, ChangeOutcome, ChangeRefusal, CharacterFeature, CharacterInstalled,
     CharacterPreviewOutcome, CharacterPreviewRefusal, CharacterState, CharacterSummary,
     ChatgptOutcome, ChatgptSignIn, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
     ConfirmationAnswer, ConfirmationId, ConfirmationQuestion, ConnectorBot, ConnectorBotsBody,
@@ -1113,6 +1113,14 @@ fn phone() -> (PhoneApp, Screen) {
                 },
                 ScreenItem::Note {
                     text: "Weather data by Open-Meteo.com".to_owned(),
+                },
+                ScreenItem::Bubble {
+                    from: BubbleFrom::Her,
+                    text: "How long do I steep green tea?".to_owned(),
+                },
+                ScreenItem::Bubble {
+                    from: BubbleFrom::Them,
+                    text: "Two to three minutes.".to_owned(),
                 },
             ],
             page: words("reminders"),

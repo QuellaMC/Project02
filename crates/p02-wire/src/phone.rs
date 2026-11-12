@@ -307,6 +307,17 @@ pub enum ScreenItem {
     /// A small quiet line under what it follows: a credit, or what
     /// something costs.
     Note { text: String },
+    /// One turn of a conversation, as a chat draws it: words that are not
+    /// blank, and whom they are from.
+    Bubble { from: BubbleFrom, text: String },
+}
+
+/// Whom a bubble's words are from: her, or the one she talks with there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "lowercase")]
+pub enum BubbleFrom {
+    Her,
+    Them,
 }
 
 /// A row of a list: a title, a time or both.

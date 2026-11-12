@@ -3,8 +3,9 @@
 //! shown the app and the connection it would sign in with, the first of
 //! theirs connected now in the AI Model page's order, and their yes signs
 //! it in with that one, asking the model it starts with. An app her phone
-//! lacks, one that signs in to nothing, one signed in already, and one with
-//! none of the person's connections connected are refused unasked.
+//! lacks, one that signs in to nothing, one signed in already with a
+//! connection still connected, and one with none of the person's
+//! connections connected are refused unasked.
 
 use async_trait::async_trait;
 use p02_contracts::{
@@ -73,13 +74,21 @@ pub(super) async fn prepare(
         Err(refusal) => return Ok(refused(&on_phone, &refusal)),
     };
 
-    if on_phone.signed_in(app).is_some() {
+    let connected = connections.connected(account).await;
+
+    // Signed in with a connection that went away is no sign-in to her app
+    // or to the person's page, so she may ask again, for one connected.
+    if on_phone.signed_in(app).is_some_and(|signed_in| {
+        connected
+            .iter()
+            .any(|offered| offered.id.as_str() == signed_in.connection.as_str())
+    }) {
         let message = format!("{} is signed in already.", app.name);
 
         return Ok(unasked(ALREADY_SIGNED_IN, message.clone(), &message));
     }
 
-    let Some(connection) = connections.connected(account).await.into_iter().next() else {
+    let Some(connection) = connected.into_iter().next() else {
         let message = format!(
             "This needs {} ChatGPT plan or OpenAI API key, connected under AI Model in Settings.",
             whose(person.as_ref())

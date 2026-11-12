@@ -7,12 +7,20 @@
  * person opens goes to the session. Nothing here changes anything of hers:
  * a switch is drawn, never pressed.
  */
-import {useEffect, useState} from 'react';
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 
 import type {
   LiveReading,
   PhoneApp,
   PhoneRing,
+  Screen,
   ScreenCell,
   ScreenItem,
   ScreenRange,
@@ -148,6 +156,7 @@ function AppView({
   readonly session: PhoneSession;
 }) {
   const {app, viewId} = view;
+  const pieces = useRef<HTMLDivElement>(null);
   const title =
     app.views.find(candidate => candidate.id === viewId)?.title ?? app.name;
 
@@ -157,11 +166,13 @@ function AppView({
   const headed =
     view.message === undefined && view.screen?.items[0]?.kind === 'glance';
 
+  useConversationEnd(pieces, view.screen);
+
   return (
     <>
       <div className="phone-view">
         {headed ? null : <h2 className="phone-view-title">{title}</h2>}
-        <div className="phone-pieces">
+        <div ref={pieces} className="phone-pieces">
           {view.message === undefined ? (
             view.screen?.items.map((item, at, items) => (
               <Piece
@@ -204,7 +215,8 @@ function AppView({
  * A piece of a screen. Text alone on its screen is a quiet line in the
  * middle of it, as a view with nothing in it yet says so, and among other
  * pieces a paragraph. A row or an app's header carrying the id of an app
- * she waits on the person to install says so in place of its status.
+ * she waits on the person to install says so in place of its status. A
+ * bubble stands at the side of whom it is from.
  */
 function Piece({
   item,
@@ -262,7 +274,37 @@ function Piece({
       return <Field field={item} />;
     case 'note':
       return <p className="phone-note">{item.text}</p>;
+    case 'bubble':
+      return (
+        <p className={`phone-bubble phone-bubble-${item.from}`}>{item.text}</p>
+      );
   }
+}
+
+/**
+ * A screen of bubbles shows its end, the newest, as a chat does: the view
+ * scrolls there as it opens and as what it says changes, and a read that
+ * says nothing new leaves it where the person scrolled it.
+ */
+function useConversationEnd(
+  pieces: RefObject<HTMLDivElement | null>,
+  screen: Screen | undefined,
+): void {
+  const said = useMemo(
+    () =>
+      screen?.items.some(item => item.kind === 'bubble') === true
+        ? JSON.stringify(screen.items)
+        : undefined,
+    [screen],
+  );
+
+  useLayoutEffect(() => {
+    const view = pieces.current;
+
+    if (said !== undefined && view !== null) {
+      view.scrollTop = view.scrollHeight;
+    }
+  }, [pieces, said]);
 }
 
 /**

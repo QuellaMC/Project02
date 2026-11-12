@@ -7,6 +7,7 @@
  */
 import {useState, type ReactNode} from 'react';
 
+import type {AppSignInBody} from '@project02/wire/contract';
 import {
   appFileTypes,
   appShownOf,
@@ -18,6 +19,7 @@ import {
   stripOf,
   unreadWarning,
   type AccountRow,
+  type SignInShown,
 } from './her-apps.ts';
 import {iconOf, tintOf} from './look.ts';
 import {
@@ -28,6 +30,7 @@ import {
   Icon,
   Label,
   PageHeader,
+  SelectBox,
   SubHeader,
   Switch,
   Tile,
@@ -111,7 +114,8 @@ export function HerApps({
  * its version and where it came from; Update Available while the App
  * Store has a newer version; what it may do; Can Wake Her Up for an app
  * that says it wakes her; the person's account it uses, for one that uses
- * one; and Remove App for one her phone does not come with.
+ * one by a key, or how it is signed in, for one that asks a model; and
+ * Remove App for one her phone does not come with.
  */
 export function AppPage({
   ctx,
@@ -184,6 +188,9 @@ export function AppPage({
       {shown.account === undefined ? null : (
         <AccountGroup ctx={ctx} account={shown.account} />
       )}
+      {shown.signIn === undefined ? null : (
+        <SignInGroup ctx={ctx} page={page} signIn={shown.signIn} />
+      )}
       {shown.removable ? (
         <RemoveApp ctx={ctx} page={page} app={app.name} her={name} />
       ) : null}
@@ -238,6 +245,109 @@ function AccountGroup({
       </Cell>
     </Group>
   );
+}
+
+/**
+ * How an app that asks a model is signed in, as the design draws it:
+ * Signed In With, Not Signed In or a connection of the person's it can
+ * sign in with now, and, while it is signed in, the model it asks, each
+ * saved at the choice; and under them, what that means.
+ */
+function SignInGroup({
+  ctx,
+  page,
+  signIn,
+}: {
+  readonly ctx: Ctx;
+  readonly page: AppPageShown;
+  readonly signIn: SignInShown;
+}) {
+  const {characterId, appId} = page;
+  const {signedIn} = signIn;
+  const [connection, chooseConnection] = useChoice(signedIn?.connection ?? '');
+  const [model, chooseModel] = useChoice(signedIn?.model ?? '');
+  const signInWith = (body: AppSignInBody): Promise<boolean> =>
+    ctx.session.signInApp(characterId, appId, body);
+
+  return (
+    <Group footer={signIn.line}>
+      <Cell kind="field">
+        <label htmlFor="sign-in-connection" className="field-label">
+          Signed In With
+        </label>
+        <SelectBox
+          id="sign-in-connection"
+          value={connection}
+          options={signIn.connections}
+          none="Not Signed In"
+          onChoose={value => {
+            const chosen = signIn.connections.find(
+              offered => offered.value === value,
+            );
+
+            chooseConnection(
+              chosen?.value ?? '',
+              signInWith(
+                chosen === undefined ? {} : {connection: chosen.value},
+              ),
+            );
+          }}
+        />
+      </Cell>
+      {signedIn === undefined ? null : (
+        <Cell kind="field">
+          <label htmlFor="sign-in-model" className="field-label">
+            Model
+          </label>
+          <SelectBox
+            id="sign-in-model"
+            value={model}
+            options={signedIn.models}
+            onChoose={value => {
+              if (value !== undefined) {
+                chooseModel(
+                  value,
+                  signInWith({connection: signedIn.connection, model: value}),
+                );
+              }
+            }}
+          />
+        </Cell>
+      )}
+    </Group>
+  );
+}
+
+/**
+ * What a select of her phone's says while the choice made in it is on its
+ * way: the choice, until her phone says other than it said when the
+ * choice was made, or her phone did not keep it; then what her phone
+ * says, `shown`. So the select never goes back through what it said
+ * before.
+ */
+function useChoice(
+  shown: string,
+): readonly [string, (chosen: string, kept: Promise<boolean>) => void] {
+  const [choice, setChoice] = useState<{
+    readonly over: string;
+    readonly chosen: string;
+  }>();
+
+  if (choice !== undefined && choice.over !== shown) {
+    setChoice(undefined);
+  }
+
+  return [
+    choice?.chosen ?? shown,
+    (chosen, kept) => {
+      setChoice({over: shown, chosen});
+      void kept.then(taken => {
+        if (!taken) {
+          setChoice(undefined);
+        }
+      });
+    },
+  ];
 }
 
 /**

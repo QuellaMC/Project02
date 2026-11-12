@@ -8,6 +8,8 @@ import {
   type AppInstallOutcome,
   type AppPreviewOutcome,
   type AppRemoveOutcome,
+  type AppSignInBody,
+  type AppSignInOutcome,
   type AppWakeBody,
   type AppWakeOutcome,
   type CharacterPreviewOutcome,
@@ -173,6 +175,17 @@ export type GatewayClient = {
     allowed: boolean,
     options?: GatewayCallOptions,
   ): Promise<AppWakeOutcome>;
+  /**
+   * The person's say on how an app on her phone that asks a model is
+   * signed in: with a connection of theirs, asking a model it offers or
+   * the one it starts with, or, with none named, signed out.
+   */
+  signInApp(
+    characterId: string,
+    appId: string,
+    signIn: AppSignInBody,
+    options?: GatewayCallOptions,
+  ): Promise<AppSignInOutcome>;
   openDirectConversation(
     characterId: string,
     options?: GatewayCallOptions,
@@ -366,6 +379,12 @@ export function createGatewayClient(
       route.post<AppWakeOutcome>(
         `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}/wake`,
         {allowed} satisfies AppWakeBody,
+        callOptions,
+      ),
+    signInApp: (characterId, appId, signIn, callOptions) =>
+      route.post<AppSignInOutcome>(
+        `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}/sign-in`,
+        signIn,
         callOptions,
       ),
     openDirectConversation: (characterId, callOptions) =>
