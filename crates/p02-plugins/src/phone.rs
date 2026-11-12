@@ -205,13 +205,12 @@ enum Step {
 }
 
 /// What an action asks for, with what answering it takes: a request; or a
-/// question, with the name of its app and how that app is signed in on her
-/// phone, none while it is not.
+/// question, with how its app is signed in on her phone, none while it is
+/// not.
 enum Asked {
     Fetch(Fetch),
     Question {
         question: Question,
-        app: String,
         signed_in: Option<SignedIn>,
     },
 }
@@ -413,13 +412,11 @@ impl PhonePlugin {
             }
             Asked::Question {
                 question,
-                app,
                 signed_in,
             } => Exchange::Question {
                 answer: connections::answered(
                     self.connections.as_ref(),
                     &question,
-                    &app,
                     signed_in.as_ref(),
                     person,
                     context.cancellation(),
@@ -527,12 +524,11 @@ impl Request {
                     Acting::Asks(Ask::Fetch(fetch)) => Step::Asks(Asked::Fetch(fetch)),
                     Acting::Asks(Ask::Question(question)) => {
                         let on_phone = phone.apps(files)?;
-                        let listed = on_phone.app(app);
 
                         Step::Asks(Asked::Question {
                             question,
-                            app: listed.map_or_else(|| app.clone(), |listed| listed.name.clone()),
-                            signed_in: listed
+                            signed_in: on_phone
+                                .app(app)
                                 .and_then(|listed| on_phone.signed_in(listed))
                                 .cloned(),
                         })

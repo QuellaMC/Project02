@@ -65,22 +65,23 @@ pub enum Unanswered {
     Failed(String),
 }
 
-/// What came of `question`, which the app named `app` asks: asked through
-/// the connection it is signed in with as `signed_in` says, within its own
+/// What came of `question`, which an app asks: asked through the
+/// connection the app is signed in with as `signed_in` says, within its own
 /// time and until `cancellation`; or the sentence the app is told instead,
 /// naming `person` as her notes do, which says when it is not signed in, or
-/// is signed in with a connection no longer connected, and to ask them.
+/// is signed in with a connection no longer connected, and to ask them. Her
+/// phone says a sentence an app does not catch after the app's name, so
+/// none of these names the app.
 pub(super) async fn answered(
     connections: &dyn Connections,
     question: &Question,
-    app: &str,
     signed_in: Option<&SignedIn>,
     person: Option<&SpeakerName>,
     cancellation: &CancellationToken,
 ) -> Result<Answer, String> {
     let Some(signed_in) = signed_in else {
         return Err(format!(
-            "{app} is not signed in on this phone. Ask {} to let you sign in, with {SIGN_IN}.",
+            "This app is not signed in on this phone. Ask {} to let you sign in, with {SIGN_IN}.",
             whom(person)
         ));
     };
@@ -108,8 +109,8 @@ pub(super) async fn answered(
             text: bounded(text),
         }),
         Ok(Err(Unanswered::NotConnected(connection))) => Err(format!(
-            "{app} is signed in with {} {connection}, which is no longer connected. Ask {} to \
-             connect it again.",
+            "This app is signed in with {} {connection}, which is no longer connected. Ask {} \
+             to connect it again.",
             whose(person),
             whom(person)
         )),

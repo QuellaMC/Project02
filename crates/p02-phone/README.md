@@ -172,10 +172,14 @@ the blocking pool.
   a day and time, once or repeating; Weather, `catalog/weather.js`, a
   place's weather now and over the hours and days ahead, read from
   Open-Meteo, which needs no key, and kept, so its screen shows the last
-  reading and when it was read; and Web Search, `catalog/search.js`, the
+  reading and when it was read; Web Search, `catalog/search.js`, the
   web searched through Tavily on the person's account, whose key its
   requests carry and it never holds, and what came up kept, so its screen
-  shows the last search. Publishing version `V` of one copies
+  shows the last search; and ChatGPT, `catalog/chatgpt.js`, a stronger
+  model she asks for help through a connection of the person's, which it
+  never holds, each question asked after the conversation before it, whose
+  newest exchanges it keeps, twenty at most and 32 KiB of text, so its
+  screen shows them as bubbles. Publishing version `V` of one copies
   its file to `apps/<id>/V.js` in the catalog's repository and adds its
   entry there with the file's SHA-256. A published version's file never
   changes: a change is a new version.

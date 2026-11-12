@@ -2,7 +2,7 @@ import {join} from 'node:path';
 
 import {expect, it} from 'vitest';
 
-import {asker, fileOf, publish} from './harness/apps.ts';
+import {asker, chatgpt, fileOf, publish} from './harness/apps.ts';
 import {sam, startAuthServer, type AuthServer} from './harness/auth-server.ts';
 import {startCatalogServer} from './harness/catalog-server.ts';
 import {inspect, startDaemon, type Daemon} from './harness/daemon.ts';
@@ -289,7 +289,7 @@ it("connections.ask-to-sign-in: she installs an app that asks a model, its card 
       output: {
         answer: {
           error:
-            'Asker is not signed in on this phone. Ask Sam to let you sign in, with phone.sign_in.',
+            'This app is not signed in on this phone. Ask Sam to let you sign in, with phone.sign_in.',
         },
       },
     },
@@ -521,7 +521,7 @@ it("connections.gone: her app signed in with a connection that is no longer conn
       output: {
         answer: {
           error:
-            "Asker is signed in with Sam's OpenAI API, which is no longer connected. Ask Sam to connect it again.",
+            "This app is signed in with Sam's OpenAI API, which is no longer connected. Ask Sam to connect it again.",
         },
       },
     },
@@ -666,4 +666,54 @@ it("connections.secrets-never-said: no key, token or account id of a connection 
   for (const hidden of [key, ...auth.secrets(), sam.chatgpt.accountId]) {
     expect(read).not.toContain(hidden);
   }
+});
+
+it('connections.chatgpt: ChatGPT, as this repository keeps it to publish, installed from the App Store: she asks to sign it in, the person allows it, her question is asked through their ChatGPT plan, she reads its answer, and her phone shows her question and the answer as a conversation', async () => {
+  const catalog = await startCatalogServer();
+
+  publish(catalog, [chatgpt]);
+
+  const {model, wire, events} = await connected(
+    {key: false, plan: true},
+    catalog.env,
+  );
+
+  expect(await wire.installApp('mira', 'chatgpt')).toMatchObject({
+    status: 'ok',
+    app: {id: 'chatgpt', source: 'catalog'},
+  });
+
+  const say = await converse(wire, 'mira');
+  const question = 'What is a gentle way to wake someone who hates mornings?';
+  const answer = 'Start soft and give them time.';
+
+  model.answer(
+    calling(['phone_sign_in', {app: 'chatgpt'}]),
+    calling(['phone_use', {app: 'chatgpt', action: 'ask', input: {question}}]),
+    planResponded(saying(answer)),
+    reply('Start soft, it says.'),
+  );
+
+  const turn = say('Ask ChatGPT how to wake me.', 'chatgpt');
+
+  await wire.answer(
+    confirmationId(await events.next(frameOf('confirmation_requested'))),
+    'approved',
+  );
+  expect(await turn).toMatchObject({status: 'completed'});
+  expect(model.requests.at(-2)).toMatchObject({path: '/chatgpt/responses'});
+  expect(toolResults(model.requests.at(-1)).at(-1)).toMatchObject({
+    status: 'accepted',
+    toolName: 'phone.use',
+    output: {answer: {question, answer}},
+  });
+  expect(await wire.phoneScreen('mira', 'chatgpt', 'chatgpt')).toEqual({
+    status: 'ok',
+    screen: {
+      items: [
+        {kind: 'bubble', from: 'her', text: question},
+        {kind: 'bubble', from: 'them', text: answer},
+      ],
+    },
+  });
 });

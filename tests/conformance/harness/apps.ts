@@ -5,9 +5,11 @@
  * with the apps the tests publish, Reminders and quiet ones, Lookup, which
  * reaches the internet, Asker, which asks a model through a connection of
  * the person's and shows what it asked as a conversation, and Sampler,
- * which shows the pieces Weather and Web Search are drawn with.
+ * which shows the pieces Weather and Web Search are drawn with; and
+ * ChatGPT, as this repository keeps it to publish.
  */
 import {createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 
 import type {CatalogServer} from './catalog-server.ts';
 
@@ -28,6 +30,27 @@ export type App = {
     readonly actions: readonly object[];
   };
   readonly script: string;
+};
+
+/**
+ * An app this repository keeps to publish, in `crates/p02-phone/catalog/`:
+ * what its manifest says that the catalog lists, and its one file as kept
+ * there.
+ */
+export type Kept = {
+  readonly manifest: Pick<
+    App['manifest'],
+    | 'id'
+    | 'name'
+    | 'summary'
+    | 'version'
+    | 'icon'
+    | 'tint'
+    | 'wakes'
+    | 'reaches'
+    | 'account'
+  >;
+  readonly file: string;
 };
 
 /** Reminders, which keeps what she adds and says it wakes her. */
@@ -256,6 +279,24 @@ export const sampler: App = {
 }`,
 };
 
+/** ChatGPT, which asks a stronger model her questions through a connection of the person's. */
+export const chatgpt: Kept = {
+  manifest: {
+    id: 'chatgpt',
+    name: 'ChatGPT',
+    summary: 'Ask a stronger model for help',
+    version: '1.0.0',
+    icon: 'bulb',
+    tint: 'indigo',
+    wakes: false,
+    account: 'chatgpt',
+  },
+  file: readFileSync(
+    new URL('../../../crates/p02-phone/catalog/chatgpt.js', import.meta.url),
+    'utf8',
+  ),
+};
+
 /** An app of `name` that shows a line and does nothing, at `version`. */
 export function quiet(id: string, name: string, version: string): App {
   return {
@@ -275,13 +316,15 @@ export function quiet(id: string, name: string, version: string): App {
   };
 }
 
-/** The app's one file: its manifest, exported, then its functions. */
-export function fileOf(app: App): string {
-  return `export const manifest = ${JSON.stringify({format: 'project02.app.v1', ...app.manifest})};\n\n${app.script}\n`;
+/** The app's one file: as kept to publish, or else its manifest, exported, then its functions. */
+export function fileOf(app: App | Kept): string {
+  return 'file' in app
+    ? app.file
+    : `export const manifest = ${JSON.stringify({format: 'project02.app.v1', ...app.manifest})};\n\n${app.script}\n`;
 }
 
 /** The catalog's entry of `app`, listing the file whose text is `listed`, its own unless the test says otherwise. */
-export function entryOf(app: App, listed = fileOf(app)): object {
+export function entryOf(app: App | Kept, listed = fileOf(app)): object {
   const {id, name, summary, icon, tint, version, wakes, reaches, account} =
     app.manifest;
 
@@ -303,7 +346,7 @@ export function entryOf(app: App, listed = fileOf(app)): object {
 /** The catalog of `apps`, in their order, each beside its file where the catalog's rule puts it; an entry given with an app lists in its place. */
 export function publish(
   catalog: CatalogServer,
-  ...apps: readonly (readonly [App, object?])[]
+  ...apps: readonly (readonly [App | Kept, object?])[]
 ): void {
   catalog.publish(
     'catalog.json',
