@@ -20,7 +20,7 @@ pub use capability::{
     CharacterStorage, DatabaseError, DatabaseOpener, FileStore, FileStoreBackend, HistoryCursor,
     HistoryMessage, LeasedFiles, LeasedStore, MessageBatch, PluginDatabase, ReadMessages,
     SessionHistory, SessionHistoryError, SessionHistoryFeed, SessionListing, SessionSummary,
-    StoreAccess, StoreError, WriteHold,
+    StoreAccess, StoreError, TEXT_FILE_KIB, WriteHold,
 };
 pub use config::{ConfigField, ConfigSection, ResolvedConfig};
 pub use context::{HookContext, TurnIdentity, TurnText};

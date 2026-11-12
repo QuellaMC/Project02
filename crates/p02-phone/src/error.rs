@@ -51,6 +51,22 @@ pub enum PackageError {
     Export { app: String, function: String },
 }
 
+/// Why the App Store's catalog, or an app of it, is not what the phone
+/// takes, said for someone who is not an engineer and naming no address.
+#[derive(Debug, thiserror::Error)]
+pub enum CatalogError {
+    #[error("the App Store cannot be reached right now")]
+    Unreachable,
+    #[error("the App Store's list of apps is longer than the phone reads")]
+    TooLarge,
+    #[error("the App Store's list of apps is not one this version of the app can read")]
+    NotACatalog,
+    /// An app whose file is not what the catalog says of it, by the app's
+    /// name; `why` says how, in a few words, for the record.
+    #[error("{name} in the App Store does not match its listing, so it cannot be installed")]
+    NotTheApp { name: String, why: String },
+}
+
 /// Why a call into the phone gave no answer, said naming the app by its
 /// name. The store's own failure stays the store's.
 #[derive(Debug, thiserror::Error)]

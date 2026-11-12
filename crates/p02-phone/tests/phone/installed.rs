@@ -78,7 +78,8 @@ fn an_app_installed_is_on_her_phone_by_name_opens_and_is_updated_keeping_what_it
         [
             "clock 1.0.0 None",
             "lists 1.0.0 Some(Catalog)",
-            "notes 1.0.0 Some(File)"
+            "notes 1.0.0 Some(File)",
+            "store 1.0.0 None"
         ]
     );
     assert_eq!(files.texts["apps/notes.txt"], notes("1.0.0"));
@@ -103,7 +104,8 @@ fn an_app_installed_is_on_her_phone_by_name_opens_and_is_updated_keeping_what_it
         [
             "clock 1.0.0 None",
             "lists 1.0.0 Some(Catalog)",
-            "notes 1.1.0 Some(Catalog)"
+            "notes 1.1.0 Some(Catalog)",
+            "store 1.0.0 None"
         ]
     );
     assert_eq!(opened.app.version(), "1.1.0");
@@ -128,6 +130,13 @@ fn an_app_that_cannot_be_installed_is_refused_and_nothing_is_written() {
                 SCREEN,
             ),
             "the phone comes with an app of the same id, Clock",
+        ),
+        (
+            text(
+                &manifest(&json!({"id": "store", "name": "My Store"})),
+                SCREEN,
+            ),
+            "the phone comes with an app of the same id, App Store",
         ),
     ] {
         assert_eq!(
@@ -156,7 +165,7 @@ fn an_app_removed_takes_its_file_its_place_what_it_keeps_and_its_rings_from_in_f
 
     phone().remove(&mut files, "notes").unwrap();
 
-    assert_eq!(on_phone(&files), ["clock 1.0.0 None"]);
+    assert_eq!(on_phone(&files), ["clock 1.0.0 None", "store 1.0.0 None"]);
     assert!(files.texts.is_empty());
     assert_eq!(
         files.documents.keys().collect::<Vec<_>>(),
@@ -167,6 +176,10 @@ fn an_app_removed_takes_its_file_its_place_what_it_keeps_and_its_rings_from_in_f
 
     for (id, refusal) in [
         ("clock", "Clock comes with the phone and cannot be removed"),
+        (
+            "store",
+            "App Store comes with the phone and cannot be removed",
+        ),
         ("notes", "there is no app \"notes\" on the phone"),
     ] {
         assert_eq!(
@@ -185,7 +198,7 @@ fn her_phone_is_hers_and_an_app_whose_file_is_gone_cannot_run_while_the_rest_of_
         .unwrap();
     act(&mut hers, "remind", &milk());
 
-    assert_eq!(on_phone(&another), ["clock 1.0.0 None"]);
+    assert_eq!(on_phone(&another), ["clock 1.0.0 None", "store 1.0.0 None"]);
     assert_eq!(
         phone()
             .open(&mut another, "notes", None, &now())
@@ -200,7 +213,11 @@ fn her_phone_is_hers_and_an_app_whose_file_is_gone_cannot_run_while_the_rest_of_
 
     assert_eq!(
         on_phone(&hers),
-        ["clock 1.0.0 None", "notes 1.0.0 Some(File)"]
+        [
+            "clock 1.0.0 None",
+            "notes 1.0.0 Some(File)",
+            "store 1.0.0 None"
+        ]
     );
     assert_eq!(
         phone()

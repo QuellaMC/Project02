@@ -8,7 +8,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use p02_contracts::{FileStoreBackend, LeasedFiles, StoreError};
+use p02_contracts::{FileStoreBackend, LeasedFiles, StoreError, TEXT_FILE_KIB};
 use p02_shared::{
     BoundJsonError, Credentials, Identifier, JsonLimits, PathEntry, append_line, bound_json,
     create_directories, describe_entry, read_file, remove_file, write_file_atomically,
@@ -21,9 +21,6 @@ use crate::home::check_real;
 use crate::jsonl::committed_lines;
 use crate::layout::EntryKind;
 use crate::lock::{Lease, Resource, acquire_before};
-
-/// How much a text file of a plugin's store holds, in KiB of UTF-8.
-pub(crate) const TEXT_KIB: usize = 256;
 
 /// What a file of a plugin's store holds, as its name says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -303,7 +300,7 @@ fn store_path<'a>(text: &'a str, kinds: &'static [FileKind]) -> Result<&'a str, 
 
 /// Whether `text` is within what a text file holds.
 fn fits(text: &str) -> bool {
-    text.len() <= TEXT_KIB * 1_024
+    text.len() <= TEXT_FILE_KIB * 1_024
 }
 
 /// The bytes of the file at `target`, none when nothing is there; anything

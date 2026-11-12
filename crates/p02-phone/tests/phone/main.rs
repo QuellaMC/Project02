@@ -8,6 +8,7 @@
 
 mod apps;
 mod calls;
+mod catalog;
 mod clock;
 mod front;
 mod installed;

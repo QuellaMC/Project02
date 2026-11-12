@@ -215,14 +215,14 @@ impl Slot {
                 self.tool_answer(turn, tool, applied)
             }
             ConfirmationDecision::Denied => refused(
-                "plugin_config_approval_denied",
+                "approval_denied",
                 format!(
                     "Tool \"{}\" was denied by the user, so it did nothing.",
                     tool.name()
                 ),
             ),
             ConfirmationDecision::Cancelled => refused(
-                "plugin_config_approval_cancelled",
+                "approval_cancelled",
                 format!(
                     "Approval for tool \"{}\" was cancelled, so it did nothing.",
                     tool.name()

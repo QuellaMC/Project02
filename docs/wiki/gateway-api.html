@@ -1023,12 +1023,13 @@ data: {…}</code></pre>
       <p>
         <code>GET /api/characters/:id/phone</code> reads her phone from her
         data, whether she runs or not. Her <code>apps</code> come in her
-        phone's order, those it comes with and then those installed on it,
-        by name, each with its <code>id</code>, <code>name</code>, the
-        <code>icon</code> and the <code>tint</code> of its tile — names of the
-        page's own set, which falls back for one it does not know — its
-        <code>views</code>, each an <code>id</code>, a <code>title</code> and
-        an <code>icon</code>, and the view it <code>opensOn</code>.
+        phone's order, those it comes with, then those installed on it by
+        name, and last the App Store, each with its <code>id</code>,
+        <code>name</code>, the <code>icon</code> and the <code>tint</code> of
+        its tile — names of the page's own set, which falls back for one it
+        does not know — its <code>views</code>, each an <code>id</code>, a
+        <code>title</code> and an <code>icon</code>, and the view it
+        <code>opensOn</code>.
         <code>front</code> is the app she has in front, by its
         <code>appId</code> and <code>viewId</code>, with that view's
         <code>screen</code>, or, when the app fails to show it, the
@@ -1050,9 +1051,13 @@ data: {…}</code></pre>
         view: its <code>items</code>, top to bottom. A <code>list</code> is a
         card of <code>rows</code> under an optional <code>header</code>, each
         row a <code>title</code>, a clock reading as <code>time</code> or
-        both, with an optional <code>caption</code> above,
+        both, with an optional <code>tile</code> at its start, an app's
+        <code>{icon, tint}</code>, <code>caption</code> above,
         <code>subtitle</code> below, <code>value</code> at its end and
-        <code>switch</code> drawn on or off; a <code>readout</code> is one
+        <code>switch</code> drawn on or off; an <code>app</code> is an app's
+        header, its <code>tile</code> and <code>name</code> with a
+        <code>subtitle</code> under them and its <code>status</code>, by the
+        app's <code>id</code>; a <code>readout</code> is one
         large reading, <code>text</code> as of the read, with an optional
         <code>label</code> and <code>caption</code>, and, when it moves,
         <code>live</code>: <code>{counts: "up", from}</code> or

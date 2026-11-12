@@ -29,7 +29,7 @@ use p02_wire::{
     PairingRequestBody, PairingSubject, PendingConfirmation, PhoneApp, PhoneDid, PhoneFront,
     PhoneOutcome, PhoneRefusal, PhoneRing, ProtocolVersion, Ready, Refusal, RemoveCharacterOutcome,
     RemoveCharacterRefusal, RosterState, RunningDraft, RunningTurn, Screen, ScreenItem,
-    ScreenOutcome, ScreenRefusal, ScreenRow, Settlement, StartOutcome, StartRefusal,
+    ScreenOutcome, ScreenRefusal, ScreenRow, ScreenTile, Settlement, StartOutcome, StartRefusal,
     StorageFailure, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp,
     TurnStatus, ViewRefusal,
 };
@@ -810,10 +810,24 @@ fn phone() -> (PhoneApp, Screen) {
         },
         Screen {
             items: vec![
+                ScreenItem::App {
+                    id: "reminders".to_owned(),
+                    tile: ScreenTile {
+                        icon: "list".to_owned(),
+                        tint: "orange".to_owned(),
+                    },
+                    name: "Reminders".to_owned(),
+                    subtitle: "Reviewed · Project02 Apps".to_owned(),
+                    status: "Not on her phone".to_owned(),
+                },
                 ScreenItem::List {
                     header: words("Laps"),
                     rows: vec![ScreenRow {
                         id: words("c1"),
+                        tile: Some(ScreenTile {
+                            icon: "globe".to_owned(),
+                            tint: "blue".to_owned(),
+                        }),
                         caption: words("Today, +8HRS"),
                         title: words("London"),
                         subtitle: words("Wake Sam, weekdays"),

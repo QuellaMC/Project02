@@ -1,6 +1,6 @@
 //! An app: its one file, a script that exports its manifest beside its
 //! functions, made once and checked whole, so a broken one is refused when
-//! it is added.
+//! it is added; or the App Store, the phone's own.
 
 use std::iter;
 
@@ -13,13 +13,22 @@ use crate::host::{Access, Host};
 use crate::manifest::{Action, Manifest, View};
 use crate::time::Now;
 
-/// An app on her phone: its manifest, every rule of it kept, and a script
-/// that runs and exports a function for its screens and for each action.
+/// An app on her phone: its manifest, every rule of it kept, and what runs
+/// it.
 #[derive(Clone, Debug)]
 pub struct App {
     manifest: Manifest,
-    script: String,
-    hears_rings: bool,
+    runs: Runs,
+}
+
+/// What runs an app's screens and actions.
+#[derive(Clone, Debug)]
+pub(crate) enum Runs {
+    /// Its one file, a script that exports a function for its screens and
+    /// for each action, and `rang` when it hears its rings.
+    Script { text: String, hears_rings: bool },
+    /// The App Store, in Rust: it needs what no app is given.
+    Store,
 }
 
 impl App {
@@ -56,10 +65,20 @@ impl App {
         }
 
         Ok(Self {
-            hears_rings: exported("rang"),
+            runs: Runs::Script {
+                text: text.to_owned(),
+                hears_rings: exported("rang"),
+            },
             manifest,
-            script: text.to_owned(),
         })
+    }
+
+    /// The App Store, whose manifest keeps every rule an app's does.
+    pub(crate) fn store(manifest: Manifest) -> Self {
+        Self {
+            manifest,
+            runs: Runs::Store,
+        }
     }
 
     #[must_use]
@@ -119,12 +138,7 @@ impl App {
         &self.manifest.opens_on
     }
 
-    pub(crate) fn script(&self) -> &str {
-        &self.script
-    }
-
-    /// Whether the script exports `rang`, to hear of its rings.
-    pub(crate) fn hears_rings(&self) -> bool {
-        self.hears_rings
+    pub(crate) fn runs(&self) -> &Runs {
+        &self.runs
     }
 }

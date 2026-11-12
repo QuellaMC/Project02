@@ -17,11 +17,11 @@ use p02_contracts::{
 };
 use p02_core::{ClientStamp, ConversationId, SpeakerName};
 use p02_plugins::{
-    ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer, FieldChange,
+    AppCatalog, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer, FieldChange,
     FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError,
 };
 use p02_runtime::{Character, Conversation, Delivery, Mind, Progress, Submission};
-use p02_shared::{DanglingLinks, Identifier, canonical_path};
+use p02_shared::{BaseUrl, DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, LogRecord, RecordKind};
 use p02_wire::ActivationStatus;
 use serde_json::{Map, Value, json};
@@ -111,6 +111,10 @@ impl World {
                     Arc::new(self.data()),
                     Arc::new(Nobody),
                     Arc::new(NoSettings),
+                    // An App Store nothing serves: no test of these reads it.
+                    Arc::new(AppCatalog::new(
+                        BaseUrl::parse("http://127.0.0.1:9").unwrap(),
+                    )),
                 ),
                 |builder, toy| {
                     let plugin: Arc<dyn RuntimePlugin> = Arc::clone(toy) as _;

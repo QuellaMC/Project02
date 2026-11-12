@@ -24,10 +24,12 @@ fn showing(screens: &Value) -> Phone {
 #[test]
 fn a_screen_reads_into_the_pieces_the_phone_knows_and_back() {
     let everything = json!({"items": [
+        {"kind": "app", "id": "tea", "tile": {"icon": "timer", "tint": "mint"}, "name": "Tea",
+         "subtitle": "Reviewed", "status": "Installed"},
         {"kind": "list", "header": "Recents", "rows": [
-            {"id": "a1", "caption": "Today, +8HRS", "title": "London",
-             "subtitle": "Wake Sam, weekdays", "time": "7:00 AM", "value": "00:12.34",
-             "switch": true},
+            {"id": "a1", "tile": {"icon": "globe", "tint": "blue"}, "caption": "Today, +8HRS",
+             "title": "London", "subtitle": "Wake Sam, weekdays", "time": "7:00 AM",
+             "value": "00:12.34", "switch": true},
             {"time": "6:30 AM", "switch": false},
         ]},
         {"kind": "readout", "id": "t1", "label": "Tea", "text": "12:34",
@@ -63,12 +65,12 @@ fn a_screen_with_what_the_phone_does_not_know_is_refused_by_name() {
         (
             "chart",
             "Notes showed a screen the phone does not take: unknown variant `chart`, expected \
-             one of `list`, `readout`, `text`",
+             one of `list`, `readout`, `text`, `app`",
         ),
         (
             "colour",
             "Notes showed a screen the phone does not take: unknown field `colour`, expected \
-             one of `id`, `caption`, `title`, `subtitle`, `time`, `value`, `switch`",
+             one of `id`, `tile`, `caption`, `title`, `subtitle`, `time`, `value`, `switch`",
         ),
         (
             "size",

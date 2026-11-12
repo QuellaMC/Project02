@@ -174,16 +174,29 @@ pub enum ScreenItem {
     },
     /// A line of plain words, as for a view with nothing in it yet.
     Text { text: String },
+    /// An app's header: its tile, its name, a small line under it and its
+    /// status, as a store's page of the app shows them.
+    App {
+        /// The app's own id, which she passes to an action.
+        id: String,
+        tile: ScreenTile,
+        name: String,
+        subtitle: String,
+        status: String,
+    },
 }
 
 /// A row of a list: a title, a time or both.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(deny_unknown_fields)]
 #[ts(optional_fields)]
 pub struct ScreenRow {
     /// The thing's own id, which she passes to an action to change it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// An app's tile at the row's start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tile: Option<ScreenTile>,
     /// A small line above.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub caption: Option<String>,
@@ -201,6 +214,15 @@ pub struct ScreenRow {
     /// A switch, shown on or off.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub switch: Option<bool>,
+}
+
+/// An app's tile as a screen draws it: its icon and its tint, names of the
+/// page's own set, as an app's on her home screen are.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(deny_unknown_fields)]
+pub struct ScreenTile {
+    pub icon: String,
+    pub tint: String,
 }
 
 /// How a readout's reading moves, in milliseconds since the epoch.

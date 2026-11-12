@@ -145,16 +145,14 @@ impl Manifest {
             return Err(PackageError::Format);
         }
 
-        // An id names the app's files, and a volume that folds case, the
-        // default on macOS and Windows, would give two ids one file.
-        if authored.id.as_str() != authored.id.collision_key() {
+        if !is_lowercase(&authored.id) {
             return Err(PackageError::IdCase);
         }
 
         not_blank("name", &authored.name)?;
         one_line("summary", &authored.summary)?;
 
-        if !is_version(&authored.version) {
+        if numbers(&authored.version).is_none() {
             return Err(PackageError::Version);
         }
 
@@ -181,17 +179,24 @@ impl Manifest {
     }
 }
 
-/// Whether `version` is three numbers with dots, `1.0.0`, each written as
-/// the number it is.
-fn is_version(version: &str) -> bool {
-    let numbers: Vec<&str> = version.split('.').collect();
+/// The three numbers of `version`, as `1.0.0` writes them with dots, each
+/// written as the number it is; none for anything else. They order
+/// versions as they are read: `1.10.0` is after `1.9.0`.
+pub(crate) fn numbers(version: &str) -> Option<[u32; 3]> {
+    let mut read = [0; 3];
+    let mut written = version.split('.');
 
-    numbers.len() == 3
-        && numbers.iter().all(|number| {
-            number
-                .parse::<u32>()
-                .is_ok_and(|read| read.to_string() == *number)
-        })
+    for number in &mut read {
+        let text = written.next()?;
+
+        *number = text.parse().ok()?;
+
+        if number.to_string() != text {
+            return None;
+        }
+    }
+
+    written.next().is_none().then_some(read)
 }
 
 fn views(authored: Vec<AuthoredView>) -> Result<Vec<View>, PackageError> {
@@ -257,7 +262,7 @@ fn actions(authored: Vec<AuthoredAction>, views: &[View]) -> Result<Vec<Action>,
 
 /// Refuses `text`, what `field` of the manifest holds, when it is blank.
 fn not_blank(field: &str, text: &str) -> Result<(), PackageError> {
-    if text.trim().is_empty() {
+    if is_blank(text) {
         Err(PackageError::Blank(field.to_owned()))
     } else {
         Ok(())
@@ -267,11 +272,27 @@ fn not_blank(field: &str, text: &str) -> Result<(), PackageError> {
 /// Refuses `text`, what `field` of the manifest holds, unless it is one
 /// line that is not blank.
 fn one_line(field: &str, text: &str) -> Result<(), PackageError> {
-    if text.trim().is_empty() || text.contains(['\n', '\r']) {
-        Err(PackageError::NotOneLine(field.to_owned()))
-    } else {
+    if is_one_line(text) {
         Ok(())
+    } else {
+        Err(PackageError::NotOneLine(field.to_owned()))
     }
+}
+
+pub(crate) fn is_blank(text: &str) -> bool {
+    text.trim().is_empty()
+}
+
+/// Whether `text` is one line that is not blank.
+pub(crate) fn is_one_line(text: &str) -> bool {
+    !is_blank(text) && !text.contains(['\n', '\r'])
+}
+
+/// Whether `id` is in lowercase: an id names an app's files, and a volume
+/// that folds case, the default on macOS and Windows, would give two ids
+/// one file.
+pub(crate) fn is_lowercase(id: &Identifier) -> bool {
+    id.as_str() == id.collision_key()
 }
 
 /// `name` as an action is named: lowercase letters, digits and `_`,

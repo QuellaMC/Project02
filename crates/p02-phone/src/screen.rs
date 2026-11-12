@@ -16,7 +16,7 @@ pub(crate) fn read(shown: Value) -> Result<Screen, String> {
         ScreenItem::List { rows, .. } => rows
             .iter()
             .any(|row| row.title.is_none() && row.time.is_none()),
-        ScreenItem::Readout { .. } | ScreenItem::Text { .. } => false,
+        ScreenItem::Readout { .. } | ScreenItem::Text { .. } | ScreenItem::App { .. } => false,
     });
 
     if untitled {

@@ -173,7 +173,7 @@ it('phone.clock-alarm: she opens the Clock and is shown its views, its actions a
     messages: [{}, {text: 'Set for seven.'}],
   });
   expect(systemLines(model.requests[0])).toContain(
-    '- On your phone: Clock ("clock") — Alarms, timers, and the time anywhere. Open an app with phone.open to see its screen and what you can do in it, then act in it with phone.use.',
+    '- On your phone: Clock ("clock") — Alarms, timers, and the time anywhere; App Store ("store") — More apps, each reviewed by Project02. Open an app with phone.open to see its screen and what you can do in it, then act in it with phone.use.',
   );
 
   const [opened, used] = toolResults(model.requests[2]);
@@ -324,7 +324,7 @@ it("phone.refusals: what her phone refuses she reads as its sentence with what t
     refused(
       'phone.open',
       'app_not_found',
-      'There is no app "weather" on the phone. Your apps: Clock ("clock").',
+      'There is no app "weather" on the phone. Your apps: Clock ("clock"), App Store ("store").',
     ),
     refused(
       'phone.open',
@@ -510,10 +510,18 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
     ],
     opensOn: 'alarms',
   };
+  const store = {
+    id: 'store',
+    name: 'App Store',
+    icon: 'bag',
+    tint: 'blue',
+    views: [{id: 'apps', title: 'App Store', icon: 'bag'}],
+    opensOn: 'apps',
+  };
 
   expect(await wire.phone('mira')).toEqual({
     status: 'ok',
-    apps: [clock],
+    apps: [clock, store],
     ringing: [],
   });
 
@@ -549,7 +557,7 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
   ).toHaveLength(2);
   expect(phone).toEqual({
     status: 'ok',
-    apps: [clock],
+    apps: [clock, store],
     front: {
       appId: 'clock',
       viewId: 'alarms',

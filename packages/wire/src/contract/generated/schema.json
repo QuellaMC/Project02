@@ -2908,6 +2908,41 @@
             "text"
           ],
           "description": "A line of plain words, as for a view with nothing in it yet."
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The app's own id, which she passes to an action."
+            },
+            "tile": {
+              "$ref": "#/$defs/ScreenTile"
+            },
+            "name": {
+              "type": "string"
+            },
+            "subtitle": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "const": "app"
+            }
+          },
+          "required": [
+            "kind",
+            "id",
+            "tile",
+            "name",
+            "subtitle",
+            "status"
+          ],
+          "description": "An app's header: its tile, its name, a small line under it and its\nstatus, as a store's page of the app shows them."
         }
       ],
       "description": "A piece of a screen."
@@ -3000,6 +3035,10 @@
           "type": "string",
           "description": "The thing's own id, which she passes to an action to change it."
         },
+        "tile": {
+          "description": "An app's tile at the row's start.",
+          "$ref": "#/$defs/ScreenTile"
+        },
         "caption": {
           "type": "string",
           "description": "A small line above."
@@ -3025,6 +3064,23 @@
         }
       },
       "description": "A row of a list: a title, a time or both."
+    },
+    "ScreenTile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "tint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "icon",
+        "tint"
+      ],
+      "description": "An app's tile as a screen draws it: its icon and its tint, names of the\npage's own set, as an app's on her home screen are."
     },
     "Setup": {
       "type": "object",

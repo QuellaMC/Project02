@@ -3,6 +3,7 @@
 //! `installed.json`, the list of them as her phone lists them without
 //! running any.
 
+use std::iter;
 use std::sync::Arc;
 
 use p02_contracts::{LeasedFiles, StoreError};
@@ -49,8 +50,8 @@ pub struct Listed {
 }
 
 /// What is on her phone: the apps it comes with, then those installed on
-/// it by name, and what of the list of those was passed over, a sentence
-/// each.
+/// it by name, then the App Store, and what of the list of the installed
+/// was passed over, a sentence each.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OnPhone {
     pub apps: Vec<Listed>,
@@ -119,7 +120,8 @@ impl Installed {
 
 impl Phone {
     /// What is on her phone, as `files` keep it, without running anything:
-    /// the apps it comes with, then those installed on it by name.
+    /// the apps compiled into the daemon, then those installed on it by
+    /// name, then the App Store.
     ///
     /// # Errors
     ///
@@ -134,10 +136,11 @@ impl Phone {
 
         Ok(OnPhone {
             apps: self
-                .comes_with
+                .bundled
                 .iter()
                 .map(|app| Listed::of(app, None))
                 .chain(installed)
+                .chain(iter::once(Listed::of(&self.store, None)))
                 .collect(),
             passed_over,
         })
@@ -183,7 +186,7 @@ impl Phone {
     ) -> Result<(), PhoneError> {
         let app = self.made(text).map_err(PhoneError::NotAnApp)?;
 
-        if let Some(taken) = self.comes_with.iter().find(|kept| kept.id() == app.id()) {
+        if let Some(taken) = self.comes_with(app.id().as_str()) {
             return Err(PhoneError::IdTaken(taken.name().to_owned()));
         }
 
@@ -205,7 +208,7 @@ impl Phone {
     /// [`PhoneError::ComesWithPhone`] for an app the phone comes with,
     /// [`PhoneError::NoApp`] for one not installed, or the store's.
     pub fn remove(&self, files: &mut dyn LeasedFiles, id: &str) -> Result<(), PhoneError> {
-        if let Some(kept) = self.comes_with.iter().find(|app| app.id().as_str() == id) {
+        if let Some(kept) = self.comes_with(id) {
             return Err(PhoneError::ComesWithPhone(kept.name().to_owned()));
         }
 

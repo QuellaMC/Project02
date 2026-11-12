@@ -7,6 +7,7 @@
 
 mod activation;
 mod before_call;
+mod catalog;
 mod character_memory;
 mod character_state;
 mod home;

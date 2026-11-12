@@ -1,13 +1,14 @@
 use std::io;
 use std::path::PathBuf;
 
+use p02_contracts::TEXT_FILE_KIB;
 use p02_core::{ConversationId, ParseConversationError, SessionId};
 use p02_shared::{BoundJsonError, Identifier};
 
 use crate::database::OpenDatabaseError;
 use crate::layout::EntryKind;
 use crate::marker::{MarkerProblem, SCHEMA_VERSION, Scope};
-use crate::plugin_files::{FileKind, TEXT_KIB, ValueProblem};
+use crate::plugin_files::{FileKind, ValueProblem};
 use crate::replay::ReplayError;
 
 /// Why the store refused or could not do what it was asked. Each is
@@ -97,7 +98,7 @@ pub enum StorageError {
         #[source]
         source: BoundJsonError,
     },
-    #[error("the text for \"{path}\" is longer than the {TEXT_KIB} KiB a text file holds")]
+    #[error("the text for \"{path}\" is longer than the {TEXT_FILE_KIB} KiB a text file holds")]
     StoreTextTooLong { path: String },
     #[error("{} is no JSON document within the JSON limits", .path.display())]
     MalformedDocument {
@@ -105,7 +106,7 @@ pub enum StorageError {
         #[source]
         source: ValueProblem,
     },
-    #[error("{} is no UTF-8 text of at most {TEXT_KIB} KiB", .path.display())]
+    #[error("{} is no UTF-8 text of at most {TEXT_FILE_KIB} KiB", .path.display())]
     MalformedText { path: PathBuf },
     #[error("could not open database {}", .path.display())]
     Database {

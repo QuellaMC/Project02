@@ -54,6 +54,7 @@ fn serve_until_signalled(flags: ServeFlags, console: &mut Console) -> ExitCode {
     match switches::read(
         env::var_os(switches::TEST_PROVIDER).as_deref(),
         env::var_os(switches::TEST_DURATIONS).as_deref(),
+        env::var_os(switches::TEST_APP_CATALOG).as_deref(),
     ) {
         Ok(switches) => serve(flags, switches, console, stop::listen_for_stop),
         Err(refused) => console.failed(&refused),

@@ -11,8 +11,9 @@ id order, each with its factory and the check of whether its settings are
 enough to build it, made by the code the factory builds it with. A
 character's host is built from the plugins her settings switch on and that
 check finds set up, each by its factory from the values her settings give
-it and checked against its manifest; when her settings change, she gets a
-host built anew.
+it and checked against its manifest, but for two the host builds itself:
+its own, linked to it, and her phone, handed the App Store's catalog. When
+her settings change, she gets a host built anew.
 
 The host's rules:
 
@@ -33,7 +34,18 @@ The plugins: `runtime.plugin`, which lists the plugins she runs, shows one
 plugin's settings and, on the person's yes, changes a field the model may
 change in her own settings; session history; mem0, whose account is the
 home's to set up; character state; character memory; her phone, whose
-apps, those it comes with and those installed on it, she is told of
-before each call as her phone's store lists them, and opens and acts in
-through two tools; and reply-style, the tone she writes in and a signoff,
-each character's own.
+apps, those it comes with and those installed on it, the App Store last,
+she is told of before each call as her phone's store lists them, opens and
+acts in through two tools, and, while her settings' Ask to Install Apps is
+on, asks the person to install from the App Store through a third, which
+is prepared reading the catalog and fetching and judging the app, and
+installs the text judged on their yes; and reply-style, the tone she writes
+in and a signoff, each character's own.
+
+`AppCatalog` is the one reader of the App Store's catalog, which the daemon
+makes from the base the binary resolved: `catalog.json`, and one entry's
+app at `apps/<id>/<version>.js`, each request within 8 seconds, through the
+client every service is reached with, taking at most 256 KiB of the
+catalog and what a text file holds of an app. Nothing is fetched under a
+lease: her opening the App Store reads its catalog before her phone's store
+is leased.

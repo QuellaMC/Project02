@@ -4,9 +4,10 @@ use std::error::Error;
 
 use p02_contracts::{
     EvidenceKind, EvidenceNote, EvidenceStatus, FileStore, LeasedStore, PluginError, ProvidedTool,
-    StoreError, ToolCallOutcome, ToolInputContract,
+    StoreError, ToolCall, ToolCallOutcome, ToolInputContract, ToolPreparation,
 };
 use p02_shared::Identifier;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 /// A tool of a package, which acts without approval and runs alone until
@@ -29,17 +30,41 @@ fn refused<E: Error + Send + Sync + 'static>(name: &str) -> impl Fn(E) -> Plugin
     move |error| PluginError::with_source(format!("tool \"{name}\" was refused"), error)
 }
 
+/// The call's input as its tool's contract admits it.
+pub(crate) fn admitted<T: DeserializeOwned>(call: &ToolCall) -> Result<T, PluginError> {
+    serde_json::from_value(Value::Object(call.input().clone())).map_err(|error| {
+        PluginError::with_source(
+            format!("{} input is not what its contract admits", call.tool_name()),
+            error,
+        )
+    })
+}
+
 /// A call the package refused, which the model reads, and its record.
 pub(crate) fn rejected(reason: &str, message: String, summary: &str) -> ToolCallOutcome {
     ToolCallOutcome::Rejected {
         reason: reason.to_owned(),
         message,
-        evidence: vec![EvidenceNote::new(
-            EvidenceKind::ToolInvocation,
-            EvidenceStatus::Rejected,
-            summary,
-        )],
+        evidence: vec![refusal(summary)],
     }
+}
+
+/// A call of a tool that asks first, which the package refused before
+/// anyone was asked: the model reads it, and its record.
+pub(crate) fn unasked(reason: &str, message: String, summary: &str) -> ToolPreparation {
+    ToolPreparation::Rejected {
+        reason: reason.to_owned(),
+        message,
+        evidence: vec![refusal(summary)],
+    }
+}
+
+fn refusal(summary: &str) -> EvidenceNote {
+    EvidenceNote::new(
+        EvidenceKind::ToolInvocation,
+        EvidenceStatus::Rejected,
+        summary,
+    )
 }
 
 /// Why a package's own files did not read or write as it keeps them.

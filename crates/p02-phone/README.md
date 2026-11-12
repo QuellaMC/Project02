@@ -61,11 +61,12 @@ the blocking pool.
   its own, and the ring leaves unless `rang` set it for another time; a
   `rang` that fails, or an app that cannot run, lets it go too.
 - **Her apps** are the apps her phone comes with, then those installed on
-  it by name, each character her own. An installed app is its one file,
-  kept as text in `apps/<app-id>.txt`, and `installed.json` lists each
-  with what her phone shows of it without running it: its id, name,
-  summary, version, icon, tint, whether it wakes her, its views and the
-  view it opens on, and where it came from, the catalog or a file.
+  it by name, then the App Store, each character her own. An installed app
+  is its one file, kept as text in `apps/<app-id>.txt`, and
+  `installed.json` lists each with what her phone shows of it without
+  running it: its id, name, summary, version, icon, tint, whether it wakes
+  her, its views and the view it opens on, and where it came from, the
+  catalog or a file.
   Installing makes the app first, so a broken one is refused and writes
   nothing; an id the phone comes with is refused; an id already installed
   is replaced, keeping what it keeps. Removing an app
@@ -79,4 +80,25 @@ the blocking pool.
 - **What a phone comes with**: the apps in `apps/`, compiled in, today the
   Clock, `apps/clock.js`: alarms, timers, a stopwatch and a world clock. A
   bundled app that is refused fails the bundled phone at its first use, as
-  a build that must not ship.
+  a build that must not ship. And the App Store, last on her home screen.
+- **The catalog** is one document, `project02.catalog.v1`, listing at most
+  100 apps, each by what the store shows of it without fetching it: its id,
+  name, summary, icon, tint, version and whether it wakes her, under the
+  names and rules of a manifest, one line on what `changes` in this
+  version, and the `sha256` of its one file. An entry that breaks a rule
+  is passed over. An app's text is taken only as the file of that SHA-256,
+  making an app, of the id and the version listed. Reaching the catalog is
+  the caller's; what goes wrong is said in plain words naming no address.
+- **The App Store** is the phone's own app, written here with no script,
+  since it needs what no app is given. Its id is taken as a bundled app's
+  is: nothing installs over it or removes it, and it sets no ring. In
+  `apps/store.json`, as its own data, it keeps the catalog it last read,
+  which its caller reads anew as she opens it, and which app's page is
+  open. Its one view shows that page, or else the catalog's apps under
+  "Reviewed by Project02", each with its tile, name and summary and whether
+  her phone holds it ("Installed", or "Update" for an older version), read
+  from her phone whenever the screen is made. `show_app {app}` answers what
+  the app is and may do and opens its page: its header, its summary, what
+  it may do ("Keep its own data", and "Wake her when something is due" for
+  one that wakes her), and its version with what changed. Opened again, it
+  shows its list; before it read anything, a line says so.

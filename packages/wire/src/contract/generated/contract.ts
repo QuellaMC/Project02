@@ -681,7 +681,11 @@ text: string, caption?: string,
 /**
  * How the reading moves, when it does.
  */
-live?: LiveReading, } | { "kind": "text", text: string, };
+live?: LiveReading, } | { "kind": "text", text: string, } | { "kind": "app", 
+/**
+ * The app's own id, which she passes to an action.
+ */
+id: string, tile: ScreenTile, name: string, subtitle: string, status: string, };
 
 /**
  * One view of an app on her phone, as a person looking around it sees it:
@@ -699,6 +703,10 @@ export type ScreenRow = {
  * The thing's own id, which she passes to an action to change it.
  */
 id?: string, 
+/**
+ * An app's tile at the row's start.
+ */
+tile?: ScreenTile, 
 /**
  * A small line above.
  */
@@ -719,6 +727,12 @@ value?: string,
  * A switch, shown on or off.
  */
 switch?: boolean, };
+
+/**
+ * An app's tile as a screen draws it: its icon and its tint, names of the
+ * page's own set, as an app's on her home screen are.
+ */
+export type ScreenTile = { icon: string, tint: string, };
 
 /**
  * Whether settings are enough for what they set up, a plugin or a

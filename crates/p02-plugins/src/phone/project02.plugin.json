@@ -14,10 +14,21 @@
     ],
     "config": {
       "scope": "global_with_character_overrides",
-      "fields": []
+      "fields": [
+        {
+          "name": "askToInstall",
+          "label": "Ask to Install Apps",
+          "description": "Lets her ask you to install an app she finds in the App Store.",
+          "secret": false,
+          "valueType": "boolean",
+          "defaultValue": true,
+          "agentMutable": false,
+          "redactionLabels": []
+        }
+      ]
     },
     "runtimePolicy": {
-      "timeoutMs": 10000,
+      "timeoutMs": 20000,
       "redactionLabels": [],
       "failureBehavior": {
         "beforeRoleModelCall": "degrade",
@@ -31,7 +42,8 @@
     "requestedAccess": {
       "character_file_store": "write",
       "model_input": "write",
-      "trusted_context": "write"
+      "trusted_context": "write",
+      "network": "read"
     }
   }
 }

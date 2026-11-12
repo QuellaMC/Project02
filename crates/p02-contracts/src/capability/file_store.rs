@@ -7,6 +7,9 @@ use serde_json::Value;
 use tokio::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+/// How much a text file of a plugin's store holds, in KiB of UTF-8.
+pub const TEXT_FILE_KIB: usize = 256;
+
 /// One plugin's durable files, under a lease that shuts out every other
 /// holder, in this process or another. The store crate implements it.
 pub trait FileStoreBackend: Send + Sync + fmt::Debug {
