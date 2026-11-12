@@ -179,6 +179,30 @@ diagnostic?: string,
 maintenance?: MaintenanceFailure, };
 
 /**
+ * What came of starting a sign-in, calling off its wait or signing out:
+ * the sign-in as it then stands, or the sentence saying why it failed.
+ */
+export type ChatgptOutcome = { "status": "ok", signIn: ChatgptSignIn, } | { "status": "failed", message: string, };
+
+/**
+ * The home's sign-in to a ChatGPT plan as it stands.
+ */
+export type ChatgptSignIn = { "state": "signed_out", message?: string, } | { "state": "waiting", 
+/**
+ * The code the person types there.
+ */
+code: string, 
+/**
+ * Where they type it.
+ */
+url: string, 
+/**
+ * When the code stops working, in milliseconds since the Unix
+ * epoch.
+ */
+expiresAt: number, } | { "state": "signed_in", email?: string, plan?: string, };
+
+/**
  * What a client stamps on a line it carries: the surface it came from, or
  * the id it submitted the line under, which a repeat of the line reuses. An
  * ASCII letter or digit, then up to 63 ASCII letters, digits, `:`, `.`, `_`
@@ -346,7 +370,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 14, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 15, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -359,7 +383,11 @@ packages: PackagesHealth, characters: ReadonlyArray<CharacterSummary>, connector
  * The person's accounts her phone knows, which the home's settings
  * hold the keys of.
  */
-accounts: ReadonlyArray<PersonAccount>, };
+accounts: ReadonlyArray<PersonAccount>, 
+/**
+ * The home's sign-in to a ChatGPT plan.
+ */
+chatgpt: ChatgptSignIn, };
 
 /**
  * The person's line into one conversation, with the two stamps its client
@@ -372,7 +400,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 14, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 15, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.

@@ -108,6 +108,8 @@ pub enum StorageError {
     },
     #[error("{} is no UTF-8 text of at most {TEXT_FILE_KIB} KiB", .path.display())]
     MalformedText { path: PathBuf },
+    #[error("{} holds no sign-in this build can read", .path.display())]
+    MalformedSignIn { path: PathBuf },
     #[error("could not open database {}", .path.display())]
     Database {
         path: PathBuf,
@@ -155,7 +157,8 @@ impl StorageError {
             | Self::Refused(_)
             | Self::InvalidParticipants(_)
             | Self::MalformedDocument { .. }
-            | Self::MalformedText { .. } => "malformed_record",
+            | Self::MalformedText { .. }
+            | Self::MalformedSignIn { .. } => "malformed_record",
             Self::InvalidStorePath { .. } => "invalid_store_path",
             Self::StoreValueLimits { .. } | Self::StoreTextTooLong { .. } => "invalid_store_value",
             Self::ConcurrentWrite { .. } => "concurrent_write",

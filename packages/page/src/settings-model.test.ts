@@ -376,13 +376,14 @@ function health(
   accounts: GatewayHealth['accounts'] = [],
 ): GatewayHealth {
   return {
-    protocolVersion: 14,
+    protocolVersion: 15,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
     characters: [mira, nova],
     connectors: [{id: 'telegram', connected, bots}],
     accounts,
+    chatgpt: {state: 'signed_out'},
   };
 }
 

@@ -867,6 +867,112 @@
       ],
       "description": "One installed character, as health reports her."
     },
+    "ChatgptOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "signIn": {
+              "$ref": "#/$defs/ChatgptSignIn"
+            },
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status",
+            "signIn"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ]
+        }
+      ],
+      "description": "What came of starting a sign-in, calling off its wait or signing out:\nthe sign-in as it then stands, or the sentence saying why it failed."
+    },
+    "ChatgptSignIn": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "const": "signed_out"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "description": "Not signed in: with why the last sign-in failed, or why the one the\nhome kept could not be read, until the next start or sign-out."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "The code the person types there."
+            },
+            "url": {
+              "type": "string",
+              "description": "Where they type it."
+            },
+            "expiresAt": {
+              "type": "integer",
+              "format": "int64",
+              "description": "When the code stops working, in milliseconds since the Unix\nepoch."
+            },
+            "state": {
+              "type": "string",
+              "const": "waiting"
+            }
+          },
+          "required": [
+            "state",
+            "code",
+            "url",
+            "expiresAt"
+          ],
+          "description": "A code waits for the person to approve it on OpenAI's page."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "plan": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "const": "signed_in"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "description": "Signed in, to the account OpenAI named, on its plan, such as `plus`."
+        }
+      ],
+      "description": "The home's sign-in to a ChatGPT plan as it stands."
+    },
     "ClientStamp": {
       "type": "string",
       "description": "What a client stamps on a line it carries: the surface it came from, or\nthe id it submitted the line under, which a repeat of the line reuses. An\nASCII letter or digit, then up to 63 ASCII letters, digits, `:`, `.`, `_`\nor `-`."
@@ -1697,7 +1803,7 @@
             "kind",
             "health"
           ],
-          "description": "The daemon's whole state read again: when the settings changed,\nbefore the pass that acts on them, and when a connector came onto\nthe stream or left it."
+          "description": "The daemon's whole state read again: when the settings changed,\nbefore the pass that acts on them, when a connector came onto the\nstream or left it, and when the home's sign-in to a ChatGPT plan\nchanged: a wait began, or ended signed in, failed or called off, or\nthe person signed out."
         },
         {
           "type": "object",
@@ -1748,7 +1854,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 14
+          "const": 15
         },
         "homeRoot": {
           "type": "string"
@@ -1779,6 +1885,10 @@
             "$ref": "#/$defs/PersonAccount"
           },
           "description": "The person's accounts her phone knows, which the home's settings\nhold the keys of."
+        },
+        "chatgpt": {
+          "$ref": "#/$defs/ChatgptSignIn",
+          "description": "The home's sign-in to a ChatGPT plan."
         }
       },
       "required": [
@@ -1788,7 +1898,8 @@
         "packages",
         "characters",
         "connectors",
-        "accounts"
+        "accounts",
+        "chatgpt"
       ],
       "description": "The daemon's whole state in one read."
     },
@@ -1821,7 +1932,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 14
+          "const": 15
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"

@@ -49,6 +49,7 @@ other build of the same commands.
 | `harness/telegram-server.ts` | Telegram's Bot API on loopback, answering by Telegram's envelope and its server's rules: it keeps every call with its moment, answers one with a 429, and drops every call while Telegram is out of reach.                                                                                                                                                      |
 | `harness/catalog-server.ts`  | The App Store's catalog on loopback: each path answers what the test published there and any other a 404, it keeps every path asked, and out of reach it cuts every request off.                                                                                                                                                                                |
 | `harness/internet-server.ts` | The internet her apps reach, on loopback for every host: a request for `https://<host>/<path>?<query>` arrives at `/<host>/<path>?<query>`, each path answers what the test scripted for it, in order, any other a 404, and it keeps every request with its headers and body.                                                                                   |
+| `harness/auth-server.ts`     | OpenAI's sign-in on loopback under its switch, as OpenAI answers: a code for each start, 403 to each ask until the test approves it as the person would, as an account with a ChatGPT plan or none, the tokens it is traded for, and a refresh that takes only the newest refresh token; it keeps every request with its fields and every secret it gave.       |
 | `harness/apps.ts`            | Apps as the App Store serves them, for a test to publish on the catalog server: an app's one file, its entry in the catalog with the file's SHA-256, and a catalog of apps, each file where its rule puts it; with Reminders, quiet apps, Lookup, which reaches the internet, and Sampler, which shows one of each piece Weather and Web Search are drawn with. |
 | `harness/server.ts`          | Binds a stand-in server to a loopback port of its own under the ceiling, and closes it with the test.                                                                                                                                                                                                                                                           |
 | `harness/terminal.py`        | A pseudo-terminal for `serve`, kept in the suite's process group and relayed to the harness.                                                                                                                                                                                                                                                                    |
@@ -67,8 +68,9 @@ arguments, and the switches of `crates/project02/README.md` it needs:
 `PROJECT02_TEST_PROVIDER=deterministic` for the fixed-reply voice,
 `PROJECT02_TEST_DURATIONS` for shortened waits,
 `PROJECT02_TEST_APP_CATALOG` for the catalog server,
-`PROJECT02_TEST_APP_INTERNET` for the internet server and
-`PROJECT02_TEST_OPENAI_API` for the model server as the OpenAI API. The connector takes two:
+`PROJECT02_TEST_APP_INTERNET` for the internet server,
+`PROJECT02_TEST_OPENAI_API` for the model server as the OpenAI API and
+`PROJECT02_TEST_OPENAI_AUTH` for the auth server as OpenAI's sign-in. The connector takes two:
 `PROJECT02_TEST_TELEGRAM_API`, naming the test's Bot API, and `edit` in
 `PROJECT02_TEST_DURATIONS` for its draft edits. A test that needs the model server or the mem0 server
 writes its settings into the home's `config.json` before the start.

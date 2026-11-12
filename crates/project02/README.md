@@ -17,7 +17,8 @@ the same daemon in another program's process, as the desktop shell does.
   the process at once. Every command exits 0, or 1 when something failed,
   which it says on stderr.
 - **inspect** reads a home through the store's readers and writes nothing:
-  a character's settings, and the report asked for, as JSON.
+  a character's settings and the home's sign-in to a ChatGPT plan, as whom
+  and on which plan and never a token, and the report asked for, as JSON.
 - **The test switches** are read once at start and are never settings:
   `PROJECT02_TEST_PROVIDER=deterministic` answers for every character;
   `PROJECT02_TEST_DURATIONS` shortens the waits, `key=milliseconds` over
@@ -28,6 +29,7 @@ the same daemon in another program's process, as the desktop shell does.
   the build's own, which one constant beside the switches holds;
   `PROJECT02_TEST_APP_INTERNET=<base>` takes every request of her apps,
   one for `https://<host>/<path>?<query>` made at
-  `<base>/<host>/<path>?<query>`, the rest of it unchanged; and
+  `<base>/<host>/<path>?<query>`, the rest of it unchanged;
   `PROJECT02_TEST_OPENAI_API=<base>` names where the OpenAI API is, in
-  place of its own address.
+  place of its own address; and `PROJECT02_TEST_OPENAI_AUTH=<base>` names
+  where OpenAI's sign-in is, in place of `https://auth.openai.com`.

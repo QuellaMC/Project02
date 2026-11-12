@@ -78,8 +78,10 @@ pub enum Event {
         message: Option<String>,
     },
     /// The daemon's whole state read again: when the settings changed,
-    /// before the pass that acts on them, and when a connector came onto
-    /// the stream or left it.
+    /// before the pass that acts on them, when a connector came onto the
+    /// stream or left it, and when the home's sign-in to a ChatGPT plan
+    /// changed: a wait began, or ended signed in, failed or called off, or
+    /// the person signed out.
     HealthChanged {
         health: Health,
     },

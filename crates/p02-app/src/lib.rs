@@ -3,6 +3,7 @@
 
 mod apps;
 mod character;
+mod chatgpt;
 mod config_control;
 mod confirmation;
 mod daemon;
@@ -14,6 +15,7 @@ mod phone;
 mod reconcile;
 mod rings;
 
+pub use chatgpt::kept_sign_in;
 pub use daemon::{Daemon, DaemonSettings, Durations, Message, OpenDaemonError, Plugin, Presence};
 pub use history::HistoryPage;
 pub use outcome::package_report;

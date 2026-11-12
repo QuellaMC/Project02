@@ -335,7 +335,9 @@
               each account of the person's her phone knows, by its
               <code>id</code> and <code>name</code>, whether the home's
               settings hold its key, <code>hasKey</code>, and
-              <code>keyFrom</code>, one sentence on where a key comes from.
+              <code>keyFrom</code>, one sentence on where a key comes from,
+              and <code>chatgpt</code>: the home's sign-in to a ChatGPT plan,
+              described below.
             </td>
           </tr>
           <tr>
@@ -665,6 +667,36 @@
             </td>
           </tr>
           <tr>
+            <td>ChatGPT sign-in</td>
+            <td><code>POST /api/chatgpt/sign-in</code></td>
+            <td>
+              No body → <code>ChatgptOutcome</code>: <code>ok</code> with the
+              <code>signIn</code> it began, <code>waiting</code> with the
+              code, where the person types it and when it stops working; or
+              <code>failed</code> with why OpenAI gave no code. Described
+              below.
+            </td>
+          </tr>
+          <tr>
+            <td>cancel ChatGPT sign-in</td>
+            <td><code>POST /api/chatgpt/sign-in/cancel</code></td>
+            <td>
+              No body → <code>ChatgptOutcome</code>: <code>ok</code> with the
+              <code>signIn</code> as it then stands, the wait called off and
+              whatever the home held before kept.
+            </td>
+          </tr>
+          <tr>
+            <td>ChatGPT sign-out</td>
+            <td><code>POST /api/chatgpt/sign-out</code></td>
+            <td>
+              No body → <code>ChatgptOutcome</code>: <code>ok</code> with the
+              <code>signIn</code>, <code>signed_out</code>, its tokens gone
+              from the home and any wait ended; or <code>failed</code> with
+              why they could not be removed, the sign-in standing.
+            </td>
+          </tr>
+          <tr>
             <td>events</td>
             <td><code>GET /api/events</code></td>
             <td>
@@ -746,7 +778,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":14,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":15,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -805,7 +837,8 @@ data: {…}</code></pre>
             <td>
               The protocol version and the daemon's snapshot at that instant:
               <code>health</code> (the roster, each character's state and last
-              maintenance failure, the connectors on the stream and their bots),
+              maintenance failure, the connectors on the stream and their bots,
+              the home's sign-in to a ChatGPT plan),
               <code>confirmations</code> and <code>pairings</code> still
               waiting, and <code>turns</code> — each turn in progress, named by
               its <code>conversationId</code> and, when a line began it, the
@@ -930,13 +963,14 @@ data: {…}</code></pre>
             <td>
               The daemon's whole state, read again the moment a config change
               or a character's package landed and before the pass that acts on
-              it, or the moment a
+              it, the moment a
               connector's process came onto the stream, left it, or said its
-              bots stand otherwise than the daemon held: the roster as config
+              bots stand otherwise than the daemon held, or the moment the
+              home's sign-in to a ChatGPT plan changed: the roster as config
               now says it, the connectors on the stream with their bots, the
-              accounts her phone knows with whether each one's key is set, and
-              the config and package problems as they stand, the shape
-              <code>GET /api/health</code> returns. Every surface hears it, not
+              accounts her phone knows with whether each one's key is set, the
+              sign-in, and the config and package problems as they stand, the
+              shape <code>GET /api/health</code> returns. Every surface hears it, not
               only the one that wrote, and one showing config reads its view
               again on it, so two windows on one screen stay in step; what the
               pass then does to each character follows as
@@ -1256,6 +1290,47 @@ data: {…}</code></pre>
         <code>pluginId</code> is <code>phone</code>, accepted or not: the page
         says she is using her phone from it until her next reply begins or
         the turn ends.
+      </p>
+
+      <h2>Signing in to a ChatGPT plan</h2>
+
+      <p class="rule">
+        The person signs the home in to their ChatGPT plan the way OpenAI's
+        Codex app does: they approve a short code on OpenAI's own page, and
+        the daemon holds the tokens that result. No token is ever part of
+        anything a client reads.
+      </p>
+
+      <p>
+        Health's <code>chatgpt</code> says the home's sign-in as it stands,
+        by its <code>state</code>: <code>signed_out</code>, with a
+        <code>message</code> when the last sign-in failed or the one the home
+        kept could not be read, until the next start or sign-out;
+        <code>waiting</code>, with the <code>code</code> the person types,
+        the <code>url</code> of OpenAI's page they type it on and
+        <code>expiresAt</code>, when the code stops working, in milliseconds
+        since the Unix epoch; or <code>signed_in</code>, with the
+        <code>email</code> of the account and its <code>plan</code>, such as
+        <code>plus</code>, as OpenAI named them. A page opened while a code
+        waits reads it there, and <code>health_changed</code> goes out
+        whenever the sign-in changes, so a page moves on by itself: to the
+        code once a wait begins; to <code>signed_in</code> once the person
+        approved it; to <code>signed_out</code> with the sentence when it
+        failed, the code ran out or the account has no ChatGPT plan; and to
+        <code>signed_out</code> with none when the wait was called off or the
+        person signed out.
+      </p>
+
+      <p>
+        <code>POST /api/chatgpt/sign-in</code> asks OpenAI for a code under
+        Codex's public client and answers it, then asks at the pace OpenAI
+        gives until the person approves it, and trades it for the tokens. A
+        start while a code waits replaces it; one OpenAI gives no code is
+        answered <code>failed</code>, any code waiting going on. The tokens
+        are kept in the home, owner-only, and survive a restart; the daemon
+        refreshes them before a use when they run out within the hour. Cancelling ends the wait and keeps what the
+        home held; signing out removes the tokens. This is not an official
+        way to use a plan in another app, and OpenAI can change or block it.
       </p>
 
       <h2>The sync rule</h2>

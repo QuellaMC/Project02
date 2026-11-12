@@ -3,6 +3,7 @@
 
 mod apps;
 mod bots;
+mod chatgpt;
 mod config;
 mod confirmation;
 mod conversation;
@@ -23,6 +24,7 @@ pub use apps::{
 pub use bots::{
     BotState, ConnectorBot, ConnectorBotsBody, ConnectorBotsOutcome, ConnectorBotsRefusal,
 };
+pub use chatgpt::{ChatgptOutcome, ChatgptSignIn};
 pub use config::{
     AccessLevel, AccessName, ActivationStatus, Authored, ChangeOutcome, ChangeRefusal,
     CharacterConnectorEntry, ConfigChange, ConfigTarget, ConfigValueType, ConfigView,

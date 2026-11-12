@@ -201,6 +201,11 @@ export function wireOf(daemon: Address) {
       call('POST', `/api/pairing/${segment(code)}`, 'PairingSettleOutcome', {
         decision,
       }),
+    chatgptSignIn: () => call('POST', '/api/chatgpt/sign-in', 'ChatgptOutcome'),
+    chatgptCancel: () =>
+      call('POST', '/api/chatgpt/sign-in/cancel', 'ChatgptOutcome'),
+    chatgptSignOut: () =>
+      call('POST', '/api/chatgpt/sign-out', 'ChatgptOutcome'),
   };
 }
 

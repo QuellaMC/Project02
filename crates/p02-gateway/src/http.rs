@@ -157,6 +157,9 @@ pub(crate) fn router(app: App) -> Router {
         .route("/api/connectors/{id}/bots", post(connector_bots))
         .route("/api/pairing", get(pairings))
         .route("/api/pairing/{code}", post(settle_pairing))
+        .route("/api/chatgpt/sign-in", post(start_chatgpt_sign_in))
+        .route("/api/chatgpt/sign-in/cancel", post(cancel_chatgpt_sign_in))
+        .route("/api/chatgpt/sign-out", post(sign_out_of_chatgpt))
         .route("/api/events", get(events))
         .fallback(fallback)
         .method_not_allowed_fallback(fallback)
@@ -501,6 +504,18 @@ async fn settle_pairing(
         Ok(AnswerBody { decision }) => answer(&app.0.daemon.settle_pairing(&code, decision).await),
         Err(refusal) => refusal.into_response(),
     }
+}
+
+async fn start_chatgpt_sign_in(State(app): State<App>) -> Response {
+    answer(&app.0.daemon.start_chatgpt_sign_in().await)
+}
+
+async fn cancel_chatgpt_sign_in(State(app): State<App>) -> Response {
+    answer(&app.0.daemon.cancel_chatgpt_sign_in().await)
+}
+
+async fn sign_out_of_chatgpt(State(app): State<App>) -> Response {
+    answer(&app.0.daemon.sign_out_of_chatgpt().await)
 }
 
 /// The event stream; a connector's own names it in the query, and is
