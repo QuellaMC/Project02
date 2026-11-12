@@ -1,16 +1,25 @@
-//! What the adapter speaks while the model writes: each native
-//! `visible_reply` call's text, decoded from its arguments as they stream,
-//! behind the reasoning filter the judge will scrub the whole with.
-//! Content is never spoken: alone it is the reply, which arrives whole at
-//! the commit, or in a moment of the character's own a thought she keeps,
-//! and beside a tool call it is the model's note to itself; the prompt
-//! promises the person never hears either, and which it is cannot be known
-//! while it arrives.
+//! What an adapter speaks while the model writes, whatever protocol it
+//! streams: each native `visible_reply` call's text, decoded from its
+//! arguments as they stream, behind the reasoning filter the judge will
+//! scrub the whole with. Content is never spoken: alone it is the reply,
+//! which arrives whole at the commit, or in a moment of the character's
+//! own a thought she keeps, and beside a tool call it is the model's note
+//! to itself; the prompt promises the person never hears either, and which
+//! it is cannot be known while it arrives.
 
 use p02_contracts::{Invocation, ReasoningFilter, ReplyDelta, VISIBLE_REPLY};
 
-use super::stream::Fragment;
 use crate::prompt::{ToolNameMapping, runtime_name};
+
+/// A piece of a named tool call's arguments: when the name first arrives,
+/// everything so far, possibly nothing; after that, each piece. A call is
+/// known by its index among the answer's.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Fragment<'a> {
+    pub(crate) index: u64,
+    pub(crate) name: &'a str,
+    pub(crate) text: &'a str,
+}
 
 /// Follows one string field of a flat JSON object as its text arrives in
 /// pieces, `{"text": "…"}`, decoding the value as far as the pieces reach:
@@ -18,7 +27,7 @@ use crate::prompt::{ToolNameMapping, runtime_name};
 /// what is not that object, or comes after the value's closing quote, is
 /// silence. The judge reads the whole object later; this reads ahead.
 #[derive(Debug)]
-pub(super) struct FieldScanner {
+struct FieldScanner {
     field: &'static str,
     state: State,
     pending: String,
@@ -36,7 +45,7 @@ enum State {
 }
 
 impl FieldScanner {
-    pub(super) fn new(field: &'static str) -> Self {
+    fn new(field: &'static str) -> Self {
         Self {
             field,
             state: State::Brace,
@@ -46,7 +55,7 @@ impl FieldScanner {
     }
 
     /// The value's next decoded characters, as far as `piece` reaches.
-    pub(super) fn push(&mut self, piece: &str) -> String {
+    fn push(&mut self, piece: &str) -> String {
         self.pending.push_str(piece);
 
         loop {
@@ -235,14 +244,14 @@ struct Draft {
 /// begin is reply n, each behind its own filter. Silent when no one
 /// listens, since the invocation hears for no one then.
 #[derive(Debug)]
-pub(super) struct ReplyDrafts<'a> {
+pub(crate) struct ReplyDrafts<'a> {
     invocation: Invocation<'a>,
     mappings: &'a [ToolNameMapping],
     drafts: Vec<Draft>,
 }
 
 impl<'a> ReplyDrafts<'a> {
-    pub(super) fn new(invocation: Invocation<'a>, mappings: &'a [ToolNameMapping]) -> Self {
+    pub(crate) fn new(invocation: Invocation<'a>, mappings: &'a [ToolNameMapping]) -> Self {
         Self {
             invocation,
             mappings,
@@ -250,7 +259,7 @@ impl<'a> ReplyDrafts<'a> {
         }
     }
 
-    pub(super) fn hear(&mut self, fragment: Fragment<'_>) {
+    pub(crate) fn hear(&mut self, fragment: Fragment<'_>) {
         if runtime_name(fragment.name, self.mappings) != VISIBLE_REPLY {
             return;
         }
@@ -281,7 +290,7 @@ impl<'a> ReplyDrafts<'a> {
 
     /// The message is whole: what each filter still held is text, a `<`
     /// that never became a tag.
-    pub(super) fn finish(self) {
+    pub(crate) fn finish(self) {
         for draft in self.drafts {
             let held = draft.filter.finish();
 

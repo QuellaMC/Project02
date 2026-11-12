@@ -100,6 +100,7 @@ const hers: OkView = {
   fingerprint: 'f1',
   diagnostics: [],
   model: {ready: true},
+  services: [],
   project02: [],
   sections: [
     {

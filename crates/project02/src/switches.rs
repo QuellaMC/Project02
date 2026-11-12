@@ -29,6 +29,9 @@ pub(crate) const TEST_APP_CATALOG: &str = "PROJECT02_TEST_APP_CATALOG";
 /// `https://<host>/<path>?<query>` is made at `<base>/<host>/<path>?<query>`.
 pub(crate) const TEST_APP_INTERNET: &str = "PROJECT02_TEST_APP_INTERNET";
 
+/// Names where the OpenAI API is, in place of its own address.
+pub(crate) const TEST_OPENAI_API: &str = "PROJECT02_TEST_OPENAI_API";
+
 /// Where this build's App Store is: its catalog, and each of its apps, by
 /// the rule the reader follows, under this base.
 const APP_CATALOG: &str = "https://raw.githubusercontent.com/QuellaMC/Project02-Apps/main";
@@ -47,16 +50,17 @@ const SERVE_KEYS: [&str; 6] = [
 const TELEGRAM_KEYS: [&str; 1] = ["edit"];
 
 /// What the switches make of a run: the model every character answers
-/// through, the daemon's waits, where the App Store is, and the stand-in
-/// her apps' requests go to. The default is a run no switch touched, the
-/// one a program that runs the daemon starts, since no switch is a setting
-/// a person sees.
+/// through, the daemon's waits, where the App Store is, the stand-in her
+/// apps' requests go to, and where the OpenAI API is. The default is a run
+/// no switch touched, the one a program that runs the daemon starts, since
+/// no switch is a setting a person sees.
 #[derive(Debug)]
 pub struct Switches {
     pub(crate) test_provider: Option<TestProvider>,
     pub(crate) durations: Durations,
     pub(crate) app_catalog: BaseUrl,
     pub(crate) app_internet: Option<BaseUrl>,
+    pub(crate) openai_api: Option<BaseUrl>,
 }
 
 impl Default for Switches {
@@ -67,6 +71,7 @@ impl Default for Switches {
             app_catalog: BaseUrl::parse(APP_CATALOG)
                 .expect("the build's own App Store is at a base URL"),
             app_internet: None,
+            openai_api: None,
         }
     }
 }
@@ -85,15 +90,16 @@ pub(crate) struct TelegramSwitches {
 }
 
 /// Serve's switches as the environment sets them: the test provider's
-/// value, the durations', the App Store's catalog's and her apps' internet's,
-/// each none when unset. The durations are read first, then a test provider
-/// other than `deterministic` is refused, then a catalog's address and an
-/// internet's that is no base.
+/// value, the durations', the App Store's catalog's, her apps' internet's
+/// and the OpenAI API's, each none when unset. The durations are read
+/// first, then a test provider other than `deterministic` is refused, then
+/// a catalog's address, an internet's and an OpenAI API's that is no base.
 pub(crate) fn read(
     provider: Option<&OsStr>,
     durations: Option<&OsStr>,
     catalog: Option<&OsStr>,
     internet: Option<&OsStr>,
+    openai: Option<&OsStr>,
 ) -> Result<Switches, SwitchError> {
     let mut switches = Switches::default();
 
@@ -126,6 +132,7 @@ pub(crate) fn read(
     }
 
     switches.app_internet = base(TEST_APP_INTERNET, internet)?;
+    switches.openai_api = base(TEST_OPENAI_API, openai)?;
 
     Ok(switches)
 }
@@ -206,30 +213,34 @@ mod tests {
         durations: Option<&str>,
         catalog: Option<&str>,
         internet: Option<&str>,
+        openai: Option<&str>,
     ) -> Result<Switches, SwitchError> {
         read(
             provider.map(OsStr::new),
             durations.map(OsStr::new),
             catalog.map(OsStr::new),
             internet.map(OsStr::new),
+            openai.map(OsStr::new),
         )
     }
 
     #[test]
     fn each_switch_sets_what_it_names_and_the_rest_keep_their_own() {
         let ms = Duration::from_millis;
-        let unset = switched(None, None, None, None).unwrap();
+        let unset = switched(None, None, None, None, None).unwrap();
 
         assert_eq!(unset.test_provider, None);
         assert_eq!(unset.durations, Durations::default());
         assert_eq!(unset.app_catalog.as_str(), APP_CATALOG);
         assert_eq!(unset.app_internet, None);
+        assert_eq!(unset.openai_api, None);
 
         let set = switched(
             Some("deterministic"),
             Some("confirmation=1,pairing=2,silence=3,ping=4,grace=5,minute=6"),
             Some("http://127.0.0.1:8765/apps/"),
             Some("http://127.0.0.1:8766"),
+            Some("http://127.0.0.1:8767/openai/v1"),
         )
         .unwrap();
 
@@ -238,6 +249,10 @@ mod tests {
         assert_eq!(
             set.app_internet.as_ref().map(BaseUrl::as_str),
             Some("http://127.0.0.1:8766/")
+        );
+        assert_eq!(
+            set.openai_api.as_ref().map(BaseUrl::as_str),
+            Some("http://127.0.0.1:8767/openai/v1")
         );
         assert_eq!(
             set.durations,
@@ -252,7 +267,7 @@ mod tests {
             }
         );
         assert_eq!(
-            switched(None, Some("grace=100"), None, None)
+            switched(None, Some("grace=100"), None, None, None)
                 .unwrap()
                 .durations,
             Durations {
@@ -266,10 +281,11 @@ mod tests {
     fn a_switch_serve_cannot_use_is_refused_naming_it() {
         let keys = "the keys here are confirmation, pairing, silence, ping, grace, minute.";
 
-        for (provider, durations, catalog, internet, said) in [
+        for (provider, durations, catalog, internet, openai, said) in [
             (
                 None,
                 Some("edit=100"),
+                None,
                 None,
                 None,
                 format!("PROJECT02_TEST_DURATIONS: unknown key \"edit\"; {keys}"),
@@ -277,6 +293,7 @@ mod tests {
             (
                 None,
                 Some("grace=1.5"),
+                None,
                 None,
                 None,
                 "PROJECT02_TEST_DURATIONS: key \"grace\" needs a whole number of milliseconds \
@@ -288,12 +305,14 @@ mod tests {
                 None,
                 None,
                 None,
+                None,
                 "PROJECT02_TEST_PROVIDER must be \"deterministic\" when it is set.".to_owned(),
             ),
             (
                 None,
                 None,
                 Some("127.0.0.1:8765"),
+                None,
                 None,
                 format!("PROJECT02_TEST_APP_CATALOG must be {BASE_URL_RULE}."),
             ),
@@ -302,13 +321,22 @@ mod tests {
                 None,
                 None,
                 Some("http://127.0.0.1:8766/?all=1"),
+                None,
                 format!("PROJECT02_TEST_APP_INTERNET must be {BASE_URL_RULE}."),
+            ),
+            (
+                None,
+                None,
+                None,
+                None,
+                Some("http://user:key@127.0.0.1:8767/v1"),
+                format!("PROJECT02_TEST_OPENAI_API must be {BASE_URL_RULE}."),
             ),
         ] {
             assert_eq!(
-                switched(provider, durations, catalog, internet).map(drop),
+                switched(provider, durations, catalog, internet, openai).map(drop),
                 Err(SwitchError(said)),
-                "{provider:?} {durations:?} {catalog:?} {internet:?}"
+                "{provider:?} {durations:?} {catalog:?} {internet:?} {openai:?}"
             );
         }
     }

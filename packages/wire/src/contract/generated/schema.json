@@ -1079,6 +1079,13 @@
             "model": {
               "$ref": "#/$defs/Setup"
             },
+            "services": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ModelService"
+              },
+              "description": "Every service, in the order a page lists them."
+            },
             "project02": {
               "type": "array",
               "items": {
@@ -1101,6 +1108,7 @@
             "fingerprint",
             "diagnostics",
             "model",
+            "services",
             "project02",
             "sections"
           ]
@@ -1126,7 +1134,7 @@
           ]
         }
       ],
-      "description": "What a settings screen renders: the fingerprint a change must present,\nthe diagnostics, whether the target's settings give a character an AI\nmodel, and the host's fields and every section the target may set, all\nin one field shape. A target whose settings cannot be resolved is\nrefused with the reason, never shown as blank fields."
+      "description": "What a settings screen renders: the fingerprint a change must present,\nthe diagnostics, whether the target's settings give a character an AI\nmodel, the services she can think with, and the host's fields and every\nsection the target may set, all in one field shape. A target whose\nsettings cannot be resolved is refused with the reason, never shown as\nblank fields."
     },
     "ConfirmationCancelReason": {
       "oneOf": [
@@ -1740,7 +1748,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 13
+          "const": 14
         },
         "homeRoot": {
           "type": "string"
@@ -1813,7 +1821,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 13
+          "const": 14
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -2104,6 +2112,36 @@
     "MessageId": {
       "type": "string",
       "description": "A message's place in its session: `<session id>:message-<n>`, numbered\nfrom 1. Numbers climb but may skip, so a message's number is its order,\nnot a count."
+    },
+    "ModelService": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/RoleModelProvider"
+        },
+        "name": {
+          "type": "string",
+          "description": "What a page calls it."
+        },
+        "connected": {
+          "type": "boolean",
+          "description": "Whether a credential of it is in effect for the target: its key,\nor for NVIDIA a server of the person's own too."
+        },
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          },
+          "description": "Its own fields, in the order a page shows them."
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "connected",
+        "fields"
+      ],
+      "description": "A service as a settings page lists it: its name, whether it is\nconnected, and which of the host's fields are its own."
     },
     "OpenConversationBody": {
       "type": "object",
@@ -2982,6 +3020,21 @@
         }
       ]
     },
+    "RoleModelProvider": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "openai",
+          "description": "The OpenAI API, on the person's key."
+        },
+        {
+          "type": "string",
+          "const": "nvidia",
+          "description": "A model on NVIDIA's cloud, or on a server of the person's own\nthat speaks its wire."
+        }
+      ],
+      "description": "The services a character can think with, each by the value of\n`roleModelProvider` that chooses it, in the order a page lists\nthem. Only real services are here: the test provider is a test\nharness's switch, never a setting, and a home has none until its\nperson chooses one."
+    },
     "RosterState": {
       "type": "string",
       "enum": [
@@ -3133,12 +3186,19 @@
             "type": "string"
           }
         },
+        "suggestedValues": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The values a page offers first, while it takes any other of the\nfield's type too."
+        },
         "choices": {
           "type": "object",
           "additionalProperties": {
             "type": "string"
           },
-          "description": "The words for each allowed value, which a page lists in the order\nof `allowedValues`."
+          "description": "The words for each allowed or suggested value, which a page lists\nin the order of `allowedValues` or `suggestedValues`."
         },
         "agentMutable": {
           "type": "boolean"

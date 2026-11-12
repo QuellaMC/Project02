@@ -68,7 +68,8 @@ with an outcome of p02-wire, never an error.
   again when what she runs on changed. A turn in flight meets it before
   its next request to her model, where her settings are read again in any
   case. Whether they give her a model is one judgement, which her
-  settings' view asks too.
+  settings' view asks too: the service they choose, built, the OpenAI API
+  at the stand-in the binary names under its test switch.
 - **A character's package** is added from a file, updated or removed
   while the daemon runs: judged as discovery would publish it, written or
   removed under the locks of her settings, and then announced and

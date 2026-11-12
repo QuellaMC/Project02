@@ -92,7 +92,7 @@ it("config.view-global: the home's view lists the host fields the home may set i
     name,
     authored: {configured: false},
     effectiveSource: 'default',
-    effective: {source: 'missing', secret: name === 'nvidiaApiKey'},
+    effective: {source: 'missing', secret: name.endsWith('ApiKey')},
   });
 
   expect(view).toMatchObject({
@@ -114,6 +114,13 @@ it("config.view-global: the home's view lists the host fields the home may set i
         effective: {source: 'config', value: 'Robin'},
       },
       unset('roleModelProvider'),
+      unset('openaiApiKey'),
+      {
+        name: 'openaiModel',
+        authored: {configured: false},
+        effectiveSource: 'default',
+        effective: {source: 'default', value: 'gpt-6-luna'},
+      },
       unset('nvidiaApiKey'),
       unset('nvidiaModel'),
       unset('nvidiaBaseUrl'),

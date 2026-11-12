@@ -184,6 +184,7 @@ function homeView(shape: Partial<OkView> = {}): OkView {
     fingerprint: 'f1',
     diagnostics: [],
     model: {ready: true},
+    services: [],
     project02: [
       field('userDisplayName', {}, 'You'),
       own('roleModelProvider', 'nvidia', {
@@ -207,6 +208,7 @@ function herView(
     fingerprint: 'f1',
     diagnostics: [],
     model: {ready: true},
+    services: [],
     project02: [own('enabled', true, {valueType: 'boolean'})],
     sections: sections ?? [
       section('session-history', {
@@ -290,7 +292,7 @@ function health(
   accounts: GatewayHealth['accounts'] = [],
 ): GatewayHealth {
   return {
-    protocolVersion: 13,
+    protocolVersion: 14,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},

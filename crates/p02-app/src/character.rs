@@ -13,20 +13,19 @@ use std::sync::{Arc, Mutex, PoisonError};
 use async_trait::async_trait;
 use p02_characters::discover;
 use p02_config::{
-    CharacterSettings, HostSettings, MaterializeError, ReadSettingsError, Resolution,
-    RoleModelProvider, materialize,
+    CharacterSettings, HostSettings, MaterializeError, ReadSettingsError, Resolution, materialize,
 };
 use p02_contracts::{CharacterStorage, FileStoreBackend, Rang, RoleModelAdapter};
 use p02_core::{SpeakerName, Timestamp};
 use p02_phone::SetRing;
 use p02_plugins::{PHONE_PLUGIN, PluginHost};
-use p02_role_model::{NvidiaSettings, select_adapter};
+use p02_role_model::{NvidiaSettings, OpenaiSettings, ServiceSettings, select_adapter};
 use p02_runtime::{Character, CompletedTurn, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Inbox, QueuedLine, RuntimeRejection, StorageError};
 use p02_wire::{
     CharacterState, Diagnostic, Event, MaintenanceFailure, OpenOutcome, OpenRefusal, PhoneRing,
-    RunningTurn, TurnRefusal, TurnStamp, TurnStatus,
+    RoleModelProvider, RunningTurn, TurnRefusal, TurnStamp, TurnStatus,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, sleep_until};
@@ -1318,7 +1317,8 @@ fn assemble(
 }
 
 /// Her model: the one the test switch puts in every character's place,
-/// else the service her settings choose, built; or the sentence saying
+/// else the service her settings choose, built, the OpenAI API at the
+/// stand-in the binary names when it names one; or the sentence saying
 /// what they need for one. Her settings' view asks this too, so the page
 /// says what she says.
 pub(crate) fn model(
@@ -1329,15 +1329,20 @@ pub(crate) fn model(
         return Ok(Arc::clone(adapter));
     }
 
-    let nvidia = host.role_model_provider.map(|provider| match provider {
-        RoleModelProvider::Nvidia => NvidiaSettings {
+    let service = host.role_model_provider.map(|provider| match provider {
+        RoleModelProvider::Openai => ServiceSettings::Openai(OpenaiSettings {
+            api_key: host.openai_api_key.clone(),
+            model: host.openai_model.clone(),
+            base_url: world.openai_api.clone(),
+        }),
+        RoleModelProvider::Nvidia => ServiceSettings::Nvidia(NvidiaSettings {
             api_key: host.nvidia_api_key.clone(),
             model: host.nvidia_model.clone(),
             base_url: host.nvidia_base_url.clone(),
-        },
+        }),
     });
 
-    match select_adapter(None, nvidia.as_ref(), world.durations.model_silence) {
+    match select_adapter(None, service.as_ref(), world.durations.model_silence) {
         Ok(Some(adapter)) => Ok(adapter),
         Ok(None) => Err(NO_SERVICE.to_owned()),
         Err(error) => Err(error_sentence(&error)),

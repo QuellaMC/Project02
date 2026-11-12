@@ -2,8 +2,8 @@
 
 use std::num::NonZeroU32;
 
-use p02_config::{ReadSettingsError, Resolution, RoleModelProvider};
-use p02_wire::Code;
+use p02_config::{ReadSettingsError, Resolution};
+use p02_wire::{Code, RoleModelProvider};
 use serde_json::json;
 
 use crate::support::{World, document, home, host_field, of};
@@ -84,6 +84,8 @@ fn what_a_document_holds_that_the_settings_do_not_know_is_not_used_and_said() {
     );
 }
 
+/// Her own service and model are hers, as every host value of hers is,
+/// while the home's key reaches her and the home keeps its own.
 #[test]
 fn a_hand_written_document_keeps_every_value_its_fields_take() {
     let world = World::new();
@@ -93,6 +95,7 @@ fn a_hand_written_document_keeps_every_value_its_fields_take() {
             "project02": {
                 "userDisplayName": "  Robin  ",
                 "roleModelProvider": "nvidia",
+                "openaiApiKey": "  sk-as typed  ",
                 "nvidiaApiKey": "  nvapi-as typed  ",
                 "nvidiaModel": "meta/llama",
                 "nvidiaBaseUrl": "https://nim.example.test/v1/",
@@ -101,14 +104,38 @@ fn a_hand_written_document_keeps_every_value_its_fields_take() {
         })))
         .write_overlay(
             "mira",
-            &document(json!({"project02": {"enabled": false, "heartbeat": "2h"}})),
+            &document(json!({"project02": {
+                "enabled": false,
+                "heartbeat": "2h",
+                "roleModelProvider": "openai",
+                "openaiModel": "gpt-5.6-terra",
+            }})),
         );
 
     let settings = world.resolve(&of("mira")).settings();
     let host = settings.host();
+    let homes = world.resolve(&home()).settings();
 
     assert_eq!(host.user_display_name.as_str(), "Robin");
-    assert_eq!(host.role_model_provider, Some(RoleModelProvider::Nvidia));
+    assert_eq!(
+        (
+            host.role_model_provider,
+            host.openai_api_key.as_deref(),
+            host.openai_model.as_str()
+        ),
+        (
+            Some(RoleModelProvider::Openai),
+            Some("  sk-as typed  "),
+            "gpt-5.6-terra"
+        )
+    );
+    assert_eq!(
+        (
+            homes.host().role_model_provider,
+            homes.host().openai_model.as_str()
+        ),
+        (Some(RoleModelProvider::Nvidia), "gpt-6-luna")
+    );
     assert_eq!(host.nvidia_model.as_deref(), Some("meta/llama"));
     assert!(!host.enabled);
     assert_eq!(host.heartbeat, NonZeroU32::new(120));

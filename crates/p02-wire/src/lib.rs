@@ -27,8 +27,8 @@ pub use config::{
     AccessLevel, AccessName, ActivationStatus, Authored, ChangeOutcome, ChangeRefusal,
     CharacterConnectorEntry, ConfigChange, ConfigTarget, ConfigValueType, ConfigView,
     ConnectorConfigView, ConnectorEntry, ConnectorRefusal, EffectiveView, FieldView, LayoutCard,
-    LayoutRow, LayoutWhen, Namespace, Operation, Placement, PluginPage, SectionActivation,
-    SectionView, Setup, Source, ValueSource, ViewRefusal,
+    LayoutRow, LayoutWhen, ModelService, Namespace, Operation, Placement, PluginPage,
+    RoleModelProvider, SectionActivation, SectionView, Setup, Source, ValueSource, ViewRefusal,
 };
 pub use confirmation::{
     Answer, AnswerBody, CancelReason, ConfirmationAnswer, ConfirmationId, ConfirmationQuestion,

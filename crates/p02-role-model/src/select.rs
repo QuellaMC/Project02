@@ -6,8 +6,10 @@ use std::time::Duration;
 
 use p02_contracts::RoleModelAdapter;
 
-use crate::nvidia::{BuildNvidiaAdapterError, NvidiaAdapter, NvidiaSettings};
+use crate::nvidia::{NvidiaAdapter, NvidiaSettings};
+use crate::responses::{OpenaiSettings, ResponsesAdapter};
 use crate::test_provider::DeterministicAdapter;
+use crate::transport::{BuildAdapterError, PROVIDER_SILENCE};
 
 /// A test provider a test harness's switch can name. None is ever a
 /// setting's value.
@@ -33,32 +35,38 @@ impl FromStr for TestProvider {
     }
 }
 
+/// The service a character's settings choose, with what they set of it.
+#[derive(Clone, Debug)]
+pub enum ServiceSettings {
+    Nvidia(NvidiaSettings),
+    Openai(OpenaiSettings),
+}
+
 /// The provider a character speaks through: the test provider the switch
-/// names, whatever the settings choose; else the provider the settings
+/// names, whatever the settings choose; else the service the settings
 /// chose, its silence bound shortened when the harness shortened it; else
-/// none, until a provider is chosen.
+/// none, until a service is chosen.
 ///
 /// # Errors
 ///
-/// [`BuildNvidiaAdapterError`] when the chosen provider's settings cannot
-/// make an adapter.
+/// [`BuildAdapterError`] when the chosen service's settings cannot make an
+/// adapter.
 pub fn select_adapter(
     test_provider: Option<TestProvider>,
-    nvidia: Option<&NvidiaSettings>,
+    service: Option<&ServiceSettings>,
     shortened_silence: Option<Duration>,
-) -> Result<Option<Arc<dyn RoleModelAdapter>>, BuildNvidiaAdapterError> {
+) -> Result<Option<Arc<dyn RoleModelAdapter>>, BuildAdapterError> {
     if let Some(TestProvider::Deterministic) = test_provider {
         return Ok(Some(Arc::new(DeterministicAdapter)));
     }
 
-    let Some(settings) = nvidia else {
+    let Some(service) = service else {
         return Ok(None);
     };
-    let adapter = NvidiaAdapter::new(settings)?;
-    let adapter = match shortened_silence {
-        Some(silence) => adapter.with_silence(silence),
-        None => adapter,
-    };
+    let silence = shortened_silence.unwrap_or(PROVIDER_SILENCE);
 
-    Ok(Some(Arc::new(adapter)))
+    Ok(Some(match service {
+        ServiceSettings::Nvidia(settings) => Arc::new(NvidiaAdapter::new(settings, silence)?),
+        ServiceSettings::Openai(settings) => Arc::new(ResponsesAdapter::openai(settings, silence)?),
+    }))
 }

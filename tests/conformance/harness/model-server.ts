@@ -1,8 +1,9 @@
 /**
- * An OpenAI-compatible chat completions server on loopback, standing in
- * for the model: the home's provider settings point the daemon at it, it
- * answers each request with the next answer the test scripted, and it
- * keeps every request the daemon sent.
+ * A model on loopback for either service, in its protocol: OpenAI's chat
+ * completions as NVIDIA's settings reach it, a server of the person's own,
+ * and OpenAI's Responses as the OpenAI API's switch names it in that
+ * service's place. It answers each request with the next answer the test
+ * scripted, and it keeps every request the daemon sent.
  */
 import {
   createServer,
@@ -32,10 +33,18 @@ export type ChatMessage = {
   readonly tool_call_id?: string;
 };
 
+/** One event of a response the Responses protocol streams: its type, and whatever its type carries. */
+export type ResponseEvent = {
+  readonly type: string;
+  readonly [field: string]: unknown;
+};
+
 /** How the server answers one request. */
 export type Answer =
   /** Streamed: each chunk a `data:` line, then `[DONE]`, unless the stream is cut. */
   | {readonly chunks: readonly unknown[]; readonly end?: 'cut'}
+  /** Streamed as the Responses protocol streams, ending after its last event unless the stream is cut. */
+  | {readonly events: readonly ResponseEvent[]; readonly end?: 'cut'}
   /** Whole, in one JSON body: how `stream: false` is answered. */
   | {readonly completion: unknown}
   | {readonly status: number; readonly body?: unknown};
@@ -56,16 +65,28 @@ export type Driven = {
   readonly write: (chunks: readonly unknown[]) => void;
   /** These bytes as they are: a frame, or a character, may end in the next piece. */
   readonly send: (bytes: Uint8Array) => void;
-  /** Ends the answer with `[DONE]`. */
+  /** Ends the answer as its protocol does: chat completions with `[DONE]`, a response with its last event. */
   readonly end: () => void;
 };
 
 export type ModelServer = {
-  /** The `project02` settings of a home's `config.json` that point the daemon here. */
+  /** The `project02` settings of a home's `config.json` that point the daemon here as NVIDIA's. */
   readonly settings: {
     readonly roleModelProvider: 'nvidia';
     readonly nvidiaApiKey: string;
     readonly nvidiaBaseUrl: string;
+  };
+  /**
+   * The OpenAI API here, under `/openai/v1`: the switch that names this
+   * server in its place, for the daemon's environment, and the `project02`
+   * settings that choose it with a key.
+   */
+  readonly openai: {
+    readonly env: {readonly PROJECT02_TEST_OPENAI_API: string};
+    readonly settings: {
+      readonly roleModelProvider: 'openai';
+      readonly openaiApiKey: string;
+    };
   };
   readonly requests: readonly ModelRequest[];
   /** The answers to the next requests, in order. */
@@ -84,7 +105,7 @@ type Scripted =
     }
   | {
       readonly reached: (request: ModelRequest) => void;
-      readonly drive: (response: ServerResponse) => void;
+      readonly drive: (response: ServerResponse, request: ModelRequest) => void;
     };
 
 export async function startModelServer(): Promise<ModelServer> {
@@ -104,7 +125,10 @@ export async function startModelServer(): Promise<ModelServer> {
 
     requests.push(recorded);
 
-    if (!recorded.path.endsWith('/chat/completions')) {
+    if (
+      !recorded.path.endsWith('/chat/completions') &&
+      !recorded.path.endsWith('/responses')
+    ) {
       response.writeHead(404).end();
 
       return;
@@ -121,7 +145,7 @@ export async function startModelServer(): Promise<ModelServer> {
 
     if ('drive' in next) {
       next.reached(recorded);
-      next.drive(response);
+      next.drive(response, recorded);
     } else if ('released' in next) {
       next.reached(recorded);
       give(await next.released, request, response);
@@ -149,6 +173,15 @@ export async function startModelServer(): Promise<ModelServer> {
       nvidiaApiKey: 'model-server-key',
       nvidiaBaseUrl: `http://127.0.0.1:${String(port)}/v1`,
     },
+    openai: {
+      env: {
+        PROJECT02_TEST_OPENAI_API: `http://127.0.0.1:${String(port)}/openai/v1`,
+      },
+      settings: {
+        roleModelProvider: 'openai',
+        openaiApiKey: 'openai-server-key',
+      },
+    },
     requests,
     answer: (...answers) => {
       script.push(...answers);
@@ -168,6 +201,7 @@ export async function startModelServer(): Promise<ModelServer> {
     stream: () => {
       const arrival = Promise.withResolvers<ModelRequest>();
       let response: ServerResponse | undefined;
+      let last = '';
       let pending: (string | Uint8Array)[] = [];
       let ended = false;
       const flush = (): void => {
@@ -182,16 +216,17 @@ export async function startModelServer(): Promise<ModelServer> {
         pending = [];
 
         if (ended) {
-          response.end('data: [DONE]\n\n');
+          response.end(last);
         }
       };
 
       script.push({
         reached: arrival.resolve,
-        drive: driven => {
+        drive: (driven, request) => {
           response = driven.writeHead(200, {
             'content-type': 'text/event-stream',
           });
+          last = request.path.endsWith('/responses') ? '' : 'data: [DONE]\n\n';
           flush();
         },
       });
@@ -254,10 +289,15 @@ function give(
       .writeHead(200, {'content-type': 'application/json'})
       .end(JSON.stringify(answer.completion));
   } else {
+    const [streamed, last] =
+      'events' in answer
+        ? [responseStream(answer.events), '']
+        : [eventStream(answer.chunks), 'data: [DONE]\n\n'];
+
     response.writeHead(200, {'content-type': 'text/event-stream'});
     // Out now, so a stream that is then cut had opened.
     response.flushHeaders();
-    response.write(eventStream(answer.chunks), () => {
+    response.write(streamed, () => {
       // Cut once the response has handed the chunks to the socket, which it
       // may do a tick later, and ended, not destroyed: they still go out first.
       if (answer.end === 'cut') {
@@ -266,9 +306,16 @@ function give(
     });
 
     if (answer.end === undefined) {
-      response.end('data: [DONE]\n\n');
+      response.end(last);
     }
   }
+}
+
+/** Each event as the Responses protocol streams it: an `event:` line naming it, and a `data:` line of its JSON. */
+export function responseStream(events: readonly ResponseEvent[]): string {
+  return events
+    .map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
+    .join('');
 }
 
 /** Each chunk a `data:` line: an object as its JSON, a string as written. */
@@ -389,7 +436,8 @@ export function calling(
   };
 }
 
-function pieces(whole: string, cuts: readonly number[]): string[] {
+/** `whole` cut at the given offsets. */
+export function pieces(whole: string, cuts: readonly number[]): string[] {
   return [0, ...cuts].map((start, at) => whole.slice(start, cuts[at]));
 }
 

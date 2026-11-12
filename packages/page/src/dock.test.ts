@@ -32,9 +32,9 @@ function character(id: string, displayName: string): CharacterSummary {
 /** A live tab of Mira's and Nova's home, nothing waiting. */
 function live(): WebState {
   return installSnapshot(initialState, {
-    protocolVersion: 13,
+    protocolVersion: 14,
     health: {
-      protocolVersion: 13,
+      protocolVersion: 14,
       homeRoot: '/home/person/.project02',
       config: {diagnostics: []},
       packages: {diagnostics: []},
@@ -291,6 +291,7 @@ describe('the dock above the message box', () => {
       fingerprint: 'f1',
       diagnostics: [],
       model: {ready: true},
+      services: [],
       project02: [],
       sections: [],
     };

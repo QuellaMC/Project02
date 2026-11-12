@@ -25,7 +25,9 @@ the same daemon in another program's process, as the desktop shell does.
   the `minute` a heartbeat counts in, and for the connector `edit`;
   `PROJECT02_TEST_TELEGRAM_API` names the Bot API the connector reaches;
   `PROJECT02_TEST_APP_CATALOG` names the App Store's catalog in place of
-  the build's own, which one constant beside the switches holds; and
+  the build's own, which one constant beside the switches holds;
   `PROJECT02_TEST_APP_INTERNET=<base>` takes every request of her apps,
   one for `https://<host>/<path>?<query>` made at
-  `<base>/<host>/<path>?<query>`, the rest of it unchanged.
+  `<base>/<host>/<path>?<query>`, the rest of it unchanged; and
+  `PROJECT02_TEST_OPENAI_API=<base>` names where the OpenAI API is, in
+  place of its own address.

@@ -15,9 +15,10 @@ use crate::diagnostic::Diagnostic;
 
 /// What a settings screen renders: the fingerprint a change must present,
 /// the diagnostics, whether the target's settings give a character an AI
-/// model, and the host's fields and every section the target may set, all
-/// in one field shape. A target whose settings cannot be resolved is
-/// refused with the reason, never shown as blank fields.
+/// model, the services she can think with, and the host's fields and every
+/// section the target may set, all in one field shape. A target whose
+/// settings cannot be resolved is refused with the reason, never shown as
+/// blank fields.
 #[derive(Debug, Serialize, JsonSchema, TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ConfigView {
@@ -25,6 +26,8 @@ pub enum ConfigView {
         fingerprint: Fingerprint,
         diagnostics: Vec<Diagnostic>,
         model: Setup,
+        /// Every service, in the order a page lists them.
+        services: Vec<ModelService>,
         project02: Vec<FieldView>,
         sections: Vec<SectionView>,
     },
@@ -39,6 +42,35 @@ pub enum ConfigView {
 pub enum ViewRefusal {
     UnknownCharacter,
     ConfigUnloadable,
+}
+
+vocabulary! {
+    /// The services a character can think with, each by the value of
+    /// `roleModelProvider` that chooses it, in the order a page lists
+    /// them. Only real services are here: the test provider is a test
+    /// harness's switch, never a setting, and a home has none until its
+    /// person chooses one.
+    RoleModelProvider {
+        /// The OpenAI API, on the person's key.
+        Openai = "openai",
+        /// A model on NVIDIA's cloud, or on a server of the person's own
+        /// that speaks its wire.
+        Nvidia = "nvidia",
+    }
+}
+
+/// A service as a settings page lists it: its name, whether it is
+/// connected, and which of the host's fields are its own.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+pub struct ModelService {
+    pub id: RoleModelProvider,
+    /// What a page calls it.
+    pub name: String,
+    /// Whether a credential of it is in effect for the target: its key,
+    /// or for NVIDIA a server of the person's own too.
+    pub connected: bool,
+    /// Its own fields, in the order a page shows them.
+    pub fields: Vec<Identifier>,
 }
 
 /// One field as a screen shows it: its declaration, what the target's own
@@ -62,8 +94,12 @@ pub struct FieldView {
     pub value_type: Option<ConfigValueType>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub allowed_values: Option<Vec<String>>,
-    /// The words for each allowed value, which a page lists in the order
-    /// of `allowedValues`.
+    /// The values a page offers first, while it takes any other of the
+    /// field's type too.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggested_values: Option<Vec<String>>,
+    /// The words for each allowed or suggested value, which a page lists
+    /// in the order of `allowedValues` or `suggestedValues`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub choices: Option<BTreeMap<String, String>>,
     pub agent_mutable: bool,
