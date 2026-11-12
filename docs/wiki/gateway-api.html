@@ -1304,8 +1304,8 @@ data: {…}</code></pre>
       <p>
         Health's <code>chatgpt</code> says the home's sign-in as it stands,
         by its <code>state</code>: <code>signed_out</code>, with a
-        <code>message</code> when the last sign-in failed or the one the home
-        kept could not be read, until the next start or sign-out;
+        <code>message</code> when the last sign-in failed or ended, or the one
+        the home kept could not be read, until the next start or sign-out;
         <code>waiting</code>, with the <code>code</code> the person types,
         the <code>url</code> of OpenAI's page they type it on and
         <code>expiresAt</code>, when the code stops working, in milliseconds
@@ -1316,9 +1316,9 @@ data: {…}</code></pre>
         whenever the sign-in changes, so a page moves on by itself: to the
         code once a wait begins; to <code>signed_in</code> once the person
         approved it; to <code>signed_out</code> with the sentence when it
-        failed, the code ran out or the account has no ChatGPT plan; and to
-        <code>signed_out</code> with none when the wait was called off or the
-        person signed out.
+        failed, the code ran out or the account has no ChatGPT plan, or when
+        OpenAI refused to renew the tokens; and to <code>signed_out</code>
+        with none when the wait was called off or the person signed out.
       </p>
 
       <p>
@@ -1331,6 +1331,23 @@ data: {…}</code></pre>
         refreshes them before a use when they run out within the hour. Cancelling ends the wait and keeps what the
         home held; signing out removes the tokens. This is not an official
         way to use a plan in another app, and OpenAI can change or block it.
+      </p>
+
+      <p>
+        A character whose settings choose <code>chatgpt</code> thinks with
+        the plan while the home is signed in, on the model her settings
+        name, else the first the plan offers, and asks its service as
+        Codex's app does, each request on the access token fresh for it. An
+        answer of 401 renews the tokens once and asks again; a second fails
+        her turn, saying to sign in again. A plan whose usage is used up
+        fails her turn saying its limit is reached and resets later. While
+        the home is signed out she is <code>needs_model</code>, saying to
+        sign in, and every running character on the plan moves between that
+        and <code>ready</code>, each with its <code>state_changed</code>,
+        whenever the sign-in begins or ends. A renewal OpenAI refuses ends
+        the sign-in, as the person's own sign-out would, with health's
+        <code>message</code> saying why. No failure, record or event repeats
+        a token or the account it went with.
       </p>
 
       <h2>The sync rule</h2>
@@ -1474,10 +1491,14 @@ data: {…}</code></pre>
         <code>services</code> list every service a character can think with,
         in the order a page shows them, each with its <code>name</code>, its
         <code>summary</code>, a line on what it is, its <code>keyFrom</code>,
-        a sentence on where a key for it comes from, its own
-        <code>fields</code> with the one that names its <code>model</code>,
-        and whether it is <code>connected</code>: a credential of it in
-        effect for the scope.
+        a sentence on where a key for it comes from, which the ChatGPT plan
+        leaves out, its own <code>fields</code> with the one that names its
+        <code>model</code>, and whether it is <code>connected</code>: a
+        credential of it in effect for the scope, or for the ChatGPT plan the
+        home signed in, with its <code>account</code>, the
+        <code>email</code> and <code>plan</code> it is signed in as. The
+        plan's model field offers the models that plan offers, its first in
+        effect, <code>"default"</code>, until one is set.
         Whatever a view offers, the scope can save: a host field is
         authorable at the home and
         per character unless its scope keeps it to one, as a character's own

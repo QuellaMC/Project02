@@ -23,19 +23,35 @@ ends the turn, and a turn spends at most 99 rounds of tool calls.
 An adapter speaks one protocol. The NVIDIA adapter streams a chat
 completion from NVIDIA's cloud or a server of the person's own. The
 Responses adapter speaks OpenAI's Responses protocol to a service of it,
-which says where it is, how a request proves who sends it and its name
-in what the person reads: today the OpenAI API. It stores nothing with
-the service and passes back no reasoning, offers every tool unstrict,
-and replays her earlier calls and their results as function calls and
-their outputs, under ids numbered within each request, since the
-runtime's own are longer than the protocol takes; a response is judged
-by the event that ends it.
+which says where it is, how a request proves who sends it, what of the
+protocol it takes and its name in what the person reads: the OpenAI API,
+on the person's key, and a ChatGPT plan, on the home's sign-in. It stores
+nothing with the service and passes back no reasoning, offers every tool
+unstrict, and replays her earlier calls and their results as function
+calls and their outputs, under ids numbered within each request, since
+the runtime's own are longer than the protocol takes. A response ends at
+the event that says so, completed, incomplete or failed, or at
+`response.done` or a `[DONE]` line, and its output is the one that event
+carries, or, when it carries none, each item as its own last event gave
+it whole.
+
+A plan's requests go as OpenAI's Codex app makes them, each in a session
+of its own: the access token fresh from the sign-in and the ChatGPT
+account, Codex's originator, empty instructions with the system's lines
+as the developer's and each text as a part, a little reasoning handed
+back encrypted, no bound on the output, and every one streamed, plain
+completions too. A 401 is asked once more on the sign-in refreshed, and
+a second is the sign-in turned down. A plan whose usage is used up is
+said so and asked no more until the next turn; too many requests at once
+are tried again and then said as the service busy.
 
 An adapter is built only with a key, or for NVIDIA a server of the
-person's own, which may ask for none; building one does no I/O, its HTTP
-client made at its first request. Both hand back the model's calls and
-text as written, and hear her reply as its arguments stream. The
-exchange is one for both: it retries a busy provider or a broken
-connection but never a timeout, bounds the provider's silence, and no
-failure repeats the key, each said as its service's own. The test
-provider answers in fixed sentences, behind a test switch alone.
+person's own, which may ask for none, or for the plan the home signed
+in; building one does no I/O, its HTTP client made at its first request.
+Both hand back the model's calls and text as written, and hear her reply
+as its arguments stream. The exchange is one for both: it retries a busy
+provider or a broken connection but never a timeout, bounds the
+provider's silence, reads an error under `error`, beside it or as its
+`detail`, and no failure repeats a key, a token or the account it went
+with, each said as its service's own. The test provider answers in fixed
+sentences, behind a test switch alone.

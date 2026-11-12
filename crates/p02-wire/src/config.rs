@@ -51,6 +51,8 @@ vocabulary! {
     /// harness's switch, never a setting, and a home has none until its
     /// person chooses one.
     RoleModelProvider {
+        /// A ChatGPT plan the home is signed in to.
+        Chatgpt = "chatgpt",
         /// The OpenAI API, on the person's key.
         Openai = "openai",
         /// A model on NVIDIA's cloud, or on a server of the person's own
@@ -60,25 +62,43 @@ vocabulary! {
 }
 
 /// A service as a settings page lists it: its name, what it is and where a
-/// key for it comes from, whether it is connected, and which of the host's
-/// fields are its own, its model's among them.
+/// key for it comes from, whether it is connected and as whom, and which of
+/// the host's fields are its own, its model's among them.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub struct ModelService {
     pub id: RoleModelProvider,
     /// What a page calls it.
     pub name: String,
     /// What it is, in a line a page shows under its name.
     pub summary: String,
-    /// Where a key for it comes from, in a sentence.
-    pub key_from: String,
-    /// Whether a credential of it is in effect for the target: its key,
-    /// or for NVIDIA a server of the person's own too.
+    /// Where a key for it comes from, in a sentence; none for the ChatGPT
+    /// plan, which takes no key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub key_from: Option<String>,
+    /// Whether it is connected for the target: a credential of it in
+    /// effect, its key or for NVIDIA a server of the person's own too; for
+    /// the ChatGPT plan, the home signed in, which is no setting.
     pub connected: bool,
+    /// Whom the ChatGPT plan is connected as, while the home is signed in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account: Option<PlanAccount>,
     /// The one of its fields that names the model she asks it for.
     pub model: Identifier,
     /// Its own fields, in the order a page shows them.
     pub fields: Vec<Identifier>,
+}
+
+/// The account a ChatGPT plan is signed in to: its email and its plan, such
+/// as `plus`, as OpenAI named them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[ts(optional_fields)]
+pub struct PlanAccount {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub plan: Option<String>,
 }
 
 /// One field as a screen shows it: its declaration, what the target's own

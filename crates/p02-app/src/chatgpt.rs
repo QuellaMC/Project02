@@ -1,27 +1,33 @@
 //! The home's sign-in to a ChatGPT plan: a code the person approves on
 //! OpenAI's page, waited for at the pace OpenAI asks, and the tokens it
-//! ends in, kept in the home and kept fresh until the person signs out.
-//! The daemon makes every request itself, at OpenAI's sign-in or at the
-//! stand-in the binary names under its test switch. This part alone writes
-//! the home's sign-in, each write under the lock of what it holds, so the
-//! file and what the daemon holds change together. Health says the sign-in
-//! as it stands, and goes to every surface whenever that changes.
+//! ends in, kept in the home and kept fresh until the person signs out or
+//! OpenAI refuses to renew them. The daemon makes every request itself, at
+//! OpenAI's sign-in or at the stand-in the binary names under its test
+//! switch. This part alone writes the home's sign-in, each write under the
+//! lock of what it holds, so the file and what the daemon holds change
+//! together. Health says the sign-in as it stands, and goes to every
+//! surface whenever that changes; the characters who think with the plan
+//! are brought up to date with it then.
 
 mod auth;
 
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
+use async_trait::async_trait;
+use p02_role_model::{PlanAccess, PlanSignIn};
 use p02_shared::{BaseUrl, error_chain, sentence};
 use p02_store::{ChatgptTokens, Home, StorageError};
-use p02_wire::{ChatgptOutcome, ChatgptSignIn};
+use p02_wire::{ChatgptOutcome, ChatgptSignIn, PlanAccount};
 use tokio::task::AbortHandle;
 
 use crate::daemon::{Daemon, WeakDaemon, blocking};
-use auth::{Auth, DeviceCode, needs_refresh, now};
+use auth::{Auth, DeviceCode, RefreshFailed, needs_refresh, now};
 
 const UNREADABLE: &str = "Your ChatGPT sign-in could not be read, so this home is signed out. \
                           Sign in again.";
 const SIGNED_OUT: &str = "Sign in to your ChatGPT plan first.";
+const ENDED: &str = "OpenAI no longer accepts your ChatGPT sign-in, so this home is signed out. \
+                     Sign in again.";
 
 /// The home's sign-in, as the daemon holds it.
 #[derive(Debug)]
@@ -53,6 +59,23 @@ struct Waiting {
     number: u64,
     code: DeviceCode,
     task: AbortHandle,
+}
+
+/// Why the home has no tokens to hand out: the sentence saying so, and
+/// whether OpenAI ended the sign-in just now, which every surface is told.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct NoTokens {
+    sentence: String,
+    ended: bool,
+}
+
+impl NoTokens {
+    fn because(sentence: impl Into<String>) -> Self {
+        Self {
+            sentence: sentence.into(),
+            ended: false,
+        }
+    }
 }
 
 impl Chatgpt {
@@ -93,36 +116,74 @@ impl Chatgpt {
         }
     }
 
+    /// Whom the home is signed in as, while it holds tokens, a wait on or
+    /// not.
+    pub(crate) fn account(&self) -> Option<PlanAccount> {
+        self.state().tokens.as_ref().map(|tokens| PlanAccount {
+            email: tokens.email.clone(),
+            plan: tokens.plan.clone(),
+        })
+    }
+
     /// The tokens, fresh: within an hour of running out they are refreshed
     /// first, and the new ones kept before they are handed out, since
     /// OpenAI refuses the refresh token they replace. Two uses at once
-    /// refresh once. The sentence saying why there are none, when the home
-    /// is not signed in or a refresh failed.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "nothing thinks with the plan yet: its service, which asks for the tokens \
-                      before each request, is their one reader"
-        )
-    )]
-    pub(crate) async fn fresh(self: &Arc<Self>) -> Result<ChatgptTokens, String> {
+    /// refresh once. Why there are none, when the home is not signed in or
+    /// the refresh failed.
+    pub(crate) async fn fresh(self: &Arc<Self>) -> Result<ChatgptTokens, NoTokens> {
         let _refreshing = self.refreshing.lock().await;
-        let current = self.state().tokens.clone().ok_or(SIGNED_OUT)?;
+        let current = self.held()?;
 
         if !needs_refresh(&current, now()) {
             return Ok(current);
         }
 
-        let refreshed = self.auth.refresh(&current, now()).await?;
-        let chatgpt = Arc::clone(self);
+        self.refresh(current).await
+    }
 
-        blocking(move || chatgpt.keep_refreshed(&current, refreshed)).await
+    /// The tokens once the plan's service refused `refused`, the access
+    /// token of some: refreshed whatever their age, unless another use
+    /// replaced that one already, as [`Chatgpt::fresh`] answers otherwise.
+    pub(crate) async fn refreshed(
+        self: &Arc<Self>,
+        refused: &str,
+    ) -> Result<ChatgptTokens, NoTokens> {
+        let _refreshing = self.refreshing.lock().await;
+        let current = self.held()?;
+
+        if current.access_token != refused && !needs_refresh(&current, now()) {
+            return Ok(current);
+        }
+
+        self.refresh(current).await
     }
 
     /// Its wait is asked no more: the daemon stops.
     pub(crate) fn stop(&self) {
         self.call_off();
+    }
+
+    /// The tokens the home holds now.
+    fn held(&self) -> Result<ChatgptTokens, NoTokens> {
+        self.state()
+            .tokens
+            .clone()
+            .ok_or_else(|| NoTokens::because(SIGNED_OUT))
+    }
+
+    /// `current` traded for new tokens, which are kept before they are
+    /// handed out; a refresh OpenAI refuses ends the sign-in, and any other
+    /// failure of it leaves the tokens as they were. Its caller holds the
+    /// refreshing lock.
+    async fn refresh(self: &Arc<Self>, current: ChatgptTokens) -> Result<ChatgptTokens, NoTokens> {
+        let refreshed = self.auth.refresh(&current, now()).await;
+        let chatgpt = Arc::clone(self);
+
+        match refreshed {
+            Ok(refreshed) => blocking(move || chatgpt.keep_refreshed(&current, refreshed)).await,
+            Err(RefreshFailed::Refused) => blocking(move || chatgpt.ended(&current)).await,
+            Err(RefreshFailed::Unanswered(sentence)) => Err(NoTokens::because(sentence)),
+        }
     }
 
     /// Keeps `refreshed` in place of `current`, unless a sign-in or a
@@ -132,20 +193,45 @@ impl Chatgpt {
         &self,
         current: &ChatgptTokens,
         refreshed: ChatgptTokens,
-    ) -> Result<ChatgptTokens, String> {
+    ) -> Result<ChatgptTokens, NoTokens> {
         let mut state = self.state();
 
         match &state.tokens {
             Some(kept) if kept == current => {}
             Some(kept) => return Ok(kept.clone()),
-            None => return Err(SIGNED_OUT.to_owned()),
+            None => return Err(NoTokens::because(SIGNED_OUT)),
         }
 
         self.home
             .keep_chatgpt_sign_in(&refreshed)
-            .map_err(|error| unsaved(&error))?;
+            .map_err(|error| NoTokens::because(unsaved(&error)))?;
         state.tokens = Some(refreshed.clone());
         Ok(refreshed)
+    }
+
+    /// Ends the sign-in whose refresh OpenAI refused, `current`'s, unless a
+    /// sign-in or a sign-out since the refresh began had the last word: the
+    /// home is signed out, saying why, and its tokens leave it. It waits on
+    /// the disk.
+    fn ended(&self, current: &ChatgptTokens) -> Result<ChatgptTokens, NoTokens> {
+        let mut state = self.state();
+
+        match &state.tokens {
+            Some(kept) if kept == current => {}
+            Some(kept) => return Ok(kept.clone()),
+            None => return Err(NoTokens::because(SIGNED_OUT)),
+        }
+
+        // Tokens a failed removal leaves behind are refused again at their
+        // first use after a restart, and the next sign-in replaces them.
+        let _ = self.home.forget_chatgpt_sign_in();
+
+        state.tokens = None;
+        state.failure = Some(ENDED.to_owned());
+        Err(NoTokens {
+            sentence: ENDED.to_owned(),
+            ended: true,
+        })
     }
 
     /// Waits for `code`'s approval on a task of its own, in place of any
@@ -290,8 +376,9 @@ impl Daemon {
     }
 
     /// Signs the home out of its ChatGPT plan: its tokens leave the home,
-    /// and any wait ends. Every surface hears it; a sign-in whose file
-    /// could not be removed stands, and the answer says why.
+    /// and any wait ends. Every surface hears it, and the characters who
+    /// think with the plan then need a model; a sign-in whose file could
+    /// not be removed stands, and the answer says why.
     pub async fn sign_out_of_chatgpt(&self) -> ChatgptOutcome {
         let daemon = self.clone();
 
@@ -300,7 +387,7 @@ impl Daemon {
 
             match chatgpt.sign_out() {
                 Ok(()) => {
-                    daemon.announce_health();
+                    daemon.sign_in_changed();
                     ChatgptOutcome::Ok {
                         sign_in: chatgpt.view(),
                     }
@@ -311,12 +398,50 @@ impl Daemon {
         .await
     }
 
-    /// Ends wait `number` as `approved` says, and tells every surface when
-    /// it was still the one waiting. It waits on the disk.
+    /// Ends wait `number` as `approved` says, and when it was still the one
+    /// waiting, tells every surface and brings the characters who think
+    /// with the plan up to date. It waits on the disk.
     fn wait_ended(&self, number: u64, approved: Result<ChatgptTokens, String>) {
         if self.world().chatgpt.end(number, approved) {
-            self.announce_health();
+            self.sign_in_changed();
         }
+    }
+
+    /// What a request on the plan carries: the home's tokens fresh, or,
+    /// once its service refused `refused`, an access token, refreshed. When
+    /// OpenAI ended the sign-in instead, every surface hears it, and the
+    /// characters who think with the plan then need a model.
+    async fn plan_access(&self, refused: Option<&str>) -> Result<PlanAccess, String> {
+        let chatgpt = &self.world().chatgpt;
+        let tokens = match refused {
+            None => chatgpt.fresh().await,
+            Some(refused) => chatgpt.refreshed(refused).await,
+        };
+
+        match tokens {
+            Ok(tokens) => Ok(PlanAccess {
+                access_token: tokens.access_token,
+                account_id: tokens.account_id,
+            }),
+            Err(NoTokens { sentence, ended }) => {
+                if ended {
+                    let daemon = self.clone();
+
+                    blocking(move || daemon.sign_in_changed()).await;
+                }
+
+                Err(sentence)
+            }
+        }
+    }
+
+    /// The home's sign-in changed: health as it now stands goes to every
+    /// surface, and a reconcile pass brings each running character up to
+    /// date with it, built again when she thinks with the plan. It waits on
+    /// the disk.
+    fn sign_in_changed(&self) {
+        self.announce_health();
+        tokio::spawn(self.reconcile());
     }
 
     /// Health as it now stands, sent to every surface from the blocking
@@ -325,6 +450,36 @@ impl Daemon {
         let daemon = self.clone();
 
         blocking(move || daemon.announce_health()).await;
+    }
+}
+
+/// The home's sign-in as a character's ChatGPT plan reaches it, through
+/// the daemon, while it lasts.
+#[derive(Debug)]
+pub(crate) struct PlanTokens(WeakDaemon);
+
+impl PlanTokens {
+    pub(crate) fn new(daemon: WeakDaemon) -> Self {
+        Self(daemon)
+    }
+
+    fn daemon(&self) -> Result<Daemon, String> {
+        self.0
+            .upgrade()
+            .ok_or_else(|| "The daemon is stopped.".to_owned())
+    }
+}
+
+#[async_trait]
+impl PlanSignIn for PlanTokens {
+    async fn fresh(&self) -> Result<PlanAccess, String> {
+        self.daemon()?.plan_access(None).await
+    }
+
+    async fn refreshed(&self, refused: &PlanAccess) -> Result<PlanAccess, String> {
+        self.daemon()?
+            .plan_access(Some(&refused.access_token))
+            .await
     }
 }
 
@@ -369,7 +524,10 @@ fn unsaved(error: &StorageError) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+
     use axum::Router;
+    use axum::http::StatusCode;
     use axum::http::header::CONTENT_TYPE;
     use axum::routing::post;
     use base64::Engine as _;
@@ -444,18 +602,26 @@ mod tests {
     }
 
     /// OpenAI's token endpoint on loopback, which keeps each form it is
-    /// sent and answers every one with `answer`.
-    async fn token_endpoint(answer: Value) -> (BaseUrl, Arc<Mutex<Vec<String>>>) {
+    /// sent and answers them with `answers`, a status and a body each, in
+    /// order.
+    async fn token_endpoint(answers: Vec<(u16, Value)>) -> (BaseUrl, Arc<Mutex<Vec<String>>>) {
         let sent = Arc::new(Mutex::new(Vec::new()));
         let kept = Arc::clone(&sent);
+        let answers = Arc::new(Mutex::new(VecDeque::from(answers)));
         let app = Router::new().route(
             "/oauth/token",
             post(move |form: String| {
                 kept.lock().unwrap().push(form);
 
-                let answer = answer.to_string();
+                let (status, answer) = answers.lock().unwrap().pop_front().unwrap();
 
-                async move { ([(CONTENT_TYPE, "application/json")], answer) }
+                async move {
+                    (
+                        StatusCode::from_u16(status).unwrap(),
+                        [(CONTENT_TYPE, "application/json")],
+                        answer.to_string(),
+                    )
+                }
             }),
         );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -483,8 +649,11 @@ mod tests {
             expires_at: 0,
         };
         let access = jwt(&json!({"exp": 2_000_000_000}));
-        let (base, sent) =
-            token_endpoint(json!({"access_token": access, "refresh_token": "refresh-2"})).await;
+        let (base, sent) = token_endpoint(vec![(
+            200,
+            json!({"access_token": access, "refresh_token": "refresh-2"}),
+        )])
+        .await;
 
         home.keep_chatgpt_sign_in(&stale).unwrap();
 
@@ -509,6 +678,91 @@ mod tests {
                 "client_id=app_EMoamEEZ73f0CkXaXp7hrann&grant_type=refresh_token&\
                  refresh_token=refresh-1&scope=openid+profile+email"
             ]
+        );
+    }
+
+    /// Once the plan's service refused a token, a use refreshes it whatever
+    /// its age, unless another use replaced that token already. A refresh
+    /// that meets a server's error ends nothing, and one OpenAI refuses
+    /// ends the sign-in: the home is signed out, saying why, and its tokens
+    /// leave it.
+    #[tokio::test]
+    async fn a_refused_token_is_refreshed_once_and_a_refused_refresh_ends_the_sign_in() {
+        let directory = tempfile::tempdir().unwrap();
+        let home = Home::new(canonical_path(directory.path(), DanglingLinks::Keep).unwrap());
+        // Fresh for years, whatever the clock reads.
+        let kept = ChatgptTokens {
+            access_token: "access-1".to_owned(),
+            refresh_token: "refresh-1".to_owned(),
+            id_token: String::new(),
+            account_id: "acct-sam".to_owned(),
+            email: Some("sam@example.com".to_owned()),
+            plan: Some("plus".to_owned()),
+            expires_at: 2_000_000_000_000,
+        };
+        let access = jwt(&json!({"exp": 2_000_000_000}));
+        let (base, sent) = token_endpoint(vec![
+            (
+                200,
+                json!({"access_token": access, "refresh_token": "refresh-2"}),
+            ),
+            (500, json!({})),
+            (401, json!({"error": {"message": "refresh_token_reused"}})),
+        ])
+        .await;
+
+        home.keep_chatgpt_sign_in(&kept).unwrap();
+
+        let chatgpt = Arc::new(Chatgpt::open(home.clone(), Some(base)));
+
+        assert_eq!(chatgpt.refreshed("access-0").await, Ok(kept.clone()));
+
+        let refreshed = chatgpt.refreshed("access-1").await.unwrap();
+
+        assert_eq!(
+            (
+                refreshed.access_token.as_str(),
+                refreshed.refresh_token.as_str()
+            ),
+            (access.as_str(), "refresh-2")
+        );
+        assert_eq!(
+            chatgpt.refreshed(&access).await,
+            Err(NoTokens::because(
+                "OpenAI could not renew your ChatGPT sign-in just now (status 500). Try again \
+                 in a moment."
+            ))
+        );
+        assert_eq!(home.chatgpt_sign_in().unwrap(), Some(refreshed));
+        assert_eq!(
+            chatgpt.refreshed(&access).await,
+            Err(NoTokens {
+                sentence: ENDED.to_owned(),
+                ended: true,
+            })
+        );
+        assert_eq!(home.chatgpt_sign_in().unwrap(), None);
+        assert_eq!(
+            (chatgpt.view(), chatgpt.account()),
+            (
+                ChatgptSignIn::SignedOut {
+                    message: Some(ENDED.to_owned())
+                },
+                None
+            )
+        );
+        // Nothing was traded for the token another use replaced.
+        assert_eq!(
+            sent.lock()
+                .unwrap()
+                .iter()
+                .filter_map(|form| {
+                    form_urlencoded::parse(form.as_bytes())
+                        .find(|(field, _)| field == "refresh_token")
+                        .map(|(_, token)| token.into_owned())
+                })
+                .collect::<Vec<_>>(),
+            ["refresh-1", "refresh-2", "refresh-2"]
         );
     }
 }

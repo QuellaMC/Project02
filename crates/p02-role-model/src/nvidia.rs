@@ -80,7 +80,7 @@ impl NvidiaAdapter {
         // person's own may ask for none.
         let access = match settings.api_key.as_deref().filter(|key| !key.is_empty()) {
             Some(key) => Access::bearer(NVIDIA, key)?,
-            None if settings.base_url.is_some() => Access::Open,
+            None if settings.base_url.is_some() => Access::open(),
             None => return Err(BuildAdapterError::MissingKey(NVIDIA)),
         };
 
@@ -114,7 +114,9 @@ impl NvidiaAdapter {
         .await?
         {
             Answer::Accepted(response) => response,
-            Answer::Refused { status, message } => {
+            Answer::Refused {
+                status, message, ..
+            } => {
                 return Err(Fault {
                     code: FailureCode::HttpError,
                     message,

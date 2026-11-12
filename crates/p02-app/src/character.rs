@@ -19,18 +19,21 @@ use p02_contracts::{CharacterStorage, FileStoreBackend, Rang, RoleModelAdapter};
 use p02_core::{SpeakerName, Timestamp};
 use p02_phone::SetRing;
 use p02_plugins::{PHONE_PLUGIN, PluginHost};
-use p02_role_model::{NvidiaSettings, OpenaiSettings, ServiceSettings, select_adapter};
+use p02_role_model::{
+    ChatgptSettings, NvidiaSettings, OpenaiSettings, PlanSignIn, ServiceSettings, select_adapter,
+};
 use p02_runtime::{Character, CompletedTurn, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Inbox, QueuedLine, RuntimeRejection, StorageError};
 use p02_wire::{
     CharacterState, Diagnostic, Event, MaintenanceFailure, OpenOutcome, OpenRefusal, PhoneRing,
-    RoleModelProvider, RunningTurn, TurnRefusal, TurnStamp, TurnStatus,
+    PlanAccount, RoleModelProvider, RunningTurn, TurnRefusal, TurnStamp, TurnStatus,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, sleep_until};
 use tokio_util::sync::CancellationToken;
 
+use crate::chatgpt::PlanTokens;
 use crate::config_control::CharacterConfig;
 use crate::confirmation::Broker;
 use crate::daemon::{Daemon, WeakDaemon, World, blocking};
@@ -248,8 +251,9 @@ fn not_ready(id: &Identifier, health: &CharacterHealth) -> String {
 /// What she is built of, from her package and her settings as they were
 /// when she was built: who she is, her data, the name the person goes by,
 /// the model she answers with, or what she needs for one, the plugins she
-/// answers with, her model's window, and those settings, which her next
-/// request compares with what they say then.
+/// answers with, her model's window, and those settings and the home's
+/// sign-in to the plan she thinks with, if she does, which her next
+/// request compares with what they are then.
 #[derive(Debug)]
 struct Built {
     character: Character,
@@ -259,6 +263,7 @@ struct Built {
     model: Result<Arc<dyn RoleModelAdapter>, String>,
     host: PluginHost,
     settings: CharacterSettings,
+    signed_in: Option<PlanAccount>,
 }
 
 /// What a character runs on: what she is built of, and her thread with the
@@ -1064,10 +1069,11 @@ impl Her {
 
     /// Brings `built` up to date with her settings: she is built again, as
     /// her boot builds her, when what they say now is not what she was
-    /// built from, unless they now switch her off, which her stop answers
-    /// once the turn in flight ends. True when she was built again, with a
-    /// model or waiting for one; what she ran on until then is let go, what
-    /// failed of that noted as maintenance.
+    /// built from, or the home's sign-in to the plan she thinks with is
+    /// not, unless they now switch her off, which her stop answers once the
+    /// turn in flight ends. True when she was built again, with a model or
+    /// waiting for one; what she ran on until then is let go, what failed
+    /// of that noted as maintenance.
     ///
     /// # Errors
     ///
@@ -1081,7 +1087,10 @@ impl Her {
         })
         .await;
 
-        if now.is_some_and(|now| now == built.settings || !now.host().enabled) {
+        if now.is_some_and(|now| {
+            (now == built.settings && plan_sign_in(&self.world, now.host()) == built.signed_in)
+                || !now.host().enabled
+        }) {
             return Ok(false);
         }
 
@@ -1274,7 +1283,8 @@ fn assemble(
         world.durations.settings_lock,
     )
     .map_err(|error| unmaterialized(id, error))?;
-    let model = model(world, settings.host());
+    let signed_in = plan_sign_in(world, settings.host());
+    let model = model(world, &daemon, settings.host(), signed_in.as_ref());
     let cautions: Vec<&str> = resolution.cautions().map(Diagnostic::message).collect();
     let host = settings
         .plugins()
@@ -1312,24 +1322,42 @@ fn assemble(
             model,
             host,
             settings,
+            signed_in,
         },
     })
 }
 
+/// Whom the home is signed in to a ChatGPT plan as, while `host` chooses
+/// the plan: what her model depends on beyond her settings.
+fn plan_sign_in(world: &World, host: &HostSettings) -> Option<PlanAccount> {
+    (host.role_model_provider == Some(RoleModelProvider::Chatgpt))
+        .then(|| world.chatgpt.account())
+        .flatten()
+}
+
 /// Her model: the one the test switch puts in every character's place,
-/// else the service her settings choose, built, the OpenAI API at the
-/// stand-in the binary names when it names one; or the sentence saying
-/// what they need for one. Her settings' view asks this too, so the page
-/// says what she says.
+/// else the service her settings choose, built, a service of OpenAI's at
+/// the stand-in the binary names when it names one, and the ChatGPT plan
+/// on the home's sign-in, as `account`, through `daemon`; or the sentence
+/// saying what they need for one. Her settings' view asks this too, so the
+/// page says what she says.
 pub(crate) fn model(
     world: &World,
+    daemon: &WeakDaemon,
     host: &HostSettings,
+    account: Option<&PlanAccount>,
 ) -> Result<Arc<dyn RoleModelAdapter>, String> {
     if let Some(adapter) = &world.test_provider {
         return Ok(Arc::clone(adapter));
     }
 
     let service = host.role_model_provider.map(|provider| match provider {
+        RoleModelProvider::Chatgpt => ServiceSettings::Chatgpt(ChatgptSettings {
+            sign_in: account
+                .map(|_| Arc::new(PlanTokens::new(daemon.clone())) as Arc<dyn PlanSignIn>),
+            model: host.chatgpt_model_on(account.and_then(|account| account.plan.as_deref())),
+            base_url: world.chatgpt_api.clone(),
+        }),
         RoleModelProvider::Openai => ServiceSettings::Openai(OpenaiSettings {
             api_key: host.openai_api_key.clone(),
             model: host.openai_model.clone(),

@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use p02_contracts::{ProviderAnswer, ProviderFailure};
 use p02_shared::{credential_header, http_client};
-use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderValue};
+use reqwest::header::{AUTHORIZATION, CONTENT_TYPE, HeaderMap, HeaderName, HeaderValue};
 use reqwest::{Response, Url};
 use serde_json::{Map, Value};
 use tokio::time::Instant;
@@ -22,6 +22,10 @@ pub(crate) const PROVIDER_SILENCE: Duration = Duration::from_secs(30);
 /// How long to wait before the second and the third attempt.
 const RETRY_DELAYS: [Duration; 2] = [Duration::from_millis(250), Duration::from_secs(1)];
 
+/// What a ChatGPT plan whose usage is used up is said to say, after the
+/// service's name.
+const LIMIT_REACHED: &str = "says your plan's limit is reached; it resets later.";
+
 /// Why an adapter cannot be built from its settings, in the words a
 /// person reads where the settings page asks for them, naming the
 /// service.
@@ -32,49 +36,80 @@ pub enum BuildAdapterError {
     MissingKey(&'static str),
     #[error("paste your {0} API key again: it holds characters that cannot be sent")]
     Credential(&'static str),
+    /// The service answers nothing until the home signs in to it.
+    #[error("sign in to your {0}")]
+    NotSignedIn(&'static str),
 }
 
-/// How a request proves who sends it.
-pub(crate) enum Access {
-    /// The key travels as a bearer token; no failure ever repeats it.
-    Key { header: HeaderValue, secret: String },
-    /// A server of one's own, which may ask for no key.
-    Open,
+/// How a request proves who sends it: the headers it carries for that,
+/// each credential among them marked sensitive, and the secrets no failure
+/// repeats.
+#[derive(Clone)]
+pub(crate) struct Access {
+    headers: HeaderMap,
+    secrets: Vec<String>,
 }
 
 impl fmt::Debug for Access {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(match self {
-            Self::Key { .. } => "Key([redacted])",
-            Self::Open => "Open",
-        })
+        formatter
+            .debug_struct("Access")
+            .field("headers", &self.headers.keys().collect::<Vec<_>>())
+            .finish_non_exhaustive()
     }
 }
 
 impl Access {
+    /// No proof at all: a server of one's own may ask for none.
+    pub(crate) fn open() -> Self {
+        Self {
+            headers: HeaderMap::new(),
+            secrets: Vec::new(),
+        }
+    }
+
     /// `key`, of `service`, as a bearer token, unless it holds what a
     /// header cannot carry.
     pub(crate) fn bearer(service: &'static str, key: &str) -> Result<Self, BuildAdapterError> {
-        Ok(Self::Key {
-            header: credential_header(&format!("Bearer {key}"))
-                .map_err(|_| BuildAdapterError::Credential(service))?,
-            secret: key.to_owned(),
-        })
+        Self::open()
+            .credential(AUTHORIZATION, &format!("Bearer {key}"), key)
+            .ok_or(BuildAdapterError::Credential(service))
     }
 
-    /// `message` without the key, wherever a provider or a transport
-    /// repeated it.
+    /// Carries `value` as `name` too, a credential in which `secret` is
+    /// never repeated; none when `value` holds what a header cannot carry.
+    pub(crate) fn credential(
+        mut self,
+        name: HeaderName,
+        value: &str,
+        secret: &str,
+    ) -> Option<Self> {
+        self.headers.insert(name, credential_header(value).ok()?);
+        self.secrets.push(secret.to_owned());
+        Some(self)
+    }
+
+    /// Carries `value` as `name` too, no secret.
+    pub(crate) fn header(mut self, name: HeaderName, value: HeaderValue) -> Self {
+        self.headers.insert(name, value);
+        self
+    }
+
+    /// `message` without a secret, wherever a provider or a transport
+    /// repeated one.
     fn redact(&self, message: String) -> String {
-        match self {
-            Self::Key { secret, .. } => message.replace(secret.as_str(), "[redacted]"),
-            Self::Open => message,
-        }
+        self.secrets
+            .iter()
+            .filter(|secret| !secret.is_empty())
+            .fold(message, |message, secret| {
+                message.replace(secret.as_str(), "[redacted]")
+            })
     }
 }
 
 /// What went wrong as the person is told it: the words of `service`, after
-/// its name, and without the key wherever the service or a transport
-/// repeated it.
+/// its name, and without a secret wherever the service or a transport
+/// repeated one.
 pub(crate) fn said(service: &str, access: &Access, what: &str) -> String {
     access.redact(format!("{service} {what}"))
 }
@@ -187,8 +222,9 @@ impl Silence {
         }
     }
 
-    /// The provider just said something.
-    fn touch(&mut self) {
+    /// The provider just said something, or is asked anew after a wait that
+    /// was none of its silence: the window starts again.
+    pub(crate) fn touch(&mut self) {
         self.deadline = Instant::now() + self.window;
     }
 
@@ -237,12 +273,18 @@ impl Failure {
 pub(crate) enum Answer {
     /// A success status: the headers are in and the body is still to read.
     Accepted(Response),
-    /// Any other status, after the last attempt it was worth.
-    Refused { status: u16, message: String },
+    /// Any other status, after the last attempt it was worth, and whether
+    /// it said a ChatGPT plan's usage is used up.
+    Refused {
+        status: u16,
+        message: String,
+        limit_reached: bool,
+    },
 }
 
-/// Sends `body` until an attempt is answered. A transport fault, or a 408,
-/// a 429 or a 5xx, is tried again after a pause, twice; a timeout never is.
+/// Sends `body` with what `access` carries until an attempt is answered. A
+/// transport fault, or a 408, a 429 or a 5xx, is tried again after a
+/// pause, twice, but a plan's usage used up never is, nor a timeout.
 /// Headers of any status are the provider speaking, so they restart the
 /// window, and the pauses wait inside it.
 pub(crate) async fn send(
@@ -256,15 +298,11 @@ pub(crate) async fn send(
 
     loop {
         let retry = retries.next();
-        let mut request = http
+        let request = http
             .post(endpoint.clone())
             .header(CONTENT_TYPE, "application/json")
+            .headers(access.headers.clone())
             .body(body.to_vec());
-
-        if let Access::Key { header, .. } = access {
-            request = request.header(AUTHORIZATION, header.clone());
-        }
-
         let response = match silence.wait(request.send()).await? {
             Ok(response) => response,
             Err(error) => match retry {
@@ -284,9 +322,9 @@ pub(crate) async fn send(
             return Ok(Answer::Accepted(response));
         }
 
-        let message = refusal(status.as_u16(), read_all(response, silence).await)?;
-        let worth_again =
-            status.as_u16() == 408 || status.as_u16() == 429 || status.is_server_error();
+        let (message, limit_reached) = refusal(status.as_u16(), read_all(response, silence).await)?;
+        let worth_again = !limit_reached
+            && (status.as_u16() == 408 || status.as_u16() == 429 || status.is_server_error());
 
         match retry {
             Some(delay) if worth_again => silence.wait(tokio::time::sleep(*delay)).await?,
@@ -294,6 +332,7 @@ pub(crate) async fn send(
                 return Ok(Answer::Refused {
                     status: status.as_u16(),
                     message,
+                    limit_reached,
                 });
             }
         }
@@ -333,32 +372,52 @@ pub(crate) async fn read_all(
 }
 
 /// What a refusal says: the provider's own error when its body names one,
-/// else the body as text, else the status alone. A timeout while it is read
-/// is the exchange's; a broken body leaves the status alone.
-fn refusal(status: u16, body: Result<Vec<u8>, Failure>) -> Result<String, Failure> {
+/// else the body as text, else the status alone; and whether it says a
+/// ChatGPT plan's usage is used up. A timeout while it is read is the
+/// exchange's; a broken body leaves the status alone.
+fn refusal(status: u16, body: Result<Vec<u8>, Failure>) -> Result<(String, bool), Failure> {
     let body = match body {
         Ok(body) => body,
         Err(failure @ Failure::TimedOut(_)) => return Err(failure),
-        Err(Failure::Broken(_)) => return Ok(format!("provider HTTP {status}.")),
+        Err(Failure::Broken(_)) => return Ok((format!("provider HTTP {status}."), false)),
     };
     let text = String::from_utf8_lossy(&body);
-    let named = serde_json::from_str::<Value>(&text)
-        .ok()
-        .and_then(|value| value.as_object().and_then(provider_error));
-
-    Ok(match named {
+    let named = match serde_json::from_str::<Value>(&text) {
+        Ok(Value::Object(body)) => Some(body),
+        _ => None,
+    };
+    let message = match named.as_ref().and_then(provider_error) {
         Some(message) => message,
         None if text.is_empty() => format!("provider HTTP {status}."),
         None => format!("provider HTTP {status}: {text}"),
-    })
+    };
+
+    Ok((message, named.as_ref().is_some_and(limit_reached)))
 }
 
-/// The error a provider names in a body, in what a 200 stream carries, or
-/// in a response that failed.
+/// What a provider says in an error body, in what a 200 stream carries, or
+/// in a response that failed: that a ChatGPT plan's usage is used up, else
+/// its own words, under `error`, beside it, or as its `detail`.
 pub(crate) fn provider_error(body: &Map<String, Value>) -> Option<String> {
+    if limit_reached(body) {
+        return Some(LIMIT_REACHED.to_owned());
+    }
+
     body.get("error")
         .and_then(|error| error.get("message"))
         .and_then(Value::as_str)
         .or_else(|| body.get("message").and_then(Value::as_str))
+        .or_else(|| body.get("detail").and_then(Value::as_str))
         .map(|message| format!("provider error: {message}"))
+}
+
+/// Whether `body` says a ChatGPT plan's usage is used up, as the plan says
+/// it: the type or the code `usage_limit_reached`, of its `error` or of
+/// the body itself.
+fn limit_reached(body: &Map<String, Value>) -> bool {
+    let error = body.get("error").and_then(Value::as_object).unwrap_or(body);
+
+    ["type", "code"]
+        .iter()
+        .any(|field| error.get(*field).and_then(Value::as_str) == Some("usage_limit_reached"))
 }

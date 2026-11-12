@@ -344,7 +344,7 @@ function ServiceCards({
     <>
       {key === undefined ? null : (
         <Group
-          footer={`Paste a key and press Return; it is never shown again. ${service.keyFrom}`}
+          footer={`Paste a key and press Return; it is never shown again. ${service.keyFrom ?? ''}`}
         >
           <FieldRow ctx={ctx} row={hostRow(home, key.name)} field={key} />
         </Group>

@@ -25,10 +25,15 @@ under the store's locks, and its views and changes are p02-wire's types.
   section's cards with the rows of the fields its target may set.
 - **Services.** Each service a character can think with is described once
   beside the host's fields: its name, what it is and where a key for it
-  comes from, its own fields with the one that names its model, and those
-  that connect it, its key or for NVIDIA a server of the person's own. A
-  view lists every service and whether one of those is in effect for its
-  target, so a page lists them without deciding anything itself.
+  comes from, its own fields with the one that names its model, and what
+  connects it: its key, for NVIDIA a server of the person's own too, and
+  for the ChatGPT plan, which takes no key, the home's sign-in. A view
+  lists every service and whether it is connected for its target, the
+  plan's with the account it is signed in as, so a page lists them without
+  deciding anything itself. The sign-in is no setting: the view's caller
+  says it, as it judges the AI model, and the plan's model then offers
+  the models that plan offers, a free plan's fewer, the first in effect
+  until one is set.
 - **Reading.** For the home a value is the home's, else its default; for
   a character it is hers, else the home's, else the default. A value its
   field refuses stays in effect, refused, so no farther value stands in

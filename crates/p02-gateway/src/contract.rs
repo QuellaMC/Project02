@@ -29,11 +29,12 @@ use p02_wire::{
     MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport,
     PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
     PairingRequestBody, PairingSubject, PendingConfirmation, PersonAccount, PhoneApp, PhoneDid,
-    PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing, ProtocolVersion, Ready, Refusal,
-    RemoveCharacterOutcome, RemoveCharacterRefusal, RosterState, RunningDraft, RunningTurn, Screen,
-    ScreenCell, ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow, ScreenTile,
-    Settlement, StartOutcome, StartRefusal, StorageFailure, StoreApp, StoreAppStatus, StoreOutcome,
-    SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
+    PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing, PlanAccount, ProtocolVersion, Ready,
+    Refusal, RemoveCharacterOutcome, RemoveCharacterRefusal, RosterState, RunningDraft,
+    RunningTurn, Screen, ScreenCell, ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal,
+    ScreenRow, ScreenTile, Settlement, StartOutcome, StartRefusal, StorageFailure, StoreApp,
+    StoreAppStatus, StoreOutcome, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal,
+    TurnStamp, TurnStatus, ViewRefusal,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -1065,7 +1066,8 @@ fn phone() -> (PhoneApp, Screen) {
 
 /// The settings of a home whose documents each name a connector this build
 /// lacks, a warning of the home's and one of Mira's overlay: the home's view,
-/// whose model is not set up, Mira's, and Telegram's read.
+/// whose model is not set up, Mira's, the home signed in to a ChatGPT plan,
+/// and Telegram's read.
 fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
     let directory = tempfile::TempDir::new().unwrap();
     let home = Home::new(canonical_path(directory.path(), DanglingLinks::Keep).unwrap());
@@ -1092,9 +1094,14 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
     let discovery = discover(home.root());
 
     (
-        config_view(&home, &sections, &discovery, &ConfigTarget::Global, |_| {
-            Err("Choose an AI service.".to_owned())
-        }),
+        config_view(
+            &home,
+            &sections,
+            &discovery,
+            &ConfigTarget::Global,
+            |_| Err("Choose an AI service.".to_owned()),
+            None,
+        ),
         config_view(
             &home,
             &sections,
@@ -1103,6 +1110,10 @@ fn settings() -> (ConfigView, ConfigView, ConnectorConfigView) {
                 character_id: mira.to_string(),
             },
             |_| Ok(()),
+            Some(&PlanAccount {
+                email: Some("sam@example.com".to_owned()),
+                plan: Some("plus".to_owned()),
+            }),
         ),
         connector_config_view(&home, &sections, &discovery, "telegram"),
     )

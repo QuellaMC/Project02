@@ -29,7 +29,7 @@ pub use config::{
     AccessLevel, AccessName, ActivationStatus, Authored, ChangeOutcome, ChangeRefusal,
     CharacterConnectorEntry, ConfigChange, ConfigTarget, ConfigValueType, ConfigView,
     ConnectorConfigView, ConnectorEntry, ConnectorRefusal, EffectiveView, FieldView, LayoutCard,
-    LayoutRow, LayoutWhen, ModelService, Namespace, Operation, Placement, PluginPage,
+    LayoutRow, LayoutWhen, ModelService, Namespace, Operation, Placement, PlanAccount, PluginPage,
     RoleModelProvider, SectionActivation, SectionView, Setup, Source, ValueSource, ViewRefusal,
 };
 pub use confirmation::{

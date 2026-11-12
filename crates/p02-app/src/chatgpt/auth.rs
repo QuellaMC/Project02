@@ -75,6 +75,16 @@ impl fmt::Debug for DeviceCode {
     }
 }
 
+/// Why a refresh gave no tokens.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum RefreshFailed {
+    /// OpenAI refused the refresh token, which is then good for nothing.
+    Refused,
+    /// No answer, or none of use: the sentence saying so. The refresh
+    /// token may still be good, and the next use tries it again.
+    Unanswered(String),
+}
+
 /// Who an ID token says its tokens are for.
 #[derive(Debug, Default, PartialEq, Eq)]
 pub(crate) struct Identity {
@@ -228,12 +238,14 @@ impl Auth {
 
     /// Trades `current`'s refresh token for new tokens at `now`, keeping
     /// what OpenAI leaves out of its answer. OpenAI replaces the refresh
-    /// token and refuses the old one from then on.
+    /// token and refuses the old one from then on, with a 401, as it
+    /// refuses one that ran out or was revoked; any other answer that gives
+    /// no tokens leaves the refresh token as it was.
     pub(crate) async fn refresh(
         &self,
         current: &ChatgptTokens,
         now: i64,
-    ) -> Result<ChatgptTokens, String> {
+    ) -> Result<ChatgptTokens, RefreshFailed> {
         let answered = self
             .post_form(
                 "oauth/token",
@@ -244,14 +256,23 @@ impl Auth {
                     ("scope", "openid profile email"),
                 ],
             )
-            .await?;
+            .await
+            .map_err(RefreshFailed::Unanswered)?;
 
-        tokens(
-            &answered,
-            Some(current),
-            now,
-            &[&current.refresh_token, &current.access_token],
-        )
+        match answered.status {
+            401 => Err(RefreshFailed::Refused),
+            200..300 => tokens(
+                &answered,
+                Some(current),
+                now,
+                &[&current.refresh_token, &current.access_token],
+            )
+            .map_err(RefreshFailed::Unanswered),
+            status => Err(RefreshFailed::Unanswered(format!(
+                "OpenAI could not renew your ChatGPT sign-in just now (status {status}). Try \
+                 again in a moment."
+            ))),
+        }
     }
 
     async fn post_json(&self, path: &str, body: &Value) -> Result<Answered, String> {

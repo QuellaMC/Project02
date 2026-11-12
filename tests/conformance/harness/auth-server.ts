@@ -46,6 +46,8 @@ export type AuthServer = {
   readonly code: () => IssuedCode | undefined;
   /** The person approves the newest code, signing in as `account`. */
   readonly approve: (account?: Account) => void;
+  /** The newest access token it gave, which a request on the plan carries. */
+  readonly accessToken: () => string | undefined;
   /** Every token, claim and code that proves who signed in, which nothing a client reads may hold. */
   readonly secrets: () => readonly string[];
 };
@@ -94,6 +96,7 @@ export async function startAuthServer(
     | undefined;
   let refreshToken:
     {readonly token: string; readonly account: Account} | undefined;
+  let accessToken: string | undefined;
   let issued = 0;
   /** A new secret of `kind`, kept to look for later. */
   const secret = (kind: string): string => {
@@ -107,7 +110,8 @@ export async function startAuthServer(
   };
   /** New tokens for `account`, its refresh token the only one the server takes from now on. */
   const tokens = (account: Account, withIdToken: boolean): object => {
-    const accessToken = jwt({exp: accessExpiry, jti: secret('access')});
+    accessToken = jwt({exp: accessExpiry, jti: secret('access')});
+
     const idToken = jwt({
       email: account.email,
       jti: secret('id'),
@@ -252,6 +256,7 @@ export async function startAuthServer(
         approved = {deviceAuthId: newest.deviceAuthId, account};
       }
     },
+    accessToken: () => accessToken,
     secrets: () => secrets,
   };
 }

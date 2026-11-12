@@ -58,6 +58,7 @@ fn serve_until_signalled(flags: ServeFlags, console: &mut Console) -> ExitCode {
         env::var_os(switches::TEST_APP_INTERNET).as_deref(),
         env::var_os(switches::TEST_OPENAI_API).as_deref(),
         env::var_os(switches::TEST_OPENAI_AUTH).as_deref(),
+        env::var_os(switches::TEST_CHATGPT_API).as_deref(),
     ) {
         Ok(switches) => serve(flags, switches, console, stop::listen_for_stop),
         Err(refused) => console.failed(&refused),

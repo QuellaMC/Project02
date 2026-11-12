@@ -483,8 +483,8 @@ export type MessageId = string;
 
 /**
  * A service as a settings page lists it: its name, what it is and where a
- * key for it comes from, whether it is connected, and which of the host's
- * fields are its own, its model's among them.
+ * key for it comes from, whether it is connected and as whom, and which of
+ * the host's fields are its own, its model's among them.
  */
 export type ModelService = { id: RoleModelProvider, 
 /**
@@ -496,14 +496,20 @@ name: string,
  */
 summary: string, 
 /**
- * Where a key for it comes from, in a sentence.
+ * Where a key for it comes from, in a sentence; none for the ChatGPT
+ * plan, which takes no key.
  */
-keyFrom: string, 
+keyFrom?: string, 
 /**
- * Whether a credential of it is in effect for the target: its key,
- * or for NVIDIA a server of the person's own too.
+ * Whether it is connected for the target: a credential of it in
+ * effect, its key or for NVIDIA a server of the person's own too; for
+ * the ChatGPT plan, the home signed in, which is no setting.
  */
 connected: boolean, 
+/**
+ * Whom the ChatGPT plan is connected as, while the home is signed in.
+ */
+account?: PlanAccount, 
 /**
  * The one of its fields that names the model she asks it for.
  */
@@ -686,6 +692,12 @@ export type PhoneRing = { appName: string, title: string, body?: string, at: Tim
 export type Placement = "mind_body" | "permission";
 
 /**
+ * The account a ChatGPT plan is signed in to: its email and its plan, such
+ * as `plus`, as OpenAI named them.
+ */
+export type PlanAccount = { email?: string, plan?: string, };
+
+/**
  * How a plugin's row on a settings page is drawn, as its manifest
  * declares it.
  */
@@ -730,7 +742,7 @@ export type RemoveCharacterRefusal = "built_in" | "unknown_character";
  * harness's switch, never a setting, and a home has none until its
  * person chooses one.
  */
-export type RoleModelProvider = "openai" | "nvidia";
+export type RoleModelProvider = "chatgpt" | "openai" | "nvidia";
 
 /**
  * Where an installed character stands as health reports her: her

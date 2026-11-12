@@ -158,6 +158,9 @@ pub struct DaemonSettings {
     /// Where OpenAI's sign-in is, under the test switch; none, and it is at
     /// its own address.
     pub openai_auth: Option<BaseUrl>,
+    /// Where a ChatGPT plan's service is, under the test switch; none, and
+    /// it is at its own address.
+    pub chatgpt_api: Option<BaseUrl>,
 }
 
 /// A line a client delivers into a conversation.
@@ -181,9 +184,10 @@ pub struct OpenDaemonError {
 
 /// What every actor of the daemon reads: the home, the settings' sections,
 /// the plugins, the waits, the model that stands in for every character's,
-/// where the OpenAI API is when the binary names a stand-in for it, the
-/// App Store's catalog her phone reads, the internet her apps reach, the
-/// home's sign-in to a ChatGPT plan, and the events.
+/// where the OpenAI API and a ChatGPT plan's service are when the binary
+/// names a stand-in for them, the App Store's catalog her phone reads, the
+/// internet her apps reach, the home's sign-in to a ChatGPT plan, and the
+/// events.
 #[derive(Debug)]
 pub(crate) struct World {
     pub(crate) home: Home,
@@ -192,6 +196,7 @@ pub(crate) struct World {
     pub(crate) durations: Durations,
     pub(crate) test_provider: Option<Arc<dyn RoleModelAdapter>>,
     pub(crate) openai_api: Option<BaseUrl>,
+    pub(crate) chatgpt_api: Option<BaseUrl>,
     pub(crate) catalog: Arc<AppCatalog>,
     pub(crate) internet: Arc<AppInternet>,
     pub(crate) chatgpt: Arc<Chatgpt>,
@@ -362,6 +367,7 @@ impl Daemon {
             app_internet,
             openai_api,
             openai_auth,
+            chatgpt_api,
         } = settings;
         let checked = home.clone();
         let chatgpt = blocking(move || {
@@ -384,6 +390,7 @@ impl Daemon {
                     durations,
                     test_provider,
                     openai_api,
+                    chatgpt_api,
                     catalog: Arc::new(AppCatalog::new(app_catalog)),
                     internet: Arc::new(AppInternet::new(app_internet)),
                     chatgpt: Arc::new(chatgpt),
@@ -662,17 +669,22 @@ impl Daemon {
     }
 
     /// The settings of `target` as its settings screen shows them, their AI
-    /// model judged as a character's start judges hers.
+    /// model judged as a character's start judges hers, and the ChatGPT
+    /// plan's service as the home's sign-in stands.
     pub async fn config_view(&self, target: ConfigTarget) -> ConfigView {
         let world = Arc::clone(&self.inner.world);
+        let daemon = self.downgrade();
 
         blocking(move || {
+            let account = world.chatgpt.account();
+
             config_view(
                 &world.home,
                 &world.sections,
                 &discover(world.home.root()),
                 &target,
-                |host| model(&world, host).map(drop),
+                |host| model(&world, &daemon, host, account.as_ref()).map(drop),
+                account.as_ref(),
             )
         })
         .await

@@ -114,6 +114,12 @@ it("config.view-global: the home's view lists the host fields the home may set i
         effective: {source: 'config', value: 'Robin'},
       },
       unset('roleModelProvider'),
+      {
+        name: 'chatgptModel',
+        authored: {configured: false},
+        effectiveSource: 'default',
+        effective: {source: 'default', value: 'gpt-6.1-terra'},
+      },
       unset('openaiApiKey'),
       {
         name: 'openaiModel',

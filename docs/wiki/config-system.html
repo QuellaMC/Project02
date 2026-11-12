@@ -39,6 +39,7 @@
   "project02": {
     "userDisplayName": "You",
     "roleModelProvider": "nvidia",
+    "chatgptModel": "gpt-6.1-sol",
     "openaiApiKey": "sk-…",
     "openaiModel": "gpt-6-luna",
     "nvidiaApiKey": "nvapi-…",
@@ -97,7 +98,7 @@
     <table>
       <thead><tr><th>Section</th><th>Owner</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><code>project02</code></td><td>Project02 host</td><td>The person's name, the service a character thinks with, <code>openai</code> or <code>nvidia</code>, with each service's own fields: the OpenAI API's key and model (GPT-6 Luna unless another is chosen), and NVIDIA's key, model, and server (NVIDIA's cloud, unless a base URL names an NVIDIA NIM or another OpenAI-compatible server), the model's context window in tokens (the replayed conversation history may use half of it; a stopgap until providers report their own limit), and, in a character's own document, whether she is switched on and her heartbeat: how often she gets a moment of her own while the person is quiet, <code>off</code>, <code>15m</code>, <code>30m</code>, <code>1h</code>, <code>2h</code> or <code>4h</code>, half an hour unless she has one.</td></tr>
+        <tr><td><code>project02</code></td><td>Project02 host</td><td>The person's name, the service a character thinks with, <code>chatgpt</code>, <code>openai</code> or <code>nvidia</code>, with each service's own fields: the ChatGPT plan's model (the first the home's plan offers unless another is chosen; the plan itself is signed in to, never set), the OpenAI API's key and model (GPT-6 Luna unless another is chosen), and NVIDIA's key, model, and server (NVIDIA's cloud, unless a base URL names an NVIDIA NIM or another OpenAI-compatible server), the model's context window in tokens (the replayed conversation history may use half of it; a stopgap until providers report their own limit), and, in a character's own document, whether she is switched on and her heartbeat: how often she gets a moment of her own while the person is quiet, <code>off</code>, <code>15m</code>, <code>30m</code>, <code>1h</code>, <code>2h</code> or <code>4h</code>, half an hour unless she has one.</td></tr>
         <tr><td><code>plugins.&lt;id&gt;</code></td><td>Host activation plus the named plugin manifest</td><td>Explicit enablement and manifest-declared plugin fields.</td></tr>
         <tr><td><code>connectors.&lt;id&gt;</code></td><td>The named connector's built-in declaration</td><td>Explicit enablement and the declared fields a messaging connector runs on.</td></tr>
       </tbody>
@@ -165,10 +166,14 @@
       The services a character can think with are described once beside the host's fields,
       and a view lists every one in the order a page shows them: its id, the value of
       <code>roleModelProvider</code> that chooses it; its name, a line on what it is, and a
-      sentence on where a key for it comes from; its own fields, and of them the
-      <code>model</code> she asks it for; and whether it is connected, which it is while a
-      credential of it is in effect for the view's target, its key or, for NVIDIA, a server of
-      the person's own too.
+      sentence on where a key for it comes from, which the ChatGPT plan, taking no key, leaves
+      out; its own fields, and of them the <code>model</code> she asks it for; and whether it
+      is connected, which it is while a credential of it is in effect for the view's target, its
+      key or, for NVIDIA, a server of the person's own too. The ChatGPT plan is connected while
+      the home is signed in to it, which is no setting: the daemon tells the view, which then
+      names the <code>account</code>, its email and its plan, and offers as the plan's model
+      the models that plan offers, every one to a paid plan and fewer to a free one, the first
+      in effect until another is set.
     </p>
 
     <h2>One schema and three representations</h2>
