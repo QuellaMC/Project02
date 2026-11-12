@@ -43,9 +43,9 @@ pub use role_model::{
     DecisionRejection, DecisionRejectionReason, DecisionResult, DuplicateToolError, Invocation,
     ModelOutput, ModelToolCall, ModelToolDefinition, Occasion, PLUGIN_LIST_TOOL,
     ParseModelToolCallError, PluginToolDefinition, PluginToolDefinitions, ProviderAnswer,
-    ProviderFailure, ProviderName, ReasoningFilter, ReplyDelta, RoleModelAdapter, RuntimeNote,
-    TextCompletion, TextCompletionRequest, TokenUsage, ToolCallResult, ToolRound, VISIBLE_REPLY,
-    WrittenCall, scrub_reasoning_blocks,
+    ProviderFailure, ProviderName, Rang, ReasoningFilter, ReplyDelta, RoleModelAdapter,
+    RuntimeNote, TextCompletion, TextCompletionRequest, TokenUsage, ToolCallResult, ToolRound,
+    VISIBLE_REPLY, WrittenCall, scrub_reasoning_blocks,
 };
 pub use schema::{InputContractError, ToolInputContract, ToolInputRejection};
 pub use tool::{

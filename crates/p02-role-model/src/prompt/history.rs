@@ -15,14 +15,17 @@ use serde_json::json;
 use crate::prompt::past_moment;
 
 /// An earlier turn as the model replays it: the person's line, or the note
-/// of a moment of the character's own, telling when it was in `zone`; each
-/// tool round as the assistant's calls and their results; then the
-/// character's replies as plain assistant text. `visible_reply` itself is
-/// never replayed.
+/// of a moment of the character's own, telling when it was in `zone` and
+/// what rang when her phone's ringing began it; each tool round as the
+/// assistant's calls and their results; then the character's replies as
+/// plain assistant text. `visible_reply` itself is never replayed.
 pub(crate) fn turn_messages(turn: &ConversationTurn, zone: &TimeZone) -> Vec<ChatMessage> {
     let opening = match &turn.user_message {
         Some(line) => line.text.to_string(),
-        None => past_moment(&turn.identity.created_at().in_zone(zone.clone())),
+        None => past_moment(
+            &turn.identity.created_at().in_zone(zone.clone()),
+            &turn.rang,
+        ),
     };
 
     std::iter::once(ChatMessage::User { content: opening })
@@ -263,6 +266,53 @@ mod tests {
                                 </moment_of_your_own>",
                 },
                 {"role": "assistant", "content": "Found your keys yet?"},
+            ])
+        );
+    }
+
+    /// A moment her phone's ringing began replays its note where a line
+    /// would be, telling that it rang, when, and what rang, a line each;
+    /// then what she said in it.
+    #[test]
+    fn a_ringing_moment_replays_its_note_telling_what_rang_then_what_she_said() {
+        let moment: ConversationTurn = serde_json::from_value(json!({
+            "eventId": "evt_2",
+            "traceId": "trace_2",
+            "createdAt": "2026-11-07T04:40:00.000Z",
+            "rang": [
+                {"app": "Clock", "title": "Timer", "at": "2026-11-06T03:00:00.000Z"},
+                {
+                    "app": "Clock",
+                    "title": "Alarm",
+                    "body": "Wake Sam",
+                    "at": "2026-11-07T04:30:00.000Z",
+                },
+            ],
+            "toolRounds": [],
+            "finalReplies": [{
+                "id": "chat.1:message-3",
+                "role": "character",
+                "speakerId": "mira",
+                "speakerName": "Mira",
+                "text": "Up you get.",
+            }],
+        }))
+        .unwrap();
+        let zone = TimeZone::fixed(jiff::tz::offset(-5));
+
+        assert_eq!(
+            serde_json::to_value(turn_messages(&moment, &zone)).unwrap(),
+            json!([
+                {
+                    "role": "user",
+                    "content": "<moment_of_your_own>\n\
+                                Your phone rang on Friday, November 6, 2026, at 23:40 — nobody \
+                                had written to you.\n\
+                                Clock, Timer (set for Thursday, November 5, at 22:00).\n\
+                                Clock, Alarm: Wake Sam (set for 23:30).\n\
+                                </moment_of_your_own>",
+                },
+                {"role": "assistant", "content": "Up you get."},
             ])
         );
     }

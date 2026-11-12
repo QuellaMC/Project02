@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use jiff::Zoned;
 use jiff::civil::Date;
-use p02_contracts::{PLUGIN_LIST_TOOL, RuntimeNote};
+use p02_contracts::{PLUGIN_LIST_TOOL, Rang, RuntimeNote};
 use p02_core::{Participant, SpeakerName};
 use p02_shared::Identifier;
 
@@ -167,25 +167,80 @@ pub(crate) fn moment_note(
     at: &Zoned,
     since_last_line: Option<Duration>,
 ) -> String {
+    format!(
+        "A moment of your own — nobody has written to you, and nothing here is something {}.\n\
+         {}\n\
+         Nobody is waiting for a reply. This time is yours: think, use your tools, or let it \
+         pass. If there is something you want {} to read, send it with visible_reply; anything \
+         else you write stays your own thought.",
+        person.said(),
+        it_is(person, at, since_last_line),
+        person.them()
+    )
+}
+
+/// The runtime's note of a moment of the character's own that her phone's
+/// ringing began, in place of the heartbeat's: that it rings and nobody
+/// wrote, the time it is `at` where the person is and how long since they
+/// last wrote, what rang, a line each, and that what she does about it is
+/// hers, with where her words go, as the heartbeat's note says it. It does
+/// not say that nobody waits, as the heartbeat's does: she set the ring,
+/// and whether somebody waits on it is hers to know. `rang` is what the
+/// apps wrote, set apart already as text inside a fence.
+pub(crate) fn ringing_note(
+    person: Person<'_>,
+    at: &Zoned,
+    since_last_line: Option<Duration>,
+    rang: &[Rang],
+) -> String {
+    format!(
+        "Your phone is ringing — nobody has written to you, and nothing here is something {}.\n\
+         {}\n\
+         {}\n\
+         What you do about it is yours. If there is something you want {} to read, send it \
+         with visible_reply; anything else you write stays your own thought.",
+        person.said(),
+        it_is(person, at, since_last_line),
+        rang_lines(rang, at),
+        person.them()
+    )
+}
+
+/// The time it is `at`, where the person is, and how long since they last
+/// wrote, when her history can say.
+fn it_is(person: Person<'_>, at: &Zoned, since_last_line: Option<Duration>) -> String {
     let now = format!("It is {}", at.strftime("%A, %B %-d, %Y, %H:%M"));
-    let when = match since_last_line {
+
+    match since_last_line {
         Some(elapsed) => format!(
             "{now}; {} last wrote to you {}.",
             person.name(),
             ago(elapsed)
         ),
         None => format!("{now}."),
-    };
+    }
+}
 
-    format!(
-        "A moment of your own — nobody has written to you, and nothing here is something {}.\n\
-         {when}\n\
-         Nobody is waiting for a reply. This time is yours: think, use your tools, or let it \
-         pass. If there is something you want {} to read, send it with visible_reply; anything \
-         else you write stays your own thought.",
-        person.said(),
-        person.them()
-    )
+/// What rang, a line each, in its order, soonest first: the app, the ring's
+/// title, its body when it has one, and when it was set for, the time alone
+/// on the day of `at` where the person is, and the day with it on any other.
+fn rang_lines(rang: &[Rang], at: &Zoned) -> String {
+    rang.iter()
+        .map(|ring| {
+            let set_for = ring.at.in_zone(at.time_zone().clone());
+            let when = if set_for.date() == at.date() {
+                set_for.strftime("%H:%M").to_string()
+            } else {
+                set_for.strftime("%A, %B %-d, at %H:%M").to_string()
+            };
+
+            match &ring.body {
+                Some(body) => format!("{}, {}: {body} (set for {when}).", ring.app, ring.title),
+                None => format!("{}, {} (set for {when}).", ring.app, ring.title),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 /// The note of an earlier moment of hers, as her history replays it where
@@ -194,6 +249,17 @@ pub(crate) fn past_moment_note(at: &Zoned) -> String {
     format!(
         "A moment of your own, on {} — nobody had written to you.",
         at.strftime("%A, %B %-d, %Y, at %H:%M")
+    )
+}
+
+/// The note of an earlier moment of hers that her phone's ringing began,
+/// as her history replays it where a line would be: that it rang, and when,
+/// where the person is, then what rang, a line each.
+pub(crate) fn past_ringing_note(at: &Zoned, rang: &[Rang]) -> String {
+    format!(
+        "Your phone rang on {} — nobody had written to you.\n{}",
+        at.strftime("%A, %B %-d, %Y, at %H:%M"),
+        rang_lines(rang, at)
     )
 }
 

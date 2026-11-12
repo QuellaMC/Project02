@@ -1,0 +1,481 @@
+import {existsSync, readFileSync} from 'node:fs';
+import {join} from 'node:path';
+
+import {expect, it} from 'vitest';
+
+import {startDaemon, type Daemon} from './harness/daemon.ts';
+import {
+  frameOf,
+  nextMoment,
+  openEvents,
+  own,
+  silent,
+} from './harness/events.ts';
+import {configJson, createHome, sessionRecords} from './harness/home.ts';
+import {
+  calling,
+  finish,
+  messagesOf,
+  reply,
+  startModelServer,
+  toolResults,
+  visibleReply,
+  type ModelRequest,
+  type ModelServer,
+} from './harness/model-server.ts';
+import {converse, saveConfig, wireOf} from './harness/wire.ts';
+
+/** The person is where the clocks read UTC, so an alarm's ring lands at a moment the test can name. */
+const utc = {TZ: 'UTC'};
+/** UTC, and a ping each half second the stream is silent: a clock to see no turn begin by. */
+const pinging = {...utc, PROJECT02_TEST_DURATIONS: 'ping=500'};
+/** Alarm a1's line in her note when it rings late: its ring was set for a long-gone morning. */
+const lateAlarm =
+  'Clock, Alarm: Wake Sam (set for Monday, January 5, at 07:00).';
+
+async function stop(daemon: Daemon): Promise<void> {
+  daemon.signal('SIGINT');
+  await daemon.exit();
+}
+
+/** Where her phone keeps what its apps save, in Mira's data. */
+function phoneData(home: string): string {
+  return join(home, 'character-data', 'mira', 'plugin-data', 'phone');
+}
+
+/** What the Clock keeps, in its one file. */
+function clockOf(home: string): unknown {
+  return JSON.parse(
+    readFileSync(join(phoneData(home), 'apps', 'clock.json'), 'utf8'),
+  );
+}
+
+/** A home where Mira answers through `model`, the person goes by Sam and her heartbeat is off; her Clock keeps `clock`, when the test gives it one. */
+function quietHome(model: ModelServer, clock?: object): string {
+  const phone =
+    clock === undefined
+      ? {}
+      : {
+          'plugin-data': {
+            phone: {apps: {'clock.json': JSON.stringify(clock)}},
+          },
+        };
+
+  return createHome({
+    'config.json': configJson({
+      project02: {...model.settings, userDisplayName: 'Sam'},
+    }),
+    'character-data': {
+      mira: {
+        'config.json': configJson({project02: {heartbeat: 'off'}}),
+        ...phone,
+      },
+    },
+  });
+}
+
+/** The Clock's file as the Clock writes it, holding alarm a1, Wake Sam at 07:00 on `days`, none for once, its ring set for 07:00 on Monday, January 5, 2026, long gone. */
+function wakeSam(days: readonly number[]): object {
+  return {
+    storage: {
+      issued: {a: 1},
+      alarms: [
+        {id: 'a1', hour: 7, minute: 0, label: 'Wake Sam', days, on: true},
+      ],
+    },
+    rings: [
+      {
+        id: 'a1',
+        at: '2026-01-05T07:00:00.000Z',
+        title: 'Alarm',
+        body: 'Wake Sam',
+      },
+    ],
+  };
+}
+
+/** The lines of what the model read where the person's line would be. */
+function openingOf(request: ModelRequest | undefined): readonly string[] {
+  return String(messagesOf(request).at(-1)?.content).split('\n');
+}
+
+/** Her phone ringing as the model reads it where a line would be, what rang a line each. */
+function ringing(...rang: readonly string[]): readonly string[] {
+  return [
+    '<moment_of_your_own>',
+    'Your phone is ringing — nobody has written to you, and nothing here is something Sam said.',
+    expect.stringMatching(/^It is .+\.$/u) as string,
+    ...rang,
+    'What you do about it is yours. If there is something you want Sam to read, send it with visible_reply; anything else you write stays your own thought.',
+    '</moment_of_your_own>',
+  ];
+}
+
+/** The lines of the system messages the model was shown. */
+function systemLines(request: ModelRequest | undefined): readonly string[] {
+  return messagesOf(request)
+    .filter(message => message.role === 'system')
+    .flatMap(message => String(message.content).split('\n'));
+}
+
+it('phone.clock-alarm: she opens the Clock and is shown its views, its actions and its screen, then sets an alarm and is shown its answer and the screen with the alarm on it; every request names her apps, the Clock keeps the alarm and its ring in its one file, and after a restart the Clock opens with the alarm still there', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const first = await startDaemon(home, utc);
+  const say = await converse(wireOf(first), 'mira');
+  const someDay = /^(?:today|tomorrow)$/u;
+
+  model.answer(
+    calling(['phone_open', {app: 'clock'}]),
+    calling([
+      'phone_use',
+      {
+        app: 'clock',
+        action: 'set_alarm',
+        input: {hour: 7, minute: 0, label: 'Wake Sam'},
+      },
+    ]),
+    reply('Set for seven.'),
+  );
+  expect(await say('Wake me at seven.', 'wake')).toMatchObject({
+    status: 'completed',
+    messages: [{}, {text: 'Set for seven.'}],
+  });
+  expect(systemLines(model.requests[0])).toContain(
+    '- On your phone: Clock ("clock") — Alarms, timers, and the time anywhere. Open an app with phone.open to see its screen and what you can do in it, then act in it with phone.use.',
+  );
+
+  const [opened, used] = toolResults(model.requests[2]);
+  const {actions} = (
+    opened as {
+      readonly output: {readonly actions: readonly {readonly name: string}[]};
+    }
+  ).output;
+
+  expect(opened).toMatchObject({
+    status: 'accepted',
+    toolName: 'phone.open',
+    output: {
+      app: 'clock',
+      name: 'Clock',
+      view: 'alarms',
+      views: [
+        {id: 'world', title: 'World Clock'},
+        {id: 'alarms', title: 'Alarms'},
+        {id: 'stopwatch', title: 'Stopwatch'},
+        {id: 'timers', title: 'Timers'},
+      ],
+      screen: {items: [{kind: 'text', text: 'No Alarms'}]},
+    },
+  });
+  expect(actions.map(action => action.name)).toEqual([
+    'set_alarm',
+    'change_alarm',
+    'delete_alarm',
+    'start_timer',
+    'cancel_timer',
+    'start_stopwatch',
+    'stop_stopwatch',
+    'lap_stopwatch',
+    'reset_stopwatch',
+    'add_city',
+    'remove_city',
+  ]);
+  expect(actions[0]).toMatchObject({
+    description:
+      'Set an alarm for a time of day, ringing once or on the days you give.',
+    input: {
+      type: 'object',
+      required: ['hour', 'minute'],
+      additionalProperties: false,
+    },
+  });
+  expect(used).toMatchObject({
+    status: 'accepted',
+    toolName: 'phone.use',
+    output: {
+      answer: {
+        id: 'a1',
+        time: '7:00 AM',
+        label: 'Wake Sam',
+        repeats: 'never',
+        on: true,
+        rings: expect.stringMatching(someDay) as string,
+      },
+      view: 'alarms',
+      screen: {
+        items: [
+          {
+            kind: 'list',
+            rows: [
+              {
+                id: 'a1',
+                time: '7:00 AM',
+                subtitle: expect.stringMatching(
+                  /^Wake Sam, (?:today|tomorrow)$/u,
+                ) as string,
+                switch: true,
+              },
+            ],
+          },
+        ],
+      },
+    },
+  });
+  expect(clockOf(home)).toMatchObject({
+    storage: {
+      alarms: [
+        {id: 'a1', hour: 7, minute: 0, label: 'Wake Sam', days: [], on: true},
+      ],
+    },
+    rings: [
+      {
+        id: 'a1',
+        at: expect.stringMatching(/T07:00:00\.000Z$/u) as string,
+        title: 'Alarm',
+        body: 'Wake Sam',
+      },
+    ],
+  });
+  await stop(first);
+
+  const again = await converse(wireOf(await startDaemon(home, utc)), 'mira');
+
+  model.answer(
+    calling(['phone_open', {app: 'clock', view: 'alarms'}]),
+    reply('Still set.'),
+  );
+  await again('Is my alarm still on?', 'still');
+  expect(toolResults(model.requests.at(-1)).at(-1)).toMatchObject({
+    status: 'accepted',
+    output: {
+      view: 'alarms',
+      screen: {
+        items: [
+          {kind: 'list', rows: [{id: 'a1', time: '7:00 AM', switch: true}]},
+        ],
+      },
+    },
+  });
+});
+
+it("phone.refusals: what her phone refuses she reads as its sentence with what there is instead: an app not on her phone with her apps, a view the app has not with its views, an action it has not with its actions, and input the action's contract refuses as the contract says it; the turn goes on to its reply, and nothing is saved", async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const say = await converse(wireOf(await startDaemon(home)), 'mira');
+  const refused = (toolName: string, reason: string, message: string) => ({
+    status: 'rejected',
+    pluginId: 'phone',
+    toolName,
+    reason,
+    message,
+  });
+
+  model.answer(
+    calling(
+      ['phone_open', {app: 'weather'}],
+      ['phone_open', {app: 'clock', view: 'calendar'}],
+      ['phone_use', {app: 'clock', action: 'snooze'}],
+      [
+        'phone_use',
+        {app: 'clock', action: 'set_alarm', input: {hour: 25, minute: 0}},
+      ],
+    ),
+    reply('My phone would not.'),
+  );
+  expect(await say('Wake me at 25:00.', 'refused')).toMatchObject({
+    status: 'completed',
+    messages: [{}, {text: 'My phone would not.'}],
+  });
+  expect(toolResults(model.requests.at(-1))).toEqual([
+    refused(
+      'phone.open',
+      'app_not_found',
+      'There is no app "weather" on the phone. Your apps: Clock ("clock").',
+    ),
+    refused(
+      'phone.open',
+      'view_not_found',
+      'Clock has no view "calendar". Its views: world, alarms, stopwatch, timers.',
+    ),
+    refused(
+      'phone.use',
+      'action_not_found',
+      'Clock has no action "snooze". Its actions: set_alarm, change_alarm, delete_alarm, start_timer, cancel_timer, start_stopwatch, stop_stopwatch, lap_stopwatch, reset_stopwatch, add_city, remove_city.',
+    ),
+    refused(
+      'phone.use',
+      'invalid_input',
+      'Clock cannot take that: set_alarm input field "hour" is refused: its value is greater than the maximum of 23.',
+    ),
+  ]);
+  expect(existsSync(phoneData(home))).toBe(false);
+});
+
+it("phone.ring-wakes-her: a timer she starts rings when it ends: a turn of her own begins, with no line's stamps, its request opening with the note that her phone is ringing and naming the Clock's timer; what she writes in it is hers on the stream, and after it the Clock's file holds no ring and no running timer", async () => {
+  const model = await startModelServer();
+  const home = quietHome(model);
+  const daemon = await startDaemon(home);
+  const events = await openEvents(daemon);
+  const say = await converse(wireOf(daemon), 'mira');
+
+  model.answer(
+    calling([
+      'phone_use',
+      {app: 'clock', action: 'start_timer', input: {seconds: 1}},
+    ]),
+    reply('A second, starting now.'),
+    {chunks: [...visibleReply('Your second is up.'), finish('tool_calls')]},
+  );
+  await say('Give me a second.', 'second');
+
+  const moment = await nextMoment(events);
+
+  expect(openingOf(model.requests.at(-1))).toEqual(
+    ringing(
+      expect.stringMatching(
+        /^Clock, Timer: 1 sec \(set for [^)]+\)\.$/u,
+      ) as string,
+    ),
+  );
+  expect(
+    moment.filter(
+      frameOf('turn_progress', {
+        progress: {
+          kind: 'visible_reply',
+          speakerId: 'mira',
+          text: 'Your second is up.',
+        },
+      }),
+    ),
+  ).toHaveLength(1);
+  expect(moment.at(-1)).toSatisfy(
+    frameOf('turn_completed', {status: 'completed'}),
+  );
+  expect(clockOf(home)).toMatchObject({storage: {timers: []}, rings: []});
+});
+
+it('phone.late-ring: a ring that came due while she was not running rings at her start, in a turn of her own whose note says when it was set for and whose event keeps what rang; once it completes, the repeating alarm is still on, its ring set for a day yet to come', async () => {
+  const model = await startModelServer();
+  const home = quietHome(model, wakeSam([1, 2, 3, 4, 5, 6, 7]));
+  const asked = model.hold();
+  const daemon = await startDaemon(home, utc);
+  const request = await asked.arrived();
+  const events = await openEvents(daemon);
+
+  expect(openingOf(request)).toEqual(ringing(lateAlarm));
+  asked.release(reply('Up you get, Sam.'));
+  expect(await events.next(own('turn_completed'))).toSatisfy(
+    frameOf('turn_completed', {status: 'completed'}),
+  );
+
+  const [event] = sessionRecords(home, 'mira', 'runtime_event_received');
+  const clock = clockOf(home) as {
+    readonly rings: readonly {readonly at: string}[];
+  };
+
+  expect(event).toMatchObject({
+    occasion: 'moment',
+    rang: [
+      {
+        app: 'Clock',
+        title: 'Alarm',
+        body: 'Wake Sam',
+        at: '2026-01-05T07:00:00.000Z',
+      },
+    ],
+  });
+  expect(clock).toMatchObject({
+    storage: {alarms: [{id: 'a1', on: true}]},
+    rings: [
+      {
+        id: 'a1',
+        title: 'Alarm',
+        at: expect.stringMatching(/T07:00:00\.000Z$/u) as string,
+      },
+    ],
+  });
+  // Its day against the day she rang: no wall clock that steps back moves a
+  // day, as it can move a moment.
+  expect(
+    Date.parse(clock.rings[0]?.at.slice(0, 10) ?? ''),
+  ).toBeGreaterThanOrEqual(
+    Date.parse(String(event?.['createdAt']).slice(0, 10)),
+  );
+});
+
+it("phone.ring-kept: a ring whose turn the model fails stays set and begins no other turn by itself; once a turn of hers completes, here the person's, a turn of her own rings it again, and then it is gone", async () => {
+  const model = await startModelServer();
+  const home = quietHome(model, wakeSam([]));
+  const asked = model.hold();
+  const daemon = await startDaemon(home, pinging);
+
+  await asked.arrived();
+
+  const events = await openEvents(daemon);
+
+  asked.release({status: 401, body: {error: {message: 'Who are you?'}}});
+  expect(await events.next(own('turn_completed'))).toSatisfy(
+    frameOf('turn_completed', {status: 'rejected', reason: 'provider_error'}),
+  );
+
+  const failed = events.frames.length;
+
+  await silent(events, 2);
+  expect(events.frames.slice(failed).filter(own('turn_running'))).toEqual([]);
+  expect(clockOf(home)).toMatchObject(wakeSam([]));
+
+  const say = await converse(wireOf(daemon), 'mira');
+
+  model.answer(reply('Morning, Sam.'), reply('There it goes again.'));
+  await say('Morning.', 'morning');
+  expect(await events.next(own('turn_completed'))).toSatisfy(
+    frameOf('turn_completed', {status: 'completed'}),
+  );
+  expect(openingOf(model.requests.at(-1))).toEqual(ringing(lateAlarm));
+  expect(clockOf(home)).toMatchObject({
+    storage: {alarms: [{id: 'a1', on: false}]},
+    rings: [],
+  });
+});
+
+it('phone.switched-on: while her settings switch her phone off, a ring that came due on it begins no turn; once they switch it on, the ring rings at once, in a turn of her own', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({
+      project02: {...model.settings, userDisplayName: 'Sam'},
+    }),
+    'character-data': {
+      mira: {
+        'config.json': configJson({
+          project02: {heartbeat: 'off'},
+          plugins: {phone: {enabled: false}},
+        }),
+        'plugin-data': {
+          phone: {apps: {'clock.json': JSON.stringify(wakeSam([]))}},
+        },
+      },
+    },
+  });
+  const daemon = await startDaemon(home, pinging);
+  const events = await openEvents(daemon);
+
+  await silent(events, 2);
+  expect(events.frames.filter(own('turn_running'))).toEqual([]);
+  expect(model.requests).toEqual([]);
+
+  model.answer(reply('Up you get, Sam.'));
+  await saveConfig(
+    wireOf(daemon),
+    {scope: 'character', characterId: 'mira'},
+    {kind: 'section_enabled', namespace: 'plugins', id: 'phone', enabled: true},
+  );
+  expect(await events.next(own('turn_completed'))).toSatisfy(
+    frameOf('turn_completed', {status: 'completed'}),
+  );
+  expect(openingOf(model.requests.at(-1))).toEqual(ringing(lateAlarm));
+});

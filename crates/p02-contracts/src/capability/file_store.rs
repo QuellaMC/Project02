@@ -219,3 +219,27 @@ impl LeasedStore<'_> {
         self.files.append_jsonl(path, value)
     }
 }
+
+/// The store a hook holds, for whatever takes leased files, each call
+/// checked as the hook's own calls are.
+impl LeasedFiles for LeasedStore<'_> {
+    fn read_json(&self, path: &str) -> Result<Option<Value>, StoreError> {
+        LeasedStore::read_json(self, path)
+    }
+
+    fn read_jsonl(&self, path: &str) -> Result<Vec<Value>, StoreError> {
+        LeasedStore::read_jsonl(self, path)
+    }
+
+    fn count_jsonl(&self, path: &str) -> Result<u64, StoreError> {
+        LeasedStore::count_jsonl(self, path)
+    }
+
+    fn write_json(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
+        LeasedStore::write_json(self, path, value)
+    }
+
+    fn append_jsonl(&mut self, path: &str, value: &Value) -> Result<(), StoreError> {
+        LeasedStore::append_jsonl(self, path, value)
+    }
+}

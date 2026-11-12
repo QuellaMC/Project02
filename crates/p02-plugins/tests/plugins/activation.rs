@@ -106,6 +106,7 @@ async fn the_listed_plugins_activate_together() {
             "character-memory",
             "character-state",
             "mem0",
+            "phone",
             "reply-style",
             "session-history"
         ]
@@ -124,6 +125,8 @@ async fn the_listed_plugins_activate_together() {
             "character_state.patch",
             "mem0.search",
             "mem0.add",
+            "phone.open",
+            "phone.use",
             "sessions.search",
             "sessions.read"
         ]
@@ -141,6 +144,7 @@ async fn the_listed_plugins_activate_together() {
             .collect::<Vec<_>>(),
         [
             Some("character-state"),
+            Some("phone"),
             Some("reply-style"),
             Some("session-history")
         ]

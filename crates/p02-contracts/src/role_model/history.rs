@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 
-use p02_core::{EventIdentity, VisibleMessage};
+use p02_core::{EventIdentity, Timestamp, VisibleMessage};
 use p02_shared::{Identifier, redact_credentials, redact_object_credentials};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -8,9 +8,9 @@ use serde_json::{Map, Value};
 use crate::tool::ToolCallId;
 
 /// A finished turn as the model replays it: the person's message, none for
-/// a moment of the character's own, every tool round with its results,
-/// then the character's final replies. The event that opened the turn
-/// names it.
+/// a moment of the character's own, what rang on her phone when its
+/// ringing began the moment, every tool round with its results, then the
+/// character's final replies. The event that opened the turn names it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationTurn {
@@ -18,8 +18,22 @@ pub struct ConversationTurn {
     pub identity: EventIdentity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_message: Option<VisibleMessage>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub rang: Vec<Rang>,
     pub tool_rounds: Vec<ToolRound>,
     pub final_replies: Vec<VisibleMessage>,
+}
+
+/// A ring of her phone's that a moment of hers tells: the app that set it,
+/// by its name, the ring's title, its body when it has one, and the time it
+/// was set for. An app wrote all but the time.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Rang {
+    pub app: String,
+    pub title: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    pub at: Timestamp,
 }
 
 impl ConversationTurn {

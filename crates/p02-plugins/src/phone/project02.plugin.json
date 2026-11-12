@@ -1,0 +1,37 @@
+{
+  "format": "project02.plugin.v2",
+  "manifest": {
+    "id": "phone",
+    "displayName": "Phone",
+    "version": "1.0.0",
+    "kind": "first_party",
+    "description": "Her phone and the apps on it.",
+    "contractVersion": "mvp-008.runtime_plugin.v2",
+    "declaredPlugins": [
+      "tool_provider",
+      "before_role_model_call",
+      "handle_tool_call"
+    ],
+    "config": {
+      "scope": "global_with_character_overrides",
+      "fields": []
+    },
+    "runtimePolicy": {
+      "timeoutMs": 10000,
+      "redactionLabels": [],
+      "failureBehavior": {
+        "beforeRoleModelCall": "degrade",
+        "handleToolCall": "reject_tool_call"
+      }
+    },
+    "activation": {
+      "defaultEnabled": true,
+      "reasons": ["built_in_phone"]
+    },
+    "requestedAccess": {
+      "character_file_store": "write",
+      "model_input": "write",
+      "trusted_context": "write"
+    }
+  }
+}

@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use p02_contracts::{
     DecisionRejectionReason, DecisionResult, Evidence, EvidenceKind, EvidenceNote, EvidenceStatus,
-    ModelOutput, Occasion, ProviderAnswer, ProviderFailure, ToolCallId, ToolCallResult,
+    ModelOutput, Occasion, ProviderAnswer, ProviderFailure, Rang, ToolCallId, ToolCallResult,
     WrittenCall,
 };
 use p02_core::{
@@ -250,11 +250,15 @@ impl Script {
         self.opened(identity, Some(line))
     }
 
-    /// A moment of Mira's own, which nobody began.
-    pub(crate) fn moment(&mut self) -> TurnScript<'_> {
+    /// A moment of Mira's own, which nobody began, telling what `rang` on
+    /// her phone: none when her heartbeat began it.
+    pub(crate) fn moment(&mut self, rang: Vec<Rang>) -> TurnScript<'_> {
         let identity = self.identity();
 
-        self.push(&identity, RecordBody::EventReceived(EventReceived::Moment));
+        self.push(
+            &identity,
+            RecordBody::EventReceived(EventReceived::Moment(rang)),
+        );
         self.opened(identity, None)
     }
 

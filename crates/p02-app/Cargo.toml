@@ -11,6 +11,7 @@ p02-characters.workspace = true
 p02-config.workspace = true
 p02-contracts.workspace = true
 p02-core.workspace = true
+p02-phone.workspace = true
 p02-plugins.workspace = true
 p02-role-model.workspace = true
 p02-runtime.workspace = true

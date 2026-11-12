@@ -6,8 +6,10 @@ import {expect, it} from 'vitest';
 import {connector, startDaemon} from './harness/daemon.ts';
 import {
   frameOf,
+  nextMoment,
   openEvents,
-  type Events,
+  own,
+  silent,
   type Frame,
 } from './harness/events.ts';
 import {
@@ -66,38 +68,6 @@ function heartbeatHome(model: ModelServer): string {
 
 function dataOf(frame: Frame | undefined): Record<string, unknown> {
   return JSON.parse(frame?.data ?? '{}') as Record<string, unknown>;
-}
-
-/** A frame of a turn of the character's own: one that carries no line's stamps. */
-function own(
-  event: 'turn_running' | 'turn_completed',
-  characterId = 'mira',
-): (frame: Frame) => boolean {
-  return frame =>
-    frameOf(event, {characterId})(frame) &&
-    !('source' in dataOf(frame)) &&
-    !('clientMessageId' in dataOf(frame));
-}
-
-/** The next turn of Mira's own as the stream tells it, from the frame that says it running to its completion, pings left out. */
-async function nextMoment(events: Events): Promise<readonly Frame[]> {
-  const begun = await events.next(own('turn_running'));
-  const ended = await events.next(own('turn_completed'));
-
-  return events.frames
-    .slice(events.frames.indexOf(begun), events.frames.indexOf(ended) + 1)
-    .filter(frame => frame.comment === undefined);
-}
-
-/** Settles once the stream has been silent long enough to ping `count` times from now on. */
-async function silent(events: Events, count: number): Promise<void> {
-  const from = events.frames.length;
-
-  await events.holding(`${String(count)} pings`, frames =>
-    frames.slice(from).filter(frame => frame.comment === 'ping').length >= count
-      ? true
-      : undefined,
-  );
 }
 
 /** The request's messages after its leading system frames. */

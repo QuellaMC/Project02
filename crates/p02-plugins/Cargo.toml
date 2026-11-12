@@ -10,6 +10,7 @@ futures-util.workspace = true
 p02-contracts.workspace = true
 p02-core.workspace = true
 p02-memory.workspace = true
+p02-phone.workspace = true
 p02-shared = { workspace = true, features = ["http"] }
 p02-wire.workspace = true
 reqwest.workspace = true

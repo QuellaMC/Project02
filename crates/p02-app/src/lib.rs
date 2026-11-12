@@ -10,6 +10,7 @@ mod outcome;
 mod packages;
 mod pairing;
 mod reconcile;
+mod rings;
 
 pub use daemon::{Daemon, DaemonSettings, Durations, Message, OpenDaemonError, Plugin, Presence};
 pub use history::HistoryPage;

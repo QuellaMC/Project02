@@ -14,6 +14,7 @@ pub mod list;
 mod management;
 pub mod mem0;
 mod package;
+mod phone;
 mod policy;
 mod reply_style;
 pub mod session_history;
@@ -29,5 +30,6 @@ pub use config_control::{
 pub use confirmation::{ConfirmationDecision, ConfirmationRequest, Confirmer};
 pub use host::{ActivationError, BuildPluginError, PluginHost, PluginHostBuilder};
 pub use lifecycle::{HookPhaseReport, PhaseStatus};
+pub use phone::PHONE_PLUGIN;
 pub use tool_call::{ProposedToolCall, ToolCallReport};
 pub use turn::Turn;

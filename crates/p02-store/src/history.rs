@@ -6,8 +6,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::num::NonZeroU32;
 
 use p02_contracts::{
-    ConversationToolCall, ConversationTurn, DecisionResult, Occasion, ToolCallId, ToolCallResult,
-    ToolRound,
+    ConversationToolCall, ConversationTurn, DecisionResult, Occasion, Rang, ToolCallId,
+    ToolCallResult, ToolRound,
 };
 use p02_core::{EventId, EventIdentity, TraceId, VisibleMessage, VisibleMessageRole};
 
@@ -28,6 +28,8 @@ struct Gathered<'a> {
     identity: &'a EventIdentity,
     /// What its event says began it: a line, unless it says otherwise.
     occasion: Occasion,
+    /// What rang on her phone, when its ringing began a moment.
+    rang: &'a [Rang],
     user_message: Option<&'a VisibleMessage>,
     replies: Vec<(&'a VisibleMessage, NonZeroU32)>,
     started: Vec<&'a ToolCallStarted>,
@@ -38,8 +40,9 @@ struct Gathered<'a> {
 /// A turn the person's line began is one once it committed their message,
 /// and a moment of the character's own once she said something or a call
 /// of hers came back: a moment that did neither is left in the log alone.
-/// A round of tool calls is one once a call it started came back, so a call
-/// that never answered is never shown to the model.
+/// A moment carries what rang on her phone, as its event says. A round of
+/// tool calls is one once a call it started came back, so a call that never
+/// answered is never shown to the model.
 pub(crate) fn project<'a>(records: impl IntoIterator<Item = &'a LogRecord>) -> ConversationHistory {
     let mut records = records.into_iter().peekable();
     let (mut turns, summary) = match records.peek().map(|record| record.body()) {
@@ -60,6 +63,7 @@ pub(crate) fn project<'a>(records: impl IntoIterator<Item = &'a LogRecord>) -> C
                 gathered.push(Gathered {
                     identity,
                     occasion: Occasion::Line,
+                    rang: &[],
                     user_message: None,
                     replies: Vec::new(),
                     started: Vec::new(),
@@ -71,7 +75,10 @@ pub(crate) fn project<'a>(records: impl IntoIterator<Item = &'a LogRecord>) -> C
         let turn = &mut gathered[at];
 
         match record.body() {
-            RecordBody::EventReceived(received) => turn.occasion = received.occasion(),
+            RecordBody::EventReceived(received) => {
+                turn.occasion = received.occasion();
+                turn.rang = received.rang();
+            }
             RecordBody::MessageCommitted(commit) => match (commit.message().role, commit.round()) {
                 (VisibleMessageRole::Character, Some(round)) => {
                     turn.replies.push((commit.message(), round));
@@ -147,6 +154,7 @@ impl Gathered<'_> {
         replayed.then(|| ConversationTurn {
             identity: self.identity.clone(),
             user_message: self.user_message.cloned(),
+            rang: self.rang.to_vec(),
             tool_rounds,
             final_replies,
         })

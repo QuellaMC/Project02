@@ -914,7 +914,8 @@ export type Chip = {
  * What she comes with: a chip for each feature this app has, by its name
  * on its plugin's tile, in the order her page shows them; and one plain
  * line for those she asks for that this app does not have, which no chip
- * stands for.
+ * stands for. A plugin her page has no row for has no chip: nothing of it
+ * is changed there.
  */
 export function comesWithOf(
   settings: Settings,
@@ -931,12 +932,17 @@ export function comesWithOf(
   const chips = features
     .flatMap(feature => (feature.kind === 'plugin' ? [feature] : []))
     .toSorted((left, right) => placeOf(left.id) - placeOf(right.id))
-    .map(feature => {
+    .flatMap(feature => {
       const section = listed[placeOf(feature.id)];
+
+      if (section !== undefined && section.page === undefined) {
+        return [];
+      }
+
       const art: {readonly icon: IconName; readonly tint: Tint} =
         section === undefined ? {icon: 'grid', tint: 'gray'} : artOf(section);
 
-      return {id: feature.id, name: feature.displayName, ...art};
+      return [{id: feature.id, name: feature.displayName, ...art}];
     });
   const unknown = features.flatMap(feature =>
     feature.kind === 'unknown' ? [feature.id] : [],

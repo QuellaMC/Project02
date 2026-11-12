@@ -7,12 +7,14 @@ use std::sync::LazyLock;
 use p02_contracts::{Manifest, ManifestError, PluginFactory, ResolvedConfig, SetupCheck};
 use serde_json::Value;
 
-use crate::{character_memory, character_state, management, mem0, reply_style, session_history};
+use crate::{
+    character_memory, character_state, management, mem0, phone, reply_style, session_history,
+};
 
 /// Each plugin by its id, with its descriptor, its check and its factory:
 /// the host's own first, then the packages in id order. Whatever lists or
 /// runs them keeps this order, the model's tools among them.
-const PLUGINS: [(&str, &str, SetupCheck, PluginFactory); 6] = [
+const PLUGINS: [(&str, &str, SetupCheck, PluginFactory); 7] = [
     (
         p02_contracts::HOST_PLUGIN,
         include_str!("management/project02.plugin.json"),
@@ -36,6 +38,12 @@ const PLUGINS: [(&str, &str, SetupCheck, PluginFactory); 6] = [
         include_str!("mem0/project02.plugin.json"),
         mem0::check_setup,
         mem0::create,
+    ),
+    (
+        phone::PHONE_PLUGIN,
+        include_str!("phone/project02.plugin.json"),
+        needs_nothing,
+        phone::create,
     ),
     (
         "reply-style",
@@ -136,9 +144,14 @@ mod tests {
                 ("character-memory", true),
                 ("character-state", false),
                 ("mem0", false),
+                ("phone", true),
                 ("reply-style", false),
                 ("session-history", true),
             ]
+        );
+        assert_eq!(
+            listed.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
+            PLUGINS.map(|(id, ..)| id)
         );
     }
 }

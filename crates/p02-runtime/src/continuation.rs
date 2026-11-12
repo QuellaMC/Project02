@@ -547,6 +547,7 @@ mod tests {
                 ConversationTurn {
                     identity,
                     user_message,
+                    rang: Vec::new(),
                     tool_rounds,
                     final_replies,
                 }

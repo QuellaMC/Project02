@@ -33,8 +33,11 @@ private = { ignore = true }
 # back to the canonical text. Those are clarified below, from where the text
 # is; where there is none to point at, the crate keeps the canonical text: the
 # crates published from the objc2 repository, which only names their
-# licenses; selectors, whose repository holds no license file; and
-# libappindicator-sys, whose package holds none and names no repository.
+# licenses; selectors, whose repository holds no license file;
+# libappindicator-sys, whose package holds none and names no repository; and
+# rquickjs-core, whose package holds none and whose repository the scan
+# cannot fetch from, the address it names ending in .git. rquickjs, published
+# from the same commit, carries that text.
 
 # Each text below is in the crate, under a name cargo-about does not scan.
 [tauri-plugin-dialog.clarify]

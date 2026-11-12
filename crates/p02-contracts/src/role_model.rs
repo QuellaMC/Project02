@@ -16,7 +16,7 @@ pub use decision::{
     BlankContextTextError, CharacterDecision, DecisionContext, DecisionRejection,
     DecisionRejectionReason, DecisionResult, Occasion, RuntimeNote,
 };
-pub use history::{ConversationToolCall, ConversationTurn, ToolCallResult, ToolRound};
+pub use history::{ConversationToolCall, ConversationTurn, Rang, ToolCallResult, ToolRound};
 pub use reasoning::{ReasoningFilter, scrub_reasoning_blocks};
 pub use tools::{
     DuplicateToolError, ModelToolCall, ModelToolDefinition, PLUGIN_LIST_TOOL,

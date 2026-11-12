@@ -1,9 +1,10 @@
 //! One actor per character: a task owning everything of hers, her state,
-//! the parts she is assembled from, her thread with the person and her
-//! confirmations, which answers what it is asked in the order it was asked,
-//! takes the lines in her inbox one at a time while she is ready, gives her
-//! a moment of her own whenever she has been quiet for as long as her
-//! heartbeat says, and between two steps reads whether she is to stop.
+//! the parts she is assembled from, her thread with the person, her
+//! confirmations and her phone's rings, which answers what it is asked in
+//! the order it was asked, takes the lines in her inbox one at a time while
+//! she is ready, gives her a moment of her own whenever something on her
+//! phone rings or she has been quiet for as long as her heartbeat says, and
+//! between two steps reads whether she is to stop.
 
 use std::num::NonZeroU64;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -15,9 +16,10 @@ use p02_config::{
     CharacterSettings, HostSettings, MaterializeError, ReadSettingsError, Resolution,
     RoleModelProvider, materialize,
 };
-use p02_contracts::RoleModelAdapter;
+use p02_contracts::{CharacterStorage, FileStoreBackend, Rang, RoleModelAdapter};
 use p02_core::{SpeakerName, Timestamp};
-use p02_plugins::PluginHost;
+use p02_phone::SetRing;
+use p02_plugins::{PHONE_PLUGIN, PluginHost};
 use p02_role_model::{NvidiaSettings, select_adapter};
 use p02_runtime::{Character, CompletedTurn, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{Identifier, error_sentence};
@@ -35,6 +37,7 @@ use crate::confirmation::Broker;
 use crate::daemon::{Daemon, WeakDaemon, World, blocking};
 use crate::outcome::{duplicate, running_turn, storage_failure, told};
 use crate::reconcile::settings_now;
+use crate::rings::{Rings, rang};
 
 /// What a character whose settings choose no AI service needs, which the
 /// settings page answers.
@@ -102,6 +105,7 @@ impl CharacterHandle {
                 commands: receiver,
                 parts: None,
                 quiet: None,
+                rings: Rings::default(),
             }
             .run(),
         );
@@ -278,6 +282,36 @@ struct Actor {
     /// person opened, her last turn ended, or her boot found her thread
     /// made before; none while her thread has never been made.
     quiet: Option<Instant>,
+    /// Her phone's rings, which this run keeps: a restart after a turn the
+    /// runtime failed is not a start, so a ring held stays held.
+    rings: Rings,
+}
+
+/// What begins a turn of hers: the person's line, what rang on her phone,
+/// or her heartbeat.
+#[derive(Debug)]
+enum Cause {
+    Line(QueuedLine),
+    Rang(Vec<SetRing>),
+    Heartbeat,
+}
+
+impl Cause {
+    fn line(&self) -> Option<&QueuedLine> {
+        match self {
+            Self::Line(line) => Some(line),
+            Self::Rang(_) | Self::Heartbeat => None,
+        }
+    }
+
+    /// What rang, as the moment it begins tells her: none but for her
+    /// phone's rings.
+    fn rang(&self) -> Vec<Rang> {
+        match self {
+            Self::Rang(rings) => rang(rings),
+            Self::Line(_) | Self::Heartbeat => Vec::new(),
+        }
+    }
 }
 
 /// What every step of hers reaches: who she is, the world she is built
@@ -301,7 +335,7 @@ impl Actor {
                 continue;
             }
 
-            let due = self.due();
+            let waking = self.waking();
 
             tokio::select! {
                 biased;
@@ -311,13 +345,38 @@ impl Actor {
                     // The daemon let go of her without a stop.
                     None => break,
                 },
-                () = sleep_until(due.unwrap_or_else(Instant::now)), if due.is_some() => {
-                    self.moment().await;
+                () = sleep_until(waking.unwrap_or_else(Instant::now)), if waking.is_some() => {
+                    self.wake().await;
                 }
             }
         }
 
         self.stop_now().await;
+    }
+
+    /// When she next wakes by herself, while she is ready: when her
+    /// heartbeat's moment is due, or when the wall clock is read again for
+    /// her next ring, whichever comes first.
+    fn waking(&self) -> Option<Instant> {
+        let ring = (self.her.state() == CharacterState::Ready)
+            .then(|| self.rings.wait(&Timestamp::now()))
+            .flatten()
+            .map(|wait| Instant::now() + wait);
+
+        self.due().into_iter().chain(ring).min()
+    }
+
+    /// She woke by herself: what rang on her phone by the wall clock begins
+    /// a moment of her own, and when nothing did, her heartbeat begins one
+    /// once it is due.
+    async fn wake(&mut self) {
+        let rang = self.rings.due(&Timestamp::now());
+
+        if !rang.is_empty() {
+            self.moment(Cause::Rang(rang)).await;
+        } else if self.due().is_some_and(|due| due <= Instant::now()) {
+            self.moment(Cause::Heartbeat).await;
+        }
     }
 
     /// When her next moment of her own is due: one period of her heartbeat
@@ -385,20 +444,23 @@ impl Actor {
             Some(&line),
         );
 
-        self.take(parts, adapter, turn, Some(line)).await;
+        self.take(parts, adapter, turn, Cause::Line(line)).await;
         true
     }
 
-    /// A moment of her own, now that one is due: she is brought up to date
-    /// with her settings first, and it runs through her thread while they
-    /// still give her a model and a heartbeat. A moment whose thread cannot
-    /// be opened never begins, and is noted as maintenance.
-    async fn moment(&mut self) {
+    /// A moment of her own, which `cause` begins, what rang on her phone or
+    /// her heartbeat: she is brought up to date with her settings first,
+    /// and it runs through her thread while they still give her a model,
+    /// and her heartbeat's while they still give her a heartbeat. A moment
+    /// whose thread cannot be opened never begins, and is noted as
+    /// maintenance; what it would have told waits, as what a moment told
+    /// that did not complete does.
+    async fn moment(&mut self, cause: Cause) {
         let Some((mut parts, adapter)) = self.runnable().await else {
             return;
         };
 
-        if parts.built.settings.host().heartbeat.is_none() {
+        if matches!(cause, Cause::Heartbeat) && parts.built.settings.host().heartbeat.is_none() {
             self.parts = Some(parts);
             return;
         }
@@ -412,11 +474,16 @@ impl Actor {
             Ok(conversation) => {
                 let turn = running_turn(self.her.id.clone(), conversation, None);
 
-                self.take(parts, adapter, turn, None).await;
+                self.take(parts, adapter, turn, cause).await;
             }
             Err(error) => {
                 self.parts = Some(parts);
                 self.quiet = Some(Instant::now());
+
+                if let Cause::Rang(told) = cause {
+                    self.rings.hold(told);
+                }
+
                 self.her.note_maintenance(error_sentence(&error));
             }
         }
@@ -441,32 +508,39 @@ impl Actor {
         }
     }
 
-    /// Takes `turn` through her thread on `parts` with `adapter` her model:
-    /// the turn of `line`, or a moment of her own when there is none. Once
-    /// it ended, however it ended, she has been quiet since; `line` leaves
-    /// her inbox, and only then is the end announced, so a client that
-    /// hears it and sends the line again is answered as her thread has it.
-    /// A turn the runtime fails leaves her failed, and she is built again
-    /// behind it; her inbox failing fails her.
+    /// Takes `turn` through her thread on `parts` with `adapter` her model,
+    /// as `cause` began it. Once it ended, however it ended, she has been
+    /// quiet since; the line that began it leaves her inbox, her phone is
+    /// looked at again, what rang handed to its apps once the moment it
+    /// began completed, and only then is the end announced, so a client
+    /// that hears it and sends the line again is answered as her thread has
+    /// it, and finds her phone as the turn left it. A turn the runtime
+    /// fails leaves her failed, and she is built again behind it; her inbox
+    /// failing fails her.
     async fn take(
         &mut self,
         mut parts: Parts,
         adapter: Arc<dyn RoleModelAdapter>,
         turn: RunningTurn,
-        line: Option<QueuedLine>,
+        cause: Cause,
     ) {
-        let taken = self.turn(&mut parts, adapter, &turn, line.as_ref()).await;
+        let taken = self.turn(&mut parts, adapter, &turn, &cause).await;
         let data = parts.built.data.clone();
+        let phone = parts.built.phone();
 
         self.parts = Some(parts);
         self.quiet = Some(Instant::now());
 
         let (ending, failure) = self.ended(taken);
-        let removed = match line {
-            Some(line) => blocking(move || data.unqueue(&line)).await,
-            None => Ok(()),
+        let (removed, told) = match cause {
+            Cause::Line(line) => (blocking(move || data.unqueue(&line)).await, Vec::new()),
+            Cause::Rang(told) => (Ok(()), told),
+            Cause::Heartbeat => (Ok(()), Vec::new()),
         };
+        let completed = ending.status == TurnStatus::Completed;
+        let phoned = self.rings.after_turn(phone, told, completed).await;
 
+        self.her.noted(&phoned);
         self.her.world.events.emit(ending.announced(turn));
 
         match (removed, failure) {
@@ -480,16 +554,15 @@ impl Actor {
     }
 
     /// Takes `turn` through her thread on `parts`, opened before it begins,
-    /// with `adapter` her model: the turn of `line`, or a moment of her own
-    /// when there is none. While it runs she still hears what she is asked:
-    /// an open of her thread is answered at once, and so is a start, since
-    /// she runs.
+    /// with `adapter` her model, as `cause` began it. While it runs she
+    /// still hears what she is asked: an open of her thread is answered at
+    /// once, and so is a start, since she runs.
     async fn turn(
         &mut self,
         parts: &mut Parts,
         adapter: Arc<dyn RoleModelAdapter>,
         turn: &RunningTurn,
-        line: Option<&QueuedLine>,
+        cause: &Cause,
     ) -> Result<(Delivery, bool), Ending> {
         let Parts { built, thread } = parts;
         let thread = self
@@ -506,7 +579,7 @@ impl Actor {
             built,
             adapter,
             turn.clone(),
-            line
+            cause
         ));
 
         loop {
@@ -556,9 +629,10 @@ impl Actor {
     }
 
     /// Her parts to use, brought up to date with her settings first, which
-    /// may leave her with a model or without one; or the sentence she
-    /// refuses with while she is not built, or once her settings no longer
-    /// build her, which fails her.
+    /// may leave her with a model or without one, her phone's rings read
+    /// again when she was built anew; or the sentence she refuses with
+    /// while she is not built, or once her settings no longer build her,
+    /// which fails her.
     async fn current(&mut self) -> Result<Parts, String> {
         let mut parts = match self.parts.take() {
             Some(parts)
@@ -575,10 +649,19 @@ impl Actor {
             }
         };
 
-        if let Err(failure) = self.her.refresh(&mut parts.built).await {
-            self.parts = Some(parts);
-            self.fail(failure).await;
-            return Err(self.her.not_ready());
+        match self.her.refresh(&mut parts.built).await {
+            // Built again, she may run her phone no longer, or only now.
+            Ok(true) => {
+                let phoned = self.rings.read(parts.built.phone()).await;
+
+                self.her.noted(&phoned);
+            }
+            Ok(false) => {}
+            Err(failure) => {
+                self.parts = Some(parts);
+                self.fail(failure).await;
+                return Err(self.her.not_ready());
+            }
         }
 
         Ok(parts)
@@ -610,16 +693,23 @@ impl Actor {
         Ok(thread.insert(held))
     }
 
+    /// Builds her, and reads her phone's rings once she is.
     async fn boot(&mut self) {
         self.her.publish(Change::Starting);
 
         match self.her.assemble().await {
             Ok(Assembled { built, state }) => {
+                let phone = built.phone();
+
                 self.quiet = self.her.met(&built.character).await.then(Instant::now);
                 self.parts = Some(Parts {
                     built,
                     thread: None,
                 });
+
+                let phoned = self.rings.read(phone).await;
+
+                self.her.noted(&phoned);
                 self.her.settle(state);
             }
             Err(failure) => self.her.settle(Change::Failed(failure)),
@@ -988,6 +1078,14 @@ impl Built {
     async fn shut_down(self) -> Vec<String> {
         self.host.shutdown().await.failures()
     }
+
+    /// Her phone's store, while her plugins include her phone.
+    fn phone(&self) -> Option<Arc<dyn FileStoreBackend>> {
+        self.host
+            .plugin_ids()
+            .find(|id| id.as_str() == PHONE_PLUGIN)
+            .map(|id| self.data.file_store(id))
+    }
 }
 
 impl Parts {
@@ -1006,19 +1104,21 @@ impl Parts {
 }
 
 /// Takes `turn` through `thread`, as `built` answers it through `adapter`:
-/// the turn of `line`, or a moment of her own when there is none. What the
-/// runtime made of it, and whether its line was heard committed, as a
-/// moment, with none to commit, always is. The stream is told the turn as
-/// it goes: a moment as it begins, then each message and tool call, and the
-/// turn as it runs whenever that changes.
+/// the turn of a line, when `cause` is one, or else a moment of her own,
+/// which tells her what rang. What the runtime made of it, and whether its
+/// line was heard committed, as a moment, with none to commit, always is.
+/// The stream is told the turn as it goes: a moment as it begins, then
+/// each message and tool call, and the turn as it runs whenever that
+/// changes.
 async fn take_turn(
     her: &Her,
     thread: &mut Conversation,
     built: &mut Built,
     adapter: Arc<dyn RoleModelAdapter>,
     turn: RunningTurn,
-    line: Option<&QueuedLine>,
+    cause: &Cause,
 ) -> (Delivery, bool) {
+    let line = cause.line();
     let committed = AtomicBool::new(line.is_none());
     let running = Mutex::new(turn);
     let listener = |progress: Progress| {
@@ -1068,7 +1168,7 @@ async fn take_turn(
                 .unwrap_or_else(PoisonError::into_inner)
                 .clone(),
         ));
-        thread.moment(&mut mind, &listener).await
+        thread.moment(cause.rang(), &mut mind, &listener).await
     };
 
     her.broker.running(None);

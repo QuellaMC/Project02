@@ -3,6 +3,7 @@
 
 use std::num::NonZeroU64;
 
+use p02_contracts::Rang;
 use p02_core::{
     Conversation, ConversationId, Participant, SessionId, Timestamp, UserLine, VisibleMessageRole,
 };
@@ -98,7 +99,7 @@ fn a_moment_is_replayed_once_she_said_or_did_something_and_a_line_once_it_landed
         .replies()
         .completed();
     script
-        .moment()
+        .moment(Vec::new())
         .round(Some(answer(
             &[],
             &[],
@@ -106,12 +107,12 @@ fn a_moment_is_replayed_once_she_said_or_did_something_and_a_line_once_it_landed
         )))
         .completed();
     script
-        .moment()
+        .moment(Vec::new())
         .round(Some(answer(&["Found your keys yet?"], &[], None)))
         .replies()
         .completed();
     script
-        .moment()
+        .moment(Vec::new())
         .round(Some(answer(&[], &["wistful"], None)))
         .start_calls()
         .finish_calls()
@@ -158,6 +159,45 @@ fn a_moment_is_replayed_once_she_said_or_did_something_and_a_line_once_it_landed
             "{identity:?}"
         );
     }
+}
+
+/// A moment her phone's ringing began is replayed with what rang, as its
+/// event tells it, and one her heartbeat began with nothing rung.
+#[test]
+fn a_moment_is_replayed_with_what_rang_on_her_phone() {
+    let world = World::new();
+    let mut script = Script::new(world.segment(1));
+    let writer = world.first_segment(&world.conversation).unwrap();
+    let rang = vec![Rang {
+        app: "Clock".to_owned(),
+        title: "Alarm".to_owned(),
+        body: Some("Wake Sam".to_owned()),
+        at: Timestamp::new("2026-10-21T07:00:00.000Z").unwrap(),
+    }];
+
+    script
+        .moment(rang.clone())
+        .round(Some(answer(&["Good morning."], &[], None)))
+        .replies()
+        .completed();
+    script
+        .moment(Vec::new())
+        .round(Some(answer(&["Found your keys yet?"], &[], None)))
+        .replies()
+        .completed();
+    written(writer, &script.records);
+
+    let replayed: Vec<Vec<Rang>> = world
+        .log(1)
+        .read()
+        .unwrap()
+        .history()
+        .turns
+        .into_iter()
+        .map(|turn| turn.rang)
+        .collect();
+
+    assert_eq!(replayed, [rang, Vec::new()]);
 }
 
 /// A session's user is the person, whoever else its conversation is

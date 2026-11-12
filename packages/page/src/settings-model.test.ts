@@ -854,9 +854,15 @@ describe('settings model', () => {
     });
   });
 
-  it('draws what she comes with in the order her page shows it, each on its tile, says once what this app does not have, and what she would find set up', () => {
+  it('draws what she comes with in the order her page shows it, each on its tile and none for a plugin her page has no row for, says once what this app does not have, and what she would find set up', () => {
     const settings = settingsOf({
-      home: homeView(),
+      home: homeView({
+        sections: [
+          memory(),
+          telegram,
+          section('phone', {displayName: 'Phone'}),
+        ],
+      }),
       'character:mira': herView(),
     });
 
@@ -869,6 +875,7 @@ describe('settings model', () => {
         },
         {kind: 'unknown', id: 'astronomy'},
         {kind: 'plugin', id: 'weather', displayName: 'Weather'},
+        {kind: 'plugin', id: 'phone', displayName: 'Phone'},
         {kind: 'plugin', id: 'session-history', displayName: 'Look Back'},
         {kind: 'unknown', id: 'clock'},
       ]),
