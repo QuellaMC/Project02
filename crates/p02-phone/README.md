@@ -140,10 +140,13 @@ the blocking pool.
 - **The apps we publish** to the App Store's catalog are kept here too, in
   `catalog/`, and tested in the engine as the Clock is, though no phone
   comes with them: today Reminders, `catalog/reminders.js`, things to do on
-  a day and time, once or repeating, and Weather, `catalog/weather.js`, a
+  a day and time, once or repeating; Weather, `catalog/weather.js`, a
   place's weather now and over the hours and days ahead, read from
   Open-Meteo, which needs no key, and kept, so its screen shows the last
-  reading and when it was read. Publishing version `V` of one copies
+  reading and when it was read; and Web Search, `catalog/search.js`, the
+  web searched through Tavily on the person's account, whose key its
+  requests carry and it never holds, and what came up kept, so its screen
+  shows the last search. Publishing version `V` of one copies
   its file to `apps/<id>/V.js` in the catalog's repository and adds its
   entry there with the file's SHA-256. A published version's file never
   changes: a change is a new version.
