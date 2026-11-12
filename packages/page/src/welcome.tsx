@@ -1,12 +1,12 @@
 /**
  * The first run's welcome, in front of the chat while the home's settings
  * give a character no AI model: the person's name, then the service and
- * its key, then the way into the chat. Each box saves as the window's
- * boxes do, into the home's settings.
+ * its key, or for the ChatGPT plan its sign-in, then the way into the
+ * chat. Each box saves as the window's boxes do, into the home's settings.
  */
 import type {ReactNode} from 'react';
 
-import type {CharacterSummary} from '@project02/wire/contract';
+import type {CharacterSummary, ChatgptSignIn} from '@project02/wire/contract';
 import type {Session} from './session.ts';
 import {
   BackButton,
@@ -18,6 +18,7 @@ import {
   SelectBox,
   Tile,
 } from './settings-controls.tsx';
+import {PlanSignIn} from './settings-plan.tsx';
 import {
   choiceWords,
   keyPlaceholder,
@@ -71,7 +72,11 @@ export function Welcome({
             session={session}
           />
         ) : step === 2 ? (
-          <ModelStep settings={settings} session={session} />
+          <ModelStep
+            settings={settings}
+            signIn={state.health?.chatgpt}
+            session={session}
+          />
         ) : (
           <DoneStep
             settings={settings}
@@ -210,11 +215,17 @@ function problemOf(settings: Settings, row: Row): readonly string[] {
   return problem === undefined ? [] : [problem];
 }
 
+/**
+ * The service and what connects it: the key of the one chosen, or in its
+ * place, for the ChatGPT plan, the sign-in its own page shows.
+ */
 function ModelStep({
   settings,
+  signIn,
   session,
 }: {
   readonly settings: Settings;
+  readonly signIn: ChatgptSignIn | undefined;
   readonly session: Session;
 }) {
   const view = viewOf(settings, home);
@@ -252,7 +263,9 @@ function ModelStep({
           <Problems problems={problemOf(settings, serviceRow)} />
         </div>
       )}
-      {key === undefined ? null : (
+      {chosen === 'chatgpt' ? (
+        <PlanSignIn signIn={signIn} session={session} />
+      ) : key === undefined ? null : (
         <div className="welcome-field">
           <label htmlFor="welcome-key" className="welcome-label">
             API Key

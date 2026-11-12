@@ -4,6 +4,7 @@
  * the store. Browser-only like session.ts; the browser suite is its cover.
  */
 import type {
+  ChatgptOutcome,
   ConfigChangeOutcome,
   ConfigTarget,
   ConfigView,
@@ -110,6 +111,12 @@ export type SettingsVerbs = {
     appId: string,
     allowed: boolean,
   ) => Promise<void>;
+  /** Starts signing the home in to a ChatGPT plan: health says the code to approve, and moves on once it is. */
+  readonly startChatgptSignIn: () => Promise<void>;
+  /** Calls off the wait for the person to approve the code. */
+  readonly cancelChatgptSignIn: () => Promise<void>;
+  /** Signs the home out of its ChatGPT plan: its tokens leave the home. */
+  readonly signOutOfChatgpt: () => Promise<void>;
 };
 
 /** An address that can never work has no settings to change. */
@@ -133,6 +140,9 @@ export const noSettingsVerbs: SettingsVerbs = {
   addAppFile: () => Promise.resolve(),
   removeApp: () => Promise.resolve(),
   letAppWake: () => Promise.resolve(),
+  startChatgptSignIn: () => Promise.resolve(),
+  cancelChatgptSignIn: () => Promise.resolve(),
+  signOutOfChatgpt: () => Promise.resolve(),
 };
 
 const advancedKey = 'project02.advanced';
@@ -455,11 +465,61 @@ function appVerbs({
   };
 }
 
-/** The welcome's steps: Continue saves what its step holds, as a box is saved, and the next step opens once it landed. */
+/**
+ * The home's sign-in to a ChatGPT plan: started, its wait called off, and
+ * signed out of. Health says the sign-in whenever it changes, and so how
+ * each of these ended, a start OpenAI gave no code for among them; what
+ * it cannot say is a notice: a sign-out that left the tokens in the home,
+ * and a call nothing answered.
+ */
+function chatgptVerbs({
+  client,
+  apply,
+}: Tab): Pick<
+  SettingsVerbs,
+  'startChatgptSignIn' | 'cancelChatgptSignIn' | 'signOutOfChatgpt'
+> {
+  const asked = async (
+    verb: () => Promise<ChatgptOutcome>,
+  ): Promise<ChatgptOutcome | undefined> => {
+    apply(noticeSpent);
+
+    try {
+      return await verb();
+    } catch (error: unknown) {
+      apply(current => noticed(current, problem(error)));
+
+      return undefined;
+    }
+  };
+
+  return {
+    async startChatgptSignIn() {
+      await asked(() => client.startChatgptSignIn());
+    },
+    async cancelChatgptSignIn() {
+      await asked(() => client.cancelChatgptSignIn());
+    },
+    async signOutOfChatgpt() {
+      const outcome = await asked(() => client.signOutOfChatgpt());
+
+      if (outcome?.status === 'failed') {
+        apply(current => noticed(current, outcome.message));
+      }
+    },
+  };
+}
+
+/**
+ * The welcome's steps: Continue saves what its step holds, as a box is
+ * saved, and the next step opens once it landed; Start Chatting closes it
+ * as the window closes.
+ */
 function welcomeVerbs(
   {getState, apply}: Tab,
   save: SettingsVerbs['save'],
-): Pick<SettingsVerbs, 'welcomeNext' | 'welcomeBack'> {
+  close: () => void,
+): Pick<SettingsVerbs, 'welcomeNext' | 'welcomeBack' | 'finishWelcome'> {
   return {
     async welcomeNext() {
       const settings = getState().settings;
@@ -493,6 +553,7 @@ function welcomeVerbs(
         apply(current => welcomeStepped(current, screen.step === 3 ? 2 : 1));
       }
     },
+    finishWelcome: close,
   };
 }
 
@@ -726,10 +787,10 @@ export function createSettingsVerbs(tab: Tab): {
         remember(on);
         apply(current => advancedSet(current, on));
       },
-      ...welcomeVerbs(reading, save),
-      finishWelcome: close,
+      ...welcomeVerbs(reading, save, close),
       ...characterVerbs(reading),
       ...appVerbs(reading),
+      ...chatgptVerbs(reading),
     },
     async changed() {
       if (getState().settings !== undefined) {

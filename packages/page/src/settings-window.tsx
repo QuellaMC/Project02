@@ -196,7 +196,7 @@ function Sidebar({
           <span className="side-label">Add Character</span>
         </FileButton>
       </div>
-      <div className="side-group">
+      <div className="side-group side-connections">
         <span className="side-group-title">Connections</span>
         {sidebar.connections.map(entry => (
           <SideButton

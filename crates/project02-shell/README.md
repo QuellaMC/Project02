@@ -29,6 +29,9 @@ Xcode's command line tools.
 - **The main window**, when closed, hides: the characters keep answering
   in Telegram. The tray's Open, the Dock, and a second launch bring it
   back; a second launch starts nothing.
+- **A link that leads outside** the page, over https, as the one to
+  OpenAI's sign-in page does, opens in the person's browser. The main
+  window gives the page no window of its own for any request.
 - **Her phone's window** is the app's own. Her Phone in the chat calls
   `window.open` on her phone's address; the main window answers that with
   no window, as it answers every request, and the app opens her phone's

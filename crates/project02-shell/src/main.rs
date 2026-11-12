@@ -203,12 +203,15 @@ fn open(app: &AppHandle, address: &str) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Answers a `window.open` of the main window's page with no window, as
-/// every one was answered before her phone had a window. One for her
-/// phone's address on the daemon at `daemon` has the app open her phone's
-/// window itself, so that it is the app's own on every system: on a Mac a
-/// window given to the page reaches Tauri as the page does. A thread of
-/// its own opens it, so the event loop builds it after this answer.
+/// Answers a `window.open` of the main window's page, or a link of it
+/// that leads to a new window, with no window of the page's own. One for
+/// her phone's address on the daemon at `daemon` has the app open her
+/// phone's window itself, so that it is the app's own on every system: on
+/// a Mac a window given to the page reaches Tauri as the page does. A
+/// thread of its own opens it, so the event loop builds it after this
+/// answer. One for an outside address over https, as the link to OpenAI's
+/// sign-in page is, opens in the person's browser; any other opens
+/// nothing.
 fn answer_new_window(app: &AppHandle, daemon: &Url, url: Url) -> NewWindowResponse<Wry> {
     if is_phone_address(&url, daemon) {
         let app = app.clone();
@@ -216,6 +219,9 @@ fn answer_new_window(app: &AppHandle, daemon: &Url, url: Url) -> NewWindowRespon
         let _ = thread::Builder::new()
             .name("phone".to_owned())
             .spawn(move || open_phone(&app, url));
+    } else if url.scheme() == "https" {
+        // One the system opens nothing for says nothing: the link stays.
+        let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
     }
 
     NewWindowResponse::Deny

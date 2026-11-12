@@ -18,6 +18,7 @@ import type {
   RuntimeConfigDiagnostic,
   RuntimeConfigSectionNamespace,
 } from '@project02/wire/contract';
+import {accountLine} from './chatgpt-plan.ts';
 import {iconOf, tintOf, type IconName, type Tint} from './look.ts';
 import {
   characterTarget,
@@ -673,6 +674,8 @@ function ownNow(
 /** A service's tile, as the design gives it, or the plainest for one it gives none. */
 export function serviceArt(serviceId: string): Art {
   switch (serviceId) {
+    case 'chatgpt':
+      return {icon: 'person', tint: 'mint'};
     case 'openai':
       return {icon: 'key', tint: 'graphite'};
     case 'nvidia':
@@ -841,11 +844,11 @@ export type ListedService = {
 };
 
 /**
- * The AI Model page's services: those connected, each saying it has its
- * key, or a server of the person's own when it has none, and In Use on the
- * one every character thinks with; and the rest, each saying what it is,
- * under Add a Service, or Services while none is connected, saying more
- * than one can be.
+ * The AI Model page's services: those connected, each saying who the
+ * ChatGPT plan is signed in as, or that it has its key, or a server of the
+ * person's own when it has none, and In Use on the one every character
+ * thinks with; and the rest, each saying what it is, under Add a Service,
+ * or Services while none is connected, saying more than one can be.
  */
 export function servicesListed(settings: Settings): {
   readonly connected: readonly ListedService[];
@@ -860,12 +863,7 @@ export function servicesListed(settings: Settings): {
   const listed = (view?.services ?? []).map(service => ({
     service,
     art: serviceArt(service.id),
-    line: !service.connected
-      ? service.summary
-      : view !== undefined &&
-          keyOf(view, service)?.effective.value !== undefined
-        ? 'Key saved'
-        : 'Your server',
+    line: service.connected ? connectedLine(view, service) : service.summary,
     inUse: service.connected && service.id === chosen?.id,
   }));
   const connected = listed.filter(entry => entry.service.connected);
@@ -882,6 +880,21 @@ export function servicesListed(settings: Settings): {
         : {title: 'Add a Service'}),
     },
   };
+}
+
+/** What a connected service's row says: who the plan is signed in as, Key saved, or Your server. */
+function connectedLine(
+  view: OkView | undefined,
+  service: ModelService,
+): string {
+  if (service.account !== undefined) {
+    return accountLine(service.account);
+  }
+
+  return view !== undefined &&
+    keyOf(view, service)?.effective.value !== undefined
+    ? 'Key saved'
+    : 'Your server';
 }
 
 /** The key the welcome asks for: the one of the chosen service's fields the home's view marks secret, with that service. */

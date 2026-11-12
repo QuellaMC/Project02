@@ -122,18 +122,29 @@ opened from an app's page, goes back to it.
 
 AI Model lists the services a character can think with as the home's view
 says them, holding no list of its own: by a service's id it keeps only its
-tile. Once one is connected, the page offers what every character thinks
-with, a service among those connected and its model, picked from the
-models its field suggests or typed in through Other…, and lists the
-services connected, In Use on that one; under them, the services that can
-be added. Each opens a page of its own with its key, pasted and never
-shown back, where a key comes from, Remove Key once one is saved, and the
-service's other fields but its model under Advanced, as NVIDIA's server
-address. A character's own AI model, from her page, is Same as Everyone or
-a service connected with its model; Same as Everyone takes away her
-service and every model of hers. Whatever else of it she holds of her
-own, a key, a server or a context size, shows under them, each to be seen
-and taken away. The welcome asks for the key of the service chosen.
+tile, and which one is the ChatGPT plan. Once one is connected, the page
+offers what every character thinks with, a service among those connected
+and its model, picked from the models its field suggests or typed in
+through Other…, and lists the services connected, In Use on that one;
+under them, the services that can be added. Each opens a page of its own
+with its key, pasted and never shown back, where a key comes from, Remove
+Key once one is saved, and the service's other fields but its model under
+Advanced, as NVIDIA's server address. The ChatGPT plan has no key: its row
+says the account and plan it is signed in as, and its page is the home's
+sign-in over the daemon's three verbs for it, drawn from health, so it
+moves on by itself: Sign In; the code with Copy Code, Open OpenAI, which
+opens OpenAI's page in the person's browser, and Cancel; then the account,
+its plan and Sign Out; and until then the warning that this is no official
+way to use a plan. A sign-in that failed or a code that ran out is said at
+Sign In in the daemon's words. `chatgpt-plan.ts`, pure and tested in Node,
+says what it shows. A character's
+own AI model, from her page, is Same as Everyone or a service connected
+with its model; Same as Everyone takes away her service and every model of
+hers. Whatever else of it she holds of her own, a key, a server or a
+context size, shows under them, each to be seen and taken away. The
+welcome asks for the key of the service chosen, or for the plan shows its
+sign-in, the same block, and goes on once the home's settings give a
+character a model.
 
 While her settings give her a phone, her page has her apps, over the
 daemon's verbs for them: an icon for each app on her phone but the App

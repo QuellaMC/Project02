@@ -997,6 +997,20 @@ code {
   color: var(--secondary);
 }
 
+/* A connection's name is the app's own word and stays whole, bold when it
+   is the page open: where the two do not fit, its value gives way. */
+.side-connections .side-label {
+  flex: 1 0 auto;
+}
+
+.side-connections .side-value {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .side-dot {
   flex: none;
   width: 8px;
@@ -1861,6 +1875,19 @@ code {
   color: #ffffff;
 }
 
+/* A pill that is the one thing its card asks for: Sign In, Open OpenAI. */
+.button-pill.button-filled {
+  background: var(--link);
+  color: #ffffff;
+}
+
+/* A pill that opens an outside page in the person's browser: a link, drawn as the pill beside it. */
+a.button-pill {
+  display: inline-flex;
+  align-items: center;
+  text-decoration: none;
+}
+
 /* A page's own action: the default one filled, Cancel beside it. */
 .actions {
   display: flex;
@@ -1980,6 +2007,81 @@ code {
   flex-direction: column;
   align-items: flex-start;
   gap: 12px;
+}
+
+/*
+ * The sign-in to a ChatGPT plan: the code, large and centred, what to do
+ * with it, the wait in the warning's ink, and the warning that it is no
+ * official way.
+ */
+.plan-code {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  padding: 26px 20px 22px;
+  text-align: center;
+}
+
+.plan-code-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--secondary);
+}
+
+.plan-code-text {
+  font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  font-size: 38px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1.1;
+  overflow-wrap: anywhere;
+}
+
+.plan-code-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+}
+
+.plan-waiting {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--secondary);
+}
+
+.plan-waiting::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--orange-glyph);
+}
+
+.plan-warning {
+  display: flex;
+  gap: 12px;
+  margin: 0;
+  padding: 14px 16px;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.plan-warning svg {
+  flex: none;
+  margin-top: 1px;
+  color: var(--orange-glyph);
+}
+
+.plan-warning strong {
+  font-weight: 600;
 }
 
 /* The first run's welcome: one card of three steps. */
