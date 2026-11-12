@@ -250,10 +250,14 @@ export function featuresPlaced(
     );
 }
 
-/** The plugins whose home settings are an account set up once, each an entry among the connections: those whose section in the home's view has fields. */
+/** The plugins whose home settings are an account set up once, each an entry among the connections: those that say they are one. */
 function connections(view: OkView | undefined): readonly Section[] {
-  return (view?.sections ?? []).filter(
-    section => section.namespace === 'plugins' && section.fields.length > 0,
+  return (view?.sections ?? []).filter(isConnection);
+}
+
+function isConnection(section: Section): boolean {
+  return (
+    section.namespace === 'plugins' && section.page?.connection !== undefined
   );
 }
 
@@ -743,7 +747,7 @@ export function sidebarOf(
       dot: (view?.sections ?? []).some(
         section =>
           section.namespace === 'plugins' &&
-          section.fields.length === 0 &&
+          !isConnection(section) &&
           wrong(home, sectionKey('plugins', section.id)),
       ),
     },
@@ -839,7 +843,11 @@ export function parentOf(page: SettingsPage): SettingsPage | undefined {
     case 'feature':
     case 'character-model':
     case 'remove':
+    case 'app':
+    case 'get-apps':
       return {kind: 'character', characterId: page.characterId};
+    case 'app-file':
+      return {kind: 'get-apps', characterId: page.characterId};
     case 'bot':
       return page.from === 'telegram' || page.target.scope === 'global'
         ? {kind: 'telegram'}
@@ -851,9 +859,13 @@ export function parentOf(page: SettingsPage): SettingsPage | undefined {
   }
 }
 
-/** Whether the sidebar's entry for `entry` is the one the page is on or opens from. */
+/** Whether the sidebar's entry for `entry` is the one the page is on or opens from, however deep under it. */
 export function marks(page: SettingsPage, entry: SettingsPage): boolean {
-  const top = parentOf(page) ?? page;
+  let top = page;
+
+  for (let up = parentOf(top); up !== undefined; up = parentOf(top)) {
+    top = up;
+  }
 
   return (
     top.kind === entry.kind && JSON.stringify(top) === JSON.stringify(entry)

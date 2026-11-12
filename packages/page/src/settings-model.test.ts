@@ -34,7 +34,7 @@ import {
   type CharacterPreview,
 } from './settings-model.ts';
 import {characterTarget, home, rowKey, type Row} from './settings.ts';
-import type {Settings} from './store.ts';
+import type {Settings, SettingsPage} from './store.ts';
 import type {
   CharacterSummary,
   ConfigView,
@@ -172,6 +172,12 @@ const telegram = section('telegram', {
   fields: [field('managementBotToken', {secret: true})],
 });
 
+/** Her phone, whose one field the home may set for everyone: settings of hers, not an account. */
+const phone = section('phone', {
+  displayName: 'Phone',
+  fields: [field('askToInstall', {valueType: 'boolean'}, true)],
+});
+
 function homeView(shape: Partial<OkView> = {}): OkView {
   return {
     status: 'ok',
@@ -258,6 +264,8 @@ function settingsOf(
     views: new Map(Object.entries(views)),
     edits: new Map(Object.entries(edits)),
     problems: new Map(),
+    phones: new Map(),
+    catalogs: new Map(),
   };
 }
 
@@ -438,12 +446,15 @@ describe('settings model', () => {
     });
   });
 
-  it('says the sidebar: the name in effect, each character off or not, AI Model by its service or Set Up, Telegram on or off, a plugin set up once by its first choice, Set Up while a character wants it, off otherwise, and a dot on what has a problem', () => {
+  it('says the sidebar: the name in effect, each character off or not, AI Model by its service or Set Up, Telegram on or off, a plugin that says it is an account set up once by its first choice, Set Up while a character wants it, off otherwise, and a dot on what has a problem', () => {
     const sidebar = (
       views: Readonly<Record<string, ConfigView>>,
       found: Parameters<typeof sidebarOf>[2] = nothingFound,
     ) => sidebarOf(settingsOf(views), [mira, nova], found, true);
-    const ready = sidebar({home: homeView(), 'character:mira': herView()});
+    const ready = sidebar({
+      home: homeView({sections: [memory(), phone, telegram]}),
+      'character:mira': herView(),
+    });
 
     expect(ready.you).toBe('You');
     expect(ready.characters.map(entry => [entry.label, entry.value])).toEqual([
@@ -483,12 +494,14 @@ describe('settings model', () => {
 
     expect(unwanted.connections[2]).toMatchObject({value: 'Off', dot: false});
 
+    // A plugin with no entry of its own, whether it has home settings or
+    // not, has its problem said on Advanced.
     const wrong = sidebar(
-      {home: homeView({sections: [memory(), section('notebook')]})},
+      {home: homeView({sections: [memory(), section('notebook'), phone]})},
       {
         rows: new Map(),
         sections: new Map([
-          ['home/plugins/notebook', ['Broken.']],
+          ['home/plugins/phone', ['Broken.']],
           ['character:mira/plugins/reply-style', ['Broken.']],
         ]),
         notes: [],
@@ -813,6 +826,22 @@ describe('settings model', () => {
       kind: 'character',
       characterId: 'nova',
     });
+    expect(
+      parentOf({kind: 'app', characterId: 'mira', appId: 'clock'}),
+    ).toEqual({kind: 'character', characterId: 'mira'});
+    expect(parentOf({kind: 'get-apps', characterId: 'mira'})).toEqual({
+      kind: 'character',
+      characterId: 'mira',
+    });
+
+    const appFile: SettingsPage = {
+      kind: 'app-file',
+      characterId: 'mira',
+      fileName: 'notes.js',
+      preview: {status: 'failed', message: 'No.'},
+    };
+
+    expect(parentOf(appFile)).toEqual({kind: 'get-apps', characterId: 'mira'});
     expect(parentOf({kind: 'you'})).toBeUndefined();
     expect(
       marks(
@@ -820,6 +849,8 @@ describe('settings model', () => {
         {kind: 'advanced'},
       ),
     ).toBe(true);
+    // Her entry is marked however deep under her page the window is.
+    expect(marks(appFile, {kind: 'character', characterId: 'mira'})).toBe(true);
     expect(marks({kind: 'you'}, {kind: 'advanced'})).toBe(false);
   });
 

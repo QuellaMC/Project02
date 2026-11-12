@@ -9,6 +9,7 @@
  */
 import type {
   AnswerOutcome,
+  AppPreviewOutcome,
   CharacterPreviewOutcome,
   CharacterSummary,
   ConfigTarget,
@@ -25,6 +26,7 @@ import type {
   PhoneOutcome,
   RunningTurn,
   RuntimeConfigSectionNamespace,
+  StoreOutcome,
   TurnStatus,
   VisibleMessageRole,
 } from '@project02/wire/contract';
@@ -133,6 +135,34 @@ export type SettingsPage =
       readonly kind: 'remove';
       readonly characterId: string;
       readonly problem?: string;
+    }
+  /**
+   * An app on her phone, from her page; while `removing`, asking whether
+   * to remove it, with what the daemon said when removing it did not land.
+   */
+  | {
+      readonly kind: 'app';
+      readonly characterId: string;
+      readonly appId: string;
+      readonly removing?: {readonly problem?: string};
+    }
+  /** Get More Apps: the App Store's apps for her, and adding one from a file, from her page. */
+  | {readonly kind: 'get-apps'; readonly characterId: string}
+  /**
+   * An app's file the person chose for her, and what the daemon said of
+   * it: what the app is and what adding it would replace, or why it adds
+   * none. Nothing of the file outlives the page.
+   */
+  | {
+      readonly kind: 'app-file';
+      readonly characterId: string;
+      /** The file's name on the person's computer. */
+      readonly fileName: string;
+      /** The file's text as it was read, sent again to add the app; none when it holds no app. */
+      readonly text?: string;
+      readonly preview: AppPreviewOutcome;
+      /** What the daemon said when adding the app did not land. */
+      readonly problem?: string;
     };
 
 /** What stands in front of the chat: the settings window on a page, or the first run's welcome at a step. */
@@ -188,6 +218,10 @@ export type Settings = {
   readonly saving?: Saving;
   /** The row whose last change landed, and that change: its check shows for a moment. */
   readonly saved?: {readonly key: string; readonly ticket: number};
+  /** Character id → her phone as last read, while a page about her apps was open. */
+  readonly phones: ReadonlyMap<string, PhoneOutcome>;
+  /** Character id → the App Store's apps for her as last read, by Get More Apps or an app's page. */
+  readonly catalogs: ReadonlyMap<string, StoreOutcome>;
 };
 
 export type WebState = {
@@ -262,7 +296,7 @@ export type LineEnding = {
 export type Opened = Extract<OpenOutcome, {status: 'opened'}>;
 
 /** The plugin that puts her phone in her hands: a tool it provides is one of her phone's. */
-const phonePlugin = 'phone';
+export const phonePlugin = 'phone';
 
 export const initialState: WebState = {
   connection: {status: 'connecting'},
@@ -1123,6 +1157,9 @@ function characterOfPage(page: SettingsPage): string | undefined {
     case 'remove':
     case 'feature':
     case 'character-model':
+    case 'app':
+    case 'get-apps':
+    case 'app-file':
       return page.characterId;
     case 'bot':
       return page.target.scope === 'character'

@@ -806,7 +806,9 @@ code {
   gap: 30px;
 }
 
-.window-notice {
+/* What the page has to say, and the warning an app from a file carries. */
+.window-notice,
+.app-warning {
   margin: 0;
   padding: 10px 14px;
   border-radius: 12px;
@@ -967,6 +969,38 @@ code {
   color: var(--secondary);
 }
 
+.panel-problem {
+  color: var(--red);
+}
+
+/* Her apps on her page: their icons, four to a row, each named under it. */
+.app-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px 6px;
+  padding: 16px 12px 14px;
+}
+
+.app-strip-app {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  border: none;
+  background: transparent;
+  color: var(--label);
+}
+
+.app-strip-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
 .cell {
   padding-left: 16px;
 }
@@ -990,7 +1024,8 @@ code {
 }
 
 .cell + .cell > .line,
-.panel-empty + .cell > .line {
+.panel-empty + .cell > .line,
+.app-strip + .cell > .line {
   border-top: 1px solid var(--divider);
 }
 
@@ -1051,6 +1086,10 @@ code {
   gap: 1px;
 }
 
+.label-strong {
+  font-weight: 600;
+}
+
 .detail {
   font-size: 13px;
   color: var(--secondary);
@@ -1099,6 +1138,12 @@ code {
 .tile-chip {
   width: 26px;
   height: 26px;
+  border-radius: 13px;
+}
+
+.tile-app {
+  width: 50px;
+  height: 50px;
   border-radius: 13px;
 }
 
@@ -1456,6 +1501,33 @@ code {
 
 .button-blue {
   color: var(--link);
+}
+
+/* A row's own action, filled: Update. */
+.button-filled {
+  padding: 0 16px;
+  background: var(--link);
+  color: #ffffff;
+}
+
+/* A search over a page's list: its glass inside the box, before what is typed. */
+.search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.search-glass {
+  position: absolute;
+  left: 11px;
+  color: var(--secondary);
+  pointer-events: none;
+}
+
+.search-input {
+  height: 36px;
+  padding: 0 12px 0 34px;
+  border-radius: 10px;
 }
 
 .buttons {

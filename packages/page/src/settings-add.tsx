@@ -19,6 +19,7 @@ import {
   readinessOf,
   type CharacterPreview,
 } from './settings-model.ts';
+import {characterFileTypes} from './settings.ts';
 import type {SettingsPage} from './store.ts';
 
 type Adding = Extract<SettingsPage, {kind: 'add'}>;
@@ -59,6 +60,7 @@ export function AddPage({
         <div className="actions">
           <FileButton
             className="button-large button-default"
+            accept={characterFileTypes}
             onChoose={file => {
               void session.chooseCharacterFile(file);
             }}

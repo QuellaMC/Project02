@@ -189,6 +189,11 @@ export function createSession(address: string): Session {
         void settings.changed();
         void phone.read();
       }
+
+      // Her apps on a settings page of hers are what her phone holds now.
+      if (event.kind === 'phone_changed') {
+        void settings.phoneChanged(event.characterId);
+      }
     },
     ready: async snapshot => {
       // The thread is set aside for the page read next, so no read

@@ -95,7 +95,31 @@ be added; it holds the text only while that page is open, and Add sends
 it again for the daemon to judge afresh. A character a person added has
 Remove at the bottom of her page, which asks first. The roster is
 health's, so a character added or removed anywhere appears or goes here,
-and a page of one who is gone is left for You.
+and a page of one who is gone is left for You. The sidebar's connections
+are AI Model, Telegram, and each plugin whose page names its entry there,
+as Long-Term Memory's does.
+
+While her settings give her a phone, her page has her apps, over the
+daemon's verbs for them: an icon for each app on her phone but the App
+Store, which has nothing to set, each opening the app's page; Get More
+Apps; and, among her permissions, Ask to Install Apps, her phone's own
+field, saved as any field is. A page about her apps reads her phone when
+the window comes to it and again on every `phone_changed` naming her, and
+Get More Apps and an app's page read the App Store's apps for her; only
+the newest read of each lands. An app's page says whose phone it is on,
+its version and where it came from; offers Update while the App Store
+says it has a newer version, since the page compares no versions; Can
+Wake Her Up for an app that says it wakes her; and Remove App, which asks
+first, for one her phone does not come with. One her phone no longer
+lists, removed here or anywhere, gives way to her page. Get More Apps
+narrows the App Store's apps by a search of their names and summaries,
+each row ending in Get, Update or Installed; Get and Update give her the
+app at once, and a refusal is a notice. An app from a file is shown as
+the daemon previews it, with what it may do, the version it replaces and
+the warning that nobody read it, and Add sends the file again for the
+daemon to judge afresh and opens the app's page. `her-apps.ts`, pure and
+tested in Node, says what each of these shows and how each answer lands;
+`settings-apps.tsx` draws them.
 
 At `/?phone=<character id>`, the token in the fragment as ever, the same
 bundle draws one character's phone and nothing else: her phone's window, a
