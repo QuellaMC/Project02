@@ -241,8 +241,9 @@ struct Draft {
 }
 
 /// The drafts of one round's replies: the n-th `visible_reply` call to
-/// begin is reply n, each behind its own filter. Silent when no one
-/// listens, since the invocation hears for no one then.
+/// begin is reply n, counted again from zero once the calls before are let
+/// go, each behind its own filter. Silent when no one listens, since the
+/// invocation hears for no one then.
 #[derive(Debug)]
 pub(crate) struct ReplyDrafts<'a> {
     invocation: Invocation<'a>,
@@ -286,6 +287,13 @@ impl<'a> ReplyDrafts<'a> {
                 text: passed,
             });
         }
+    }
+
+    /// The answer let go every call so far, so their drafts go too, which
+    /// whoever listens is told.
+    pub(crate) fn let_go(&mut self) {
+        self.drafts.clear();
+        self.invocation.let_go();
     }
 
     /// The message is whole: what each filter still held is text, a `<`

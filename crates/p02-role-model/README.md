@@ -56,9 +56,10 @@ numbered within each request, and each tool's arguments stream as the
 model writes them. It asks for no sampling, thinking, effort or
 forced tool choice, sends no thinking back, and gives an answer the room
 the OpenAI API gives. For a model the setting offers, a request asks for
-Anthropic's own fallback for a decline. A message is judged at its stop:
-a decline, said with its category, and a message cut short fail the
-round.
+Anthropic's own fallback for a decline; where it takes a message over,
+the calls before it are let go, and the replies drafted of them with
+them. A message is judged at its stop: a decline, said with its category,
+and a message cut short fail the round.
 
 An adapter is built only with a key, or for NVIDIA a server of the
 person's own, which may ask for none, or for the plan the home signed

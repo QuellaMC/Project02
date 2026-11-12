@@ -8,7 +8,8 @@ mod reasoning;
 mod tools;
 
 pub use adapter::{
-    Invocation, ProviderName, ReplyDelta, RoleModelAdapter, TextCompletion, TextCompletionRequest,
+    Invocation, ProviderName, ReplyDelta, ReplyDraft, RoleModelAdapter, TextCompletion,
+    TextCompletionRequest,
 };
 pub use answer::{ModelOutput, ProviderAnswer, ProviderFailure, TokenUsage, WrittenCall};
 pub use chat::{ChatCompletionTool, ChatFunctionCall, ChatMessage, ChatToolCall, ChatToolFunction};

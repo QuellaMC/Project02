@@ -7,13 +7,13 @@ use std::sync::{Arc, Mutex};
 
 use p02_contracts::{
     ChatFunctionCall, ChatMessage, ChatToolCall, Invocation, ProviderAnswer, ProviderName,
-    ReplyDelta, RoleModelAdapter, TextCompletion, TextCompletionRequest, ToolCallId,
+    ReplyDraft, RoleModelAdapter, TextCompletion, TextCompletionRequest, ToolCallId,
 };
 use p02_role_model::{AnthropicSettings, ServiceSettings, select_adapter};
 use serde_json::{Value, json};
 
 use crate::stub::{Answer, Stub};
-use crate::support::wire;
+use crate::support::{piece, wire};
 
 const KEY: &str = "sk-ant-fixture-key";
 
@@ -255,7 +255,7 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
     ]));
 
     let heard = Mutex::new(Vec::new());
-    let listener = |delta: ReplyDelta| heard.lock().unwrap().push(delta.text);
+    let listener = |draft: ReplyDraft| heard.lock().unwrap().push(draft);
     let answer = adapter(&stub)
         .invoke(&Invocation::new(&messages, &tools).with_reply_listener(&listener))
         .await;
@@ -305,7 +305,7 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
             "fallbacks": "default",
         })
     );
-    assert_eq!(*heard.lock().unwrap(), ["Hel", "lo."]);
+    assert_eq!(*heard.lock().unwrap(), [piece("Hel"), piece("lo.")]);
 
     let ProviderAnswer::Answered {
         output,
@@ -333,6 +333,60 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
             Some("tool_use".to_owned()),
             Some((12, 34))
         )
+    );
+}
+
+/// A decline in the middle of her reply, taken over by Anthropic's
+/// fallback: the reply the declining model left half written is let go, in
+/// the answer and as a draft, its note stays, and the fallback's reply is
+/// drafted as the round's first, which the answer holds it as.
+#[tokio::test]
+async fn a_fallback_taking_over_lets_go_the_reply_before_it_and_drafts_its_own_in_its_place() {
+    let stub = Stub::start().await;
+    let (messages, tools) = wire(&["visible_reply"]);
+
+    stub.answer(message(&[
+        text(0, "A note."),
+        tool_use(1, "visible_reply", &["{\"text\":\"Half a"]),
+        block(
+            2,
+            &json!({
+                "type": "fallback",
+                "from": {"model": "claude-opus-5-5"},
+                "to": {"model": "claude-opus-4-8"},
+            }),
+            Vec::new(),
+        ),
+        tool_use(3, "visible_reply", &["{\"text\":\"Who", "le.\"}"]),
+        stopped("tool_use"),
+    ]));
+
+    let heard = Mutex::new(Vec::new());
+    let listener = |draft: ReplyDraft| heard.lock().unwrap().push(draft);
+    let answer = adapter(&stub)
+        .invoke(&Invocation::new(&messages, &tools).with_reply_listener(&listener))
+        .await;
+
+    assert_eq!(
+        *heard.lock().unwrap(),
+        [
+            piece("Half a"),
+            ReplyDraft::LetGo,
+            piece("Who"),
+            piece("le."),
+        ]
+    );
+
+    let ProviderAnswer::Answered { output, .. } = answer else {
+        panic!("the round failed: {answer:?}");
+    };
+
+    assert_eq!(
+        serde_json::to_value(output).unwrap(),
+        json!({
+            "toolCalls": [{"name": "visible_reply", "input": {"text": "Whole."}}],
+            "text": "A note.",
+        })
     );
 }
 

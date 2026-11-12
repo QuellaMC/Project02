@@ -1471,9 +1471,10 @@ data: {…}</code></pre>
         history. It ends in one of two ways: the <code>visible_reply</code>
         that names its <code>draftId</code> comes first, then the turn without
         that draft; or the turn without it comes alone, a draft withdrawn — a
-        round the parser refused, a reply whose write failed. The daemon
-        closes every draft a round opened before the round moves on, so none
-        is open at <code>turn_completed</code>.
+        round the parser refused, a reply whose write failed, a reply its
+        model let go, whose <code>draftId</code> the next draft may take. The
+        daemon closes every draft a round opened before the round moves on, so
+        none is open at <code>turn_completed</code>.
       </p>
 
       <table>

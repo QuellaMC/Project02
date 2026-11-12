@@ -1,9 +1,10 @@
 //! A streamed message, Anthropic's Messages protocol's events read until the
 //! one that stops it: each tool call's arguments are told as they arrive,
 //! under the name its block started with, so a draft can be shown while the
-//! model writes; each text block is kept, and thinking and any block of no
-//! use here are read past. Why the message stopped, its calls, its text and
-//! the tokens it took are what is judged.
+//! model writes, and so is Anthropic's fallback taking the message over,
+//! which lets the calls before it go; each text block is kept, and thinking
+//! and any block of no use here are read past. Why the message stopped, its
+//! calls, its text and the tokens it took are what is judged.
 
 use std::collections::BTreeMap;
 
@@ -14,6 +15,15 @@ use serde_json::{Map, Value};
 use crate::draft::Fragment;
 use crate::prompt::json_text;
 use crate::transport::{FailureCode, StreamError, malformed, provider_error, typed_event};
+
+/// What a message tells of its tool calls while it streams.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Told<'a> {
+    /// A piece of one call's arguments.
+    Piece(Fragment<'a>),
+    /// Every call so far is let go.
+    LetGo,
+}
 
 /// A tool call as its block left it: the name the block started with, and
 /// its arguments as written, or the input it started with when none were.
@@ -59,12 +69,12 @@ pub(super) struct MessageFold {
 
 impl MessageFold {
     /// Takes the next bytes, cut anywhere, and tells `heard` each tool
-    /// call's pieces: the message once an event stops it; what follows it
-    /// is not read.
+    /// call's pieces, and the calls let go: the message once an event stops
+    /// it; what follows it is not read.
     pub(super) fn push(
         &mut self,
         bytes: &[u8],
-        heard: &mut impl FnMut(Fragment<'_>),
+        heard: &mut impl FnMut(Told<'_>),
     ) -> Result<Option<Stopped>, StreamError> {
         for frame in self.frames.push(bytes) {
             if let Some(data) = frame.data.as_deref()
@@ -80,7 +90,7 @@ impl MessageFold {
     fn take(
         &mut self,
         data: &str,
-        heard: &mut impl FnMut(Fragment<'_>),
+        heard: &mut impl FnMut(Told<'_>),
     ) -> Result<Option<Stopped>, StreamError> {
         let (kind, event) = typed_event(data)?;
 
@@ -110,12 +120,12 @@ impl MessageFold {
     /// A block, started: a text block, or a tool call under its name, which
     /// a draft is told; thinking and any other block are read past. The
     /// block that marks Anthropic's fallback taking over lets go every call
-    /// before it: the model that declined left them unfinished, and only
-    /// its text is carried on.
+    /// before it, which a draft is told too: the model that declined left
+    /// them unfinished, and only its text is carried on.
     fn started(
         &mut self,
         event: &Map<String, Value>,
-        heard: &mut impl FnMut(Fragment<'_>),
+        heard: &mut impl FnMut(Told<'_>),
     ) -> Result<(), StreamError> {
         let index = index(event)?;
         let block = event.get("content_block");
@@ -134,11 +144,11 @@ impl MessageFold {
                     .map(str::to_owned);
 
                 if let Some(name) = &name {
-                    heard(Fragment {
+                    heard(Told::Piece(Fragment {
                         index,
                         name,
                         text: "",
-                    });
+                    }));
                 }
 
                 Block::Call {
@@ -150,6 +160,7 @@ impl MessageFold {
             Some("fallback") => {
                 self.blocks
                     .retain(|_, block| matches!(block, Block::Text(_)));
+                heard(Told::LetGo);
                 return Ok(());
             }
             _ => return Ok(()),
@@ -164,7 +175,7 @@ impl MessageFold {
     fn delta(
         &mut self,
         event: &Map<String, Value>,
-        heard: &mut impl FnMut(Fragment<'_>),
+        heard: &mut impl FnMut(Told<'_>),
     ) -> Result<(), StreamError> {
         let index = index(event)?;
         let delta = event.get("delta");
@@ -191,11 +202,11 @@ impl MessageFold {
                 if let Some(name) = name
                     && !piece.is_empty()
                 {
-                    heard(Fragment {
+                    heard(Told::Piece(Fragment {
                         index,
                         name,
                         text: piece,
-                    });
+                    }));
                 }
             }
             _ => {}
@@ -318,12 +329,14 @@ mod tests {
     fn read(pieces: &[&[u8]]) -> (Result<Option<Stopped>, StreamError>, Heard) {
         let mut fold = MessageFold::default();
         let mut heard = Vec::new();
-        let mut record = |fragment: Fragment<'_>| {
-            heard.push((
-                fragment.index,
-                fragment.name.to_owned(),
-                fragment.text.to_owned(),
-            ));
+        let mut record = |told: Told<'_>| {
+            if let Told::Piece(fragment) = told {
+                heard.push((
+                    fragment.index,
+                    fragment.name.to_owned(),
+                    fragment.text.to_owned(),
+                ));
+            }
         };
 
         for piece in pieces {
@@ -334,35 +347,6 @@ mod tests {
         }
 
         (Ok(None), heard)
-    }
-
-    /// A decline in the middle of a message, taken over by the fallback: the
-    /// call the declining model left unfinished is let go, its text stays,
-    /// and the fallback's own call is the answer's.
-    #[test]
-    fn a_fallback_taking_over_lets_go_the_calls_before_it_and_keeps_the_text() {
-        let stream = concat!(
-            "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":7}}}\n\n",
-            "data: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"A note. \"}}\n\n",
-            "data: {\"type\":\"content_block_start\",\"index\":1,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_a\",\"name\":\"visible_reply\",\"input\":{}}}\n\n",
-            "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"text\\\":\\\"Half a\"}}\n\n",
-            "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"fallback\",\"from\":{\"model\":\"claude-opus-5-5\"},\"to\":{\"model\":\"claude-opus-4-8\"}}}\n\n",
-            "data: {\"type\":\"content_block_start\",\"index\":3,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_b\",\"name\":\"visible_reply\",\"input\":{}}}\n\n",
-            "data: {\"type\":\"content_block_delta\",\"index\":3,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"text\\\":\\\"Whole.\\\"}\"}}\n\n",
-            "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":9}}\n\n",
-            "data: {\"type\":\"message_stop\"}\n\n",
-        );
-        let (stopped, _) = read(&[stream.as_bytes()]);
-        let stopped = stopped.unwrap().unwrap();
-
-        assert_eq!(
-            stopped.calls,
-            [Call {
-                name: Some("visible_reply".to_owned()),
-                arguments: "{\"text\":\"Whole.\"}".to_owned(),
-            }]
-        );
-        assert_eq!(stopped.text, "A note. ");
     }
 
     fn call(name: &str, arguments: &str) -> Call {

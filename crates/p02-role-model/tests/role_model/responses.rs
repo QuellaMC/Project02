@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use p02_contracts::{
     ChatFunctionCall, ChatMessage, ChatToolCall, Invocation, ProviderAnswer, ProviderName,
-    ReplyDelta, RoleModelAdapter, TextCompletion, TextCompletionRequest, ToolCallId,
+    ReplyDraft, RoleModelAdapter, TextCompletion, TextCompletionRequest, ToolCallId,
 };
 use p02_role_model::{
     ChatgptSettings, OpenaiSettings, PlanAccess, PlanSignIn, ServiceSettings, select_adapter,
@@ -15,7 +15,7 @@ use p02_role_model::{
 use serde_json::{Value, json};
 
 use crate::stub::{Answer, Stub};
-use crate::support::wire;
+use crate::support::{piece, wire};
 
 const KEY: &str = "sk-fixture-key";
 
@@ -185,7 +185,7 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
     ));
 
     let heard = Mutex::new(Vec::new());
-    let listener = |delta: ReplyDelta| heard.lock().unwrap().push(delta.text);
+    let listener = |draft: ReplyDraft| heard.lock().unwrap().push(draft);
     let answer = adapter(&stub)
         .invoke(&Invocation::new(&messages, &tools).with_reply_listener(&listener))
         .await;
@@ -220,7 +220,7 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
             "max_output_tokens": 32_768,
         })
     );
-    assert_eq!(*heard.lock().unwrap(), ["Hel", "lo."]);
+    assert_eq!(*heard.lock().unwrap(), [piece("Hel"), piece("lo.")]);
 
     let ProviderAnswer::Answered {
         output,
@@ -514,7 +514,7 @@ async fn a_round_on_a_plan_goes_out_as_codex_sends_it_and_its_answer_is_read_fro
     ));
 
     let heard = Mutex::new(Vec::new());
-    let listener = |delta: ReplyDelta| heard.lock().unwrap().push(delta.text);
+    let listener = |draft: ReplyDraft| heard.lock().unwrap().push(draft);
     let answer = plan(&stub, &Arc::new(SignIn::default()))
         .invoke(&Invocation::new(&messages, &tools).with_reply_listener(&listener))
         .await;
@@ -567,7 +567,7 @@ async fn a_round_on_a_plan_goes_out_as_codex_sends_it_and_its_answer_is_read_fro
             "prompt_cache_key": session,
         })
     );
-    assert_eq!(*heard.lock().unwrap(), ["Hel", "lo."]);
+    assert_eq!(*heard.lock().unwrap(), [piece("Hel"), piece("lo.")]);
 
     let ProviderAnswer::Answered {
         output,

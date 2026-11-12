@@ -19,14 +19,14 @@ use reqwest::header::{HeaderName, HeaderValue};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::draft::{Fragment, ReplyDrafts};
+use crate::draft::ReplyDrafts;
 use crate::prompt::{
     CallIds, ToolNameMapping, json_text, provider_name, provider_names, runtime_name,
 };
 use crate::transport::{
     self, Access, BuildAdapterError, Client, FailureCode, Fault, MAX_OUTPUT_TOKENS, Silence, said,
 };
-use stream::{MessageFold, Stopped};
+use stream::{MessageFold, Stopped, Told};
 
 /// What a failure's words call the service.
 const CLAUDE: &str = "Claude";
@@ -117,13 +117,13 @@ impl AnthropicAdapter {
         })
     }
 
-    /// Sends `body` and reads the message it streams back to its stop, each
-    /// piece of a call's arguments told to `heard`, with the status that
-    /// answered; or why there is none.
+    /// Sends `body` and reads the message it streams back to its stop, what
+    /// it tells of its calls told to `heard`, with the status that answered;
+    /// or why there is none.
     async fn ask(
         &self,
         body: &[u8],
-        heard: &mut impl FnMut(Fragment<'_>),
+        heard: &mut impl FnMut(Told<'_>),
     ) -> Result<(Stopped, u16), Fault> {
         let http = self.http.get()?;
         let mut silence = Silence::start(self.silence);
@@ -145,7 +145,10 @@ impl AnthropicAdapter {
         drafts: &mut ReplyDrafts<'_>,
     ) -> Result<ProviderAnswer, Fault> {
         let (stopped, status) = self
-            .ask(&request.bytes, &mut |fragment| drafts.hear(fragment))
+            .ask(&request.bytes, &mut |told| match told {
+                Told::Piece(fragment) => drafts.hear(fragment),
+                Told::LetGo => drafts.let_go(),
+            })
             .await?;
 
         answer(stopped, &request.mappings).map_err(|(code, message)| Fault {

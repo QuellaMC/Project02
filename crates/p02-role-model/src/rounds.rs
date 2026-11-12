@@ -14,7 +14,7 @@ use p02_characters::Persona;
 use p02_contracts::{
     CharacterDecision, ConversationToolCall, ConversationTurn, DecisionContext, DecisionRejection,
     DecisionRejectionReason, DecisionResult, Invocation, ModelToolCall, PluginToolDefinitions,
-    ProviderAnswer, ReplyDelta, RoleModelAdapter, ToolCallId, ToolCallResult, ToolRound,
+    ProviderAnswer, ReplyDraft, RoleModelAdapter, ToolCallId, ToolCallResult, ToolRound,
 };
 use p02_core::{EventIdentity, VisibleMessage, VisibleText};
 use p02_shared::Identifier;
@@ -236,7 +236,10 @@ impl<'a> Rounds<'a> {
         let round = drafts.round();
         let note = self.refusal_note.take();
         let prompt = render(&self.envelope, self.history, self.persona, note.as_deref());
-        let listener = |delta: ReplyDelta| drafts.speak(delta);
+        let listener = |draft: ReplyDraft| match draft {
+            ReplyDraft::Delta(delta) => drafts.speak(delta),
+            ReplyDraft::LetGo => drafts.let_go(),
+        };
         let invocation = Invocation::new(prompt.messages(), prompt.tools())
             .with_history(self.history)
             .with_reply_listener(&listener);

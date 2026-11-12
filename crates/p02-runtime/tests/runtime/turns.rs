@@ -100,6 +100,34 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
     );
 }
 
+/// A reply its model drafts and lets go, as when another model takes its
+/// answer over, is withdrawn there and then, and the reply drafted after it
+/// is the one its commit replaces.
+#[tokio::test]
+async fn a_draft_its_model_lets_go_is_withdrawn_and_the_next_takes_its_place() {
+    let mut chat = Chat::new(&[]);
+
+    chat.model.script([Round::says(reply(&["Whole."]))
+        .drafting(0, &["Half a"])
+        .letting_go()
+        .drafting(0, &["Who", "le."])]);
+
+    let delivery = chat.say("Hello?", "hello").await;
+
+    assert!(matches!(delivery, Delivery::Completed(_)), "{delivery:?}");
+    assert_eq!(
+        chat.heard.take(),
+        [
+            "user_message Hello?",
+            "reply_delta 1.0 Half a",
+            "reply_withdrawn 1.0",
+            "reply_delta 1.0 Who",
+            "reply_delta 1.0 le.",
+            "visible_reply 1.0 Whole."
+        ]
+    );
+}
+
 /// A blank text is refused with its event and the refusal recorded,
 /// nothing committed and the model never asked, and the next line
 /// completes.
