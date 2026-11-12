@@ -35,6 +35,7 @@ use crate::character::{CharacterHandle, model};
 use crate::history::{self, HistoryPage};
 use crate::outcome::{duplicate, package_report, storage_failure};
 use crate::pairing::Pairings;
+use crate::phone::accounts;
 use crate::reconcile::{Reconciler, Roster, settings_now};
 
 type Factory =
@@ -389,8 +390,9 @@ impl Daemon {
     }
 
     /// The daemon's whole state, read now: the roster as the disk says it
-    /// is, each character's state as her actor published it, and the
-    /// connectors on the stream, each with its bots.
+    /// is, each character's state as her actor published it, the
+    /// connectors on the stream, each with its bots, and the accounts her
+    /// phone knows, each with whether the home's settings hold its key.
     pub async fn health(&self) -> Health {
         let daemon = self.clone();
 
@@ -442,6 +444,7 @@ impl Daemon {
                     })
                     .collect()
             },
+            accounts: accounts(&self.inner.world),
         }
     }
 

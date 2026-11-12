@@ -134,6 +134,7 @@ const health: GatewayHealth = {
     },
   ],
   connectors: [],
+  accounts: [],
 };
 
 const mira = characterTarget('mira');

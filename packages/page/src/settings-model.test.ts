@@ -287,6 +287,7 @@ const nova: CharacterSummary = {
 function health(
   connected: boolean,
   bots: GatewayHealth['connectors'][number]['bots'] = [],
+  accounts: GatewayHealth['accounts'] = [],
 ): GatewayHealth {
   return {
     protocolVersion: 13,
@@ -295,6 +296,17 @@ function health(
     packages: {diagnostics: []},
     characters: [mira, nova],
     connectors: [{id: 'telegram', connected, bots}],
+    accounts,
+  };
+}
+
+/** The person's Tavily account as health says it, its key set or not. */
+function tavily(hasKey: boolean): GatewayHealth['accounts'][number] {
+  return {
+    id: 'tavily',
+    name: 'Tavily',
+    hasKey,
+    keyFrom: 'Get a free key at tavily.com.',
   };
 }
 
@@ -446,11 +458,12 @@ describe('settings model', () => {
     });
   });
 
-  it('says the sidebar: the name in effect, each character off or not, AI Model by its service or Set Up, Telegram on or off, a plugin that says it is an account set up once by its first choice, Set Up while a character wants it, off otherwise, and a dot on what has a problem', () => {
+  it('says the sidebar: the name in effect, each character off or not, AI Model by its service or Set Up, Telegram on or off, a plugin that says it is an account set up once by its first choice, Set Up while a character wants it, off otherwise, an account her apps use on once its key is set and not at all before, and a dot on what has a problem', () => {
     const sidebar = (
       views: Readonly<Record<string, ConfigView>>,
       found: Parameters<typeof sidebarOf>[2] = nothingFound,
-    ) => sidebarOf(settingsOf(views), [mira, nova], found, true);
+      accounts: GatewayHealth['accounts'] = [],
+    ) => sidebarOf(settingsOf(views), health(true, [], accounts), found, true);
     const ready = sidebar({
       home: homeView({sections: [memory(), phone, telegram]}),
       'character:mira': herView(),
@@ -493,6 +506,23 @@ describe('settings model', () => {
     });
 
     expect(unwanted.connections[2]).toMatchObject({value: 'Off', dot: false});
+
+    const keyed = (hasKey: boolean) =>
+      sidebar({home: homeView()}, nothingFound, [tavily(hasKey)]).connections;
+
+    expect(keyed(true).map(entry => [entry.label, entry.value])).toEqual([
+      ['AI Model', 'NVIDIA'],
+      ['Telegram', 'On'],
+      ['Memory', 'Mem0 Cloud'],
+      ['Tavily', 'On'],
+    ]);
+    expect(keyed(true).at(-1)).toMatchObject({
+      page: {kind: 'account', accountId: 'tavily'},
+      icon: 'key',
+      tint: 'graphite',
+      dot: false,
+    });
+    expect(keyed(false).map(entry => entry.label)).not.toContain('Tavily');
 
     // A plugin with no entry of its own, whether it has home settings or
     // not, has its problem said on Advanced.
@@ -842,6 +872,22 @@ describe('settings model', () => {
     };
 
     expect(parentOf(appFile)).toEqual({kind: 'get-apps', characterId: 'mira'});
+
+    // An account's page goes back to the app it was opened from, and is a
+    // page of the sidebar's own when opened from Connections.
+    const fromApp: SettingsPage = {
+      kind: 'account',
+      accountId: 'tavily',
+      from: {characterId: 'mira', appId: 'search'},
+    };
+
+    expect(parentOf(fromApp)).toEqual({
+      kind: 'app',
+      characterId: 'mira',
+      appId: 'search',
+    });
+    expect(marks(fromApp, {kind: 'character', characterId: 'mira'})).toBe(true);
+    expect(parentOf({kind: 'account', accountId: 'tavily'})).toBeUndefined();
     expect(parentOf({kind: 'you'})).toBeUndefined();
     expect(
       marks(

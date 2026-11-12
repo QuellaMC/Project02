@@ -24,6 +24,7 @@ import {
 import type {Ctx} from './settings-fields.tsx';
 import {findings, marks, sidebarOf} from './settings-model.ts';
 import {
+  AccountPage,
   AdvancedPage,
   ConnectionPage,
   ModelPage,
@@ -100,6 +101,8 @@ function PageShown({
       return <TelegramPage ctx={ctx} />;
     case 'connection':
       return <ConnectionPage ctx={ctx} pluginId={page.pluginId} />;
+    case 'account':
+      return <AccountPage ctx={ctx} page={page} />;
     case 'advanced':
       return <AdvancedPage ctx={ctx} />;
     case 'feature':
@@ -135,8 +138,7 @@ function Sidebar({
   readonly page: SettingsPage;
 }) {
   const {state, settings, session, findings: found} = ctx;
-  const characters = state.health?.characters ?? [];
-  const sidebar = sidebarOf(settings, characters, found, state.advanced);
+  const sidebar = sidebarOf(settings, state.health, found, state.advanced);
   const go = (to: SettingsPage) => () => {
     session.goTo(to);
   };

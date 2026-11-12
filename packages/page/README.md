@@ -29,8 +29,9 @@ for the person's answer is asked, every confirmation of whichever
 character and every pairing request, one at a time in one spot.
 The one that expires first is in front, with up to two more as edges
 behind it, and its card says who asks and what, in words `ask-words.ts`
-makes, pure and tested in Node: her ask to install or update an app, from
-its preview; her ask to change one of her settings, in the words her
+makes, pure and tested in Node: her ask to install an app, from its
+preview, with what the app may do, a clause each, or to update one; her
+ask to change one of her settings, in the words her
 settings page uses, which are read for it; someone new on a connector; and
 for a preview the page cannot read, the tool and what it would do behind
 Details. It counts down the time left, and Allow and Don't Allow answer
@@ -112,8 +113,12 @@ it again for the daemon to judge afresh. A character a person added has
 Remove at the bottom of her page, which asks first. The roster is
 health's, so a character added or removed anywhere appears or goes here,
 and a page of one who is gone is left for You. The sidebar's connections
-are AI Model, Telegram, and each plugin whose page names its entry there,
-as Long-Term Memory's does.
+are AI Model, Telegram, each plugin whose page names its entry there, as
+Long-Term Memory's does, and each account of the person's that her apps
+use, once health says its key is set; one with no key is reached from an
+app that uses it, and nowhere else. An account's page has the one field of
+its key, pasted and never shown back, and where a key comes from, and,
+opened from an app's page, goes back to it.
 
 While her settings give her a phone, her page has her apps, over the
 daemon's verbs for them: an icon for each app on her phone but the App
@@ -126,8 +131,11 @@ the newest read of each lands. An app's page says whose phone it is on,
 its version and where it came from; offers Update while the App Store
 says it has a newer version, since the page compares no versions; Can
 Wake Her Up for an app that says it wakes her; and Remove App, which asks
-first, for one her phone does not come with. One her phone no longer
-lists, removed here or anywhere, gives way to her page. Get More Apps
+first, for one her phone does not come with. It says what the app may do,
+a line each, and for an app that uses an account of the person's, the
+account: by its name once her phone has its key, else Set Up, either
+opening the account's page. One her phone no longer lists, removed here
+or anywhere, gives way to her page. Get More Apps
 narrows the App Store's apps by a search of their names and summaries,
 each row ending in Get, Update or Installed; Get and Update give her the
 app at once, and a refusal is a notice. An app from a file is shown as

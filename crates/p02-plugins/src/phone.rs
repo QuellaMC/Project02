@@ -75,19 +75,7 @@ pub(crate) fn create(_input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>
 pub(crate) fn factory(catalog: Arc<AppCatalog>, internet: Arc<AppInternet>) -> Box<Factory> {
     Box::new(move |input: &FactoryInput<'_>| {
         let phone = Phone::bundled().map_err(|error| PluginError::new(error_chain(error)))?;
-        let keys = Account::all()
-            .iter()
-            .filter_map(|account| {
-                let text = input
-                    .config()
-                    .value(&key_field(account))
-                    .and_then(Value::as_str)
-                    .map(str::trim)
-                    .filter(|text| !text.is_empty())?;
-
-                Some((account, Key::new(text)?))
-            })
-            .collect();
+        let keys = keys(|field| input.config().value(field));
         let mut tools = vec![
             tool(
                 OPEN,
@@ -147,6 +135,34 @@ pub(crate) fn factory(catalog: Arc<AppCatalog>, internet: Arc<AppInternet>) -> B
 /// `account`.
 fn key_field(account: &Account) -> String {
     format!("{}ApiKey", account.id())
+}
+
+/// The person's key for each account the phone's settings, which
+/// `value_of` reads by field name, hold one for: its text, trimmed, when a
+/// header can carry it.
+fn keys<'v>(value_of: impl Fn(&str) -> Option<&'v Value>) -> Vec<(&'static Account, Key)> {
+    Account::all()
+        .iter()
+        .filter_map(|account| {
+            let text = value_of(&key_field(account))
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|text| !text.is_empty())?;
+
+            Some((account, Key::new(text)?))
+        })
+        .collect()
+}
+
+/// The accounts whose key the person gave her phone, among the phone's
+/// settings `value_of` reads by field name, as her phone takes a key: what
+/// a client is told of an account says what her phone then does.
+#[must_use]
+pub fn keyed_accounts<'v>(value_of: impl Fn(&str) -> Option<&'v Value>) -> Vec<&'static Account> {
+    keys(value_of)
+        .into_iter()
+        .map(|(account, _)| account)
+        .collect()
 }
 
 #[derive(Debug)]
@@ -462,7 +478,7 @@ fn named(name: &str, id: &Identifier) -> String {
 /// the line she knows it by.
 fn noted(app: &Listed, on_phone: &OnPhone, person: Option<&SpeakerName>) -> String {
     let id = &app.id;
-    let named = if app.wakes && !on_phone.may_wake(app) {
+    let named = if app.asks.wakes() && !on_phone.may_wake(app) {
         format!(
             "{} (\"{id}\", which {} said may not wake you)",
             app.name,

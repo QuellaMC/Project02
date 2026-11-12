@@ -1,10 +1,11 @@
 /**
  * Her apps in the settings window: what her page's Apps group, an app's
- * page, Get More Apps and an app's file show, from what the daemon last
- * said of her phone and of the App Store's apps for her, and how each read
- * and each answer to the person's act lands in the window. How an app of
- * the App Store stands on her phone is the daemon's word: the page compares
- * no versions. Nothing here touches the DOM.
+ * page with the person's account it uses, Get More Apps and an app's file
+ * show, from what the daemon last said of her phone and of the App Store's
+ * apps for her, and how each read and each answer to the person's act
+ * lands in the window. How an app of the App Store stands on her phone is
+ * the daemon's word: the page compares no versions. Nothing here touches
+ * the DOM.
  */
 import type {
   AppInstallOutcome,
@@ -19,6 +20,7 @@ import type {
 } from '@project02/wire/contract';
 import {
   characterTarget,
+  home,
   sectionOf,
   settingsOpened,
   windowPage,
@@ -72,7 +74,27 @@ export function askToInstallRow(characterId: string): Row {
   };
 }
 
-/** The character whose apps a page is about: her page, an app's page of hers, Get More Apps and an app's file for her. */
+/**
+ * The home's field of her phone's that holds the person's key for the
+ * account `accountId`, as her phone reads it: one for every character.
+ */
+export function accountKeyRow(accountId: string): Row {
+  return {
+    target: home,
+    place: {
+      kind: 'field',
+      namespace: 'plugins',
+      id: phonePlugin,
+      name: `${accountId}ApiKey`,
+    },
+  };
+}
+
+/**
+ * The character whose apps a page is about: her page, an app's page of
+ * hers, Get More Apps, an app's file for her, and the page of an account
+ * opened from an app of hers, whose Back goes to that app.
+ */
 export function appsCharacterOf(
   page: SettingsPage | undefined,
 ): string | undefined {
@@ -83,6 +105,8 @@ export function appsCharacterOf(
     case 'get-apps':
     case 'app-file':
       return page.characterId;
+    case 'account':
+      return page.from?.characterId;
     default:
       return undefined;
   }
@@ -135,6 +159,20 @@ export type AppShown = {
   readonly update?: string;
   /** Whether Remove App is offered: not for an app her phone comes with. */
   readonly removable: boolean;
+  /** The row of the person's account it uses, for an app that uses one. */
+  readonly account?: AccountRow;
+};
+
+/**
+ * The row of the person's account an app uses: the account's name once
+ * the person gave her phone its key, else Set Up, either opening the
+ * account's page, whose Back returns to the app; and the line under it.
+ */
+export type AccountRow = {
+  readonly name: string;
+  readonly hasKey: boolean;
+  readonly opens: SettingsPage;
+  readonly line: string;
 };
 
 const sourceWords: Readonly<Record<AppSource, string>> = {
@@ -142,6 +180,19 @@ const sourceWords: Readonly<Record<AppSource, string>> = {
   catalog: 'from the App Store',
   file: 'from a file',
 };
+
+/** Her app `appId` as her phone was last read: none while it does not list the app. */
+export function herApp(
+  settings: Settings,
+  characterId: string,
+  appId: string,
+): PhoneApp | undefined {
+  const phone = settings.phones.get(characterId);
+
+  return phone?.status === 'ok'
+    ? phone.apps.find(listed => listed.id === appId)
+    : undefined;
+}
 
 /**
  * The page of her app `appId`, from her phone as last read: none while it
@@ -153,11 +204,7 @@ export function appShownOf(
   her: {readonly characterId: string; readonly name: string},
   appId: string,
 ): AppShown | undefined {
-  const phone = settings.phones.get(her.characterId);
-  const app =
-    phone?.status === 'ok'
-      ? phone.apps.find(listed => listed.id === appId)
-      : undefined;
+  const app = herApp(settings, her.characterId, appId);
 
   if (app === undefined) {
     return undefined;
@@ -168,6 +215,7 @@ export function appShownOf(
     store?.status === 'ok'
       ? store.apps.find(entry => entry.id === appId)
       : undefined;
+  const {account} = app;
 
   return {
     app,
@@ -175,6 +223,20 @@ export function appShownOf(
     ...(app.wakes ? {wake: wakeWords(app)} : {}),
     ...(listed?.status === 'update' ? {update: listed.version} : {}),
     removable: app.source !== 'built_in',
+    ...(account === undefined
+      ? {}
+      : {
+          account: {
+            name: account.name,
+            hasKey: account.hasKey,
+            opens: {
+              kind: 'account',
+              accountId: account.id,
+              from: {characterId: her.characterId, appId},
+            },
+            line: `What she does in it uses your ${account.name} account.`,
+          },
+        }),
   };
 }
 

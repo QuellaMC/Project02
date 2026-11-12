@@ -23,6 +23,7 @@ const reminders = {
   tint: 'orange',
   version: '1.1.0',
   wakes: true,
+  reachesInternet: false,
 };
 
 /** Her ask, as the confirmation that asks the person carries it, with `shape` made to it. */
@@ -141,7 +142,11 @@ const alex: PairingRequest = {
 };
 
 describe('what the card that asks says', () => {
-  it("her ask to install an app: on the app's own tile, who asks, from the App Store, and whether it can wake her; to update one, the version it replaces, and that what it kept stays; and where it was asked when that was not a page", () => {
+  it("her ask to install an app: on the app's own tile, who asks, from the App Store, and what it may do, a clause each, joined as a sentence joins them; to update one, the version it replaces, and that what it kept stays; and where it was asked when that was not a page", () => {
+    const said = (app: Readonly<Record<string, JsonValue>>) =>
+      confirmationWords(pending(install({app: {...reminders, ...app}})), 'Mira')
+        .sentence;
+
     expect(confirmationWords(pending(install()), 'Mira')).toEqual({
       tile: {icon: 'list', tint: 'orange'},
       asker: {id: 'mira', name: 'Mira'},
@@ -149,12 +154,18 @@ describe('what the card that asks says', () => {
       sentence:
         'From the App Store. It keeps its own data and can wake her up.',
     });
-    expect(
-      confirmationWords(
-        pending(install({app: {...reminders, wakes: false}})),
-        'Mira',
-      ).sentence,
-    ).toBe('From the App Store. It keeps its own data.');
+    expect(said({wakes: false})).toBe(
+      'From the App Store. It keeps its own data.',
+    );
+    expect(said({wakes: false, reachesInternet: true})).toBe(
+      'From the App Store. It keeps its own data and reaches the internet.',
+    );
+    expect(said({wakes: false, reachesInternet: true, account: 'Tavily'})).toBe(
+      'From the App Store. It keeps its own data, reaches the internet and uses your Tavily account.',
+    );
+    expect(said({reachesInternet: true, account: 'Tavily'})).toBe(
+      'From the App Store. It keeps its own data, can wake her up, reaches the internet and uses your Tavily account.',
+    );
     expect(
       confirmationWords(
         pending(install({replaces: '1.0.0'}), {

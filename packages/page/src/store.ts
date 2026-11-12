@@ -103,6 +103,16 @@ export type SettingsPage =
   | {readonly kind: 'telegram'}
   /** A plugin's account, set up once for everyone. */
   | {readonly kind: 'connection'; readonly pluginId: string}
+  /**
+   * An account of the person's that her apps use, set up once for
+   * everyone: from Connections, or from the page of an app of hers that
+   * uses it, which its Back returns to.
+   */
+  | {
+      readonly kind: 'account';
+      readonly accountId: string;
+      readonly from?: {readonly characterId: string; readonly appId: string};
+    }
   | {readonly kind: 'advanced'}
   /** A plugin's own page for one character, from her page. */
   | {
@@ -1223,6 +1233,8 @@ function characterOfPage(page: SettingsPage): string | undefined {
       return page.target.scope === 'character'
         ? page.target.characterId
         : undefined;
+    case 'account':
+      return page.from?.characterId;
     default:
       return undefined;
   }

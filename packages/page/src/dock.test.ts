@@ -40,6 +40,7 @@ function live(): WebState {
       packages: {diagnostics: []},
       characters: [character('mira', 'Mira'), character('nova', 'Nova')],
       connectors: [],
+      accounts: [],
     },
     confirmations: [],
     pairings: [],

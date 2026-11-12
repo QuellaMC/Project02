@@ -34,7 +34,11 @@ const settingKind = 'runtime_plugin_config_change';
 const plainArt: Art = {icon: 'grid', tint: 'gray'};
 
 export type InstallAsk = {
-  /** The app as the App Store lists it: its id, name, tile and version, and whether it says it wakes her. */
+  /**
+   * The app as the App Store lists it: its id, name, tile and version,
+   * whether it says it wakes her, whether it reaches the internet, and the
+   * name of the person's account it uses there, when it uses one.
+   */
   readonly app: {
     readonly id: string;
     readonly name: string;
@@ -42,6 +46,8 @@ export type InstallAsk = {
     readonly tint: string;
     readonly version: string;
     readonly wakes: boolean;
+    readonly reachesInternet: boolean;
+    readonly account?: string;
   };
   /** The version of it on her phone that installing it updates, when there is one. */
   readonly replaces?: string;
@@ -174,9 +180,28 @@ function installSaid(name: string, {app, replaces}: InstallAsk): Said {
     title: `${name} wants to ${replaces === undefined ? 'install' : 'update'} ${app.name}`,
     sentence:
       replaces === undefined
-        ? `From the App Store. ${app.wakes ? 'It keeps its own data and can wake her up.' : 'It keeps its own data.'}`
+        ? `From the App Store. It ${joined(mayDo(app))}.`
         : `From the App Store. Version ${app.version} replaces ${replaces}, and what it kept stays.`,
   };
+}
+
+/** What an app may do, a clause each: keeping its own data is every app's. */
+function mayDo(app: InstallAsk['app']): readonly string[] {
+  return [
+    'keeps its own data',
+    ...(app.wakes ? ['can wake her up'] : []),
+    ...(app.reachesInternet ? ['reaches the internet'] : []),
+    ...(app.account === undefined ? [] : [`uses your ${app.account} account`]),
+  ];
+}
+
+/** Clauses joined as a sentence joins them: the last by "and", the rest by commas. */
+function joined(clauses: readonly string[]): string {
+  const last = clauses.at(-1) ?? '';
+
+  return clauses.length < 2
+    ? last
+    : `${clauses.slice(0, -1).join(', ')} and ${last}`;
 }
 
 /**
@@ -261,15 +286,26 @@ function appOf(app: JsonValue | undefined): InstallAsk['app'] | undefined {
     return undefined;
   }
 
-  const {id, name, icon, tint, version, wakes} = app;
+  const {id, name, icon, tint, version, wakes, reachesInternet, account} = app;
 
   return typeof id === 'string' &&
     typeof name === 'string' &&
     typeof icon === 'string' &&
     typeof tint === 'string' &&
     typeof version === 'string' &&
-    typeof wakes === 'boolean'
-    ? {id, name, icon, tint, version, wakes}
+    typeof wakes === 'boolean' &&
+    typeof reachesInternet === 'boolean' &&
+    (account === undefined || typeof account === 'string')
+    ? {
+        id,
+        name,
+        icon,
+        tint,
+        version,
+        wakes,
+        reachesInternet,
+        ...(account === undefined ? {} : {account}),
+      }
     : undefined;
 }
 

@@ -52,6 +52,7 @@ const clock: PhoneApp = {
   tint: 'graphite',
   wakes: true,
   mayWake: true,
+  itMay: ['Keep its own data', 'Wake her when something is due'],
   views: [
     {id: 'world', title: 'World Clock', icon: 'globe'},
     {id: 'alarms', title: 'Alarms', icon: 'alarm'},
@@ -75,6 +76,7 @@ function health(...characters: readonly CharacterSummary[]): GatewayHealth {
     packages: {diagnostics: []},
     characters,
     connectors: [],
+    accounts: [],
   };
 }
 
@@ -152,6 +154,7 @@ const store: PhoneApp = {
   tint: 'blue',
   wakes: false,
   mayWake: true,
+  itMay: ['Keep its own data'],
   views: [{id: 'apps', title: 'App Store', icon: 'bag'}],
   opensOn: 'apps',
 };
@@ -179,6 +182,7 @@ function askFor(
           tint: 'orange',
           version: '1.0.0',
           wakes: true,
+          reachesInternet: false,
         },
         source: 'catalog',
       },

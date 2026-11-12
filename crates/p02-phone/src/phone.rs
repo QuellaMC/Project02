@@ -306,7 +306,7 @@ impl Phone {
         for app in on_phone
             .apps
             .iter()
-            .filter(|app| app.wakes && on_phone.may_wake(app))
+            .filter(|app| app.asks.wakes && on_phone.may_wake(app))
         {
             set.extend(
                 Kept::read(files, &app.id)?

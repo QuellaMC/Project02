@@ -17,6 +17,7 @@ import {
   storeRows,
   stripOf,
   unreadWarning,
+  type AccountRow,
 } from './her-apps.ts';
 import {iconOf, tintOf} from './look.ts';
 import {
@@ -108,8 +109,9 @@ export function HerApps({
 /**
  * An app's page under hers: its tile and name, with whose phone it is on,
  * its version and where it came from; Update Available while the App
- * Store has a newer version; Can Wake Her Up for an app that says it wakes
- * her; and Remove App for one her phone does not come with.
+ * Store has a newer version; what it may do; Can Wake Her Up for an app
+ * that says it wakes her; the person's account it uses, for one that uses
+ * one; and Remove App for one her phone does not come with.
  */
 export function AppPage({
   ctx,
@@ -164,6 +166,7 @@ export function AppPage({
           </Cell>
         </Group>
       )}
+      <ItMay lines={app.itMay} />
       {shown.wake === undefined ? null : (
         <Group footer={shown.wake}>
           <Cell kind="switch">
@@ -178,10 +181,62 @@ export function AppPage({
           </Cell>
         </Group>
       )}
+      {shown.account === undefined ? null : (
+        <AccountGroup ctx={ctx} account={shown.account} />
+      )}
       {shown.removable ? (
         <RemoveApp ctx={ctx} page={page} app={app.name} her={name} />
       ) : null}
     </>
+  );
+}
+
+/** What an app may do, a line each on a shield, as its page and the preview of its file list them. */
+function ItMay({lines}: {readonly lines: readonly string[]}) {
+  return (
+    <Group title="It May">
+      {lines.map(line => (
+        <Cell kind="note" key={line}>
+          <Tile icon="shield" tint="gray" size="note" />
+          <span className="label">{line}</span>
+        </Cell>
+      ))}
+    </Group>
+  );
+}
+
+/**
+ * The person's account an app uses: its name with a chevron once its key
+ * is set, else Set Up, either opening the account's page; and under it,
+ * that what she does in the app uses the account.
+ */
+function AccountGroup({
+  ctx,
+  account,
+}: {
+  readonly ctx: Ctx;
+  readonly account: AccountRow;
+}) {
+  const open = () => {
+    ctx.session.goTo(account.opens);
+  };
+
+  return (
+    <Group footer={account.line}>
+      <Cell kind="switch">
+        <Label name="Account" />
+        {account.hasKey ? (
+          <button type="button" className="drill" onClick={open}>
+            {account.name}
+            <Chevron />
+          </button>
+        ) : (
+          <button type="button" className="button-setup" onClick={open}>
+            Set Up
+          </button>
+        )}
+      </Cell>
+    </Group>
   );
 }
 
@@ -485,14 +540,7 @@ export function AppFilePage({
         />
         <p className="preview-about">{preview.summary}</p>
       </div>
-      <Group title="It May">
-        {preview.itMay.map(line => (
-          <Cell kind="note" key={line}>
-            <Tile icon="shield" tint="gray" size="note" />
-            <span className="label">{line}</span>
-          </Cell>
-        ))}
-      </Group>
+      <ItMay lines={preview.itMay} />
       {replaces === undefined ? null : <p className="page-note">{replaces}</p>}
       <p className="app-warning">{unreadWarning}</p>
       <div className="preview-end">

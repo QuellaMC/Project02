@@ -82,7 +82,7 @@ fn the_bundled_phone_holds_the_clock_which_opens_on_its_alarms() {
             listed.name.as_str(),
             listed.summary.as_str(),
             listed.version.as_str(),
-            listed.wakes,
+            listed.asks.wakes(),
             listed.source,
         ),
         (

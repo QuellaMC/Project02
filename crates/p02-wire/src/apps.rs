@@ -108,7 +108,8 @@ pub enum AppPreviewOutcome {
 #[ts(optional_fields)]
 pub enum AppInstallOutcome {
     Ok {
-        app: PhoneApp,
+        // Boxed, since an app is many times the size of a refusal.
+        app: Box<PhoneApp>,
         #[serde(skip_serializing_if = "Option::is_none")]
         replaced: Option<String>,
     },

@@ -40,6 +40,12 @@ export type AnswerBody = { decision: Answer, };
 export type AnswerOutcome = { "status": "answered" } | { "status": "expired" } | { "status": "unknown" };
 
 /**
+ * An account of the person's that an app uses: the id her phone knows it
+ * by, its name, and whether the person gave her phone its key.
+ */
+export type AppAccount = { id: Identifier, name: string, hasKey: boolean, };
+
+/**
  * What came of giving her an app, from the App Store or from a file: the
  * app as her phone now lists it, and the version of it that it replaced,
  * when it replaced one; or why it was not given.
@@ -343,7 +349,12 @@ config: ConfigHealth,
 /**
  * The packages discovery could not publish, which the roster lacks.
  */
-packages: PackagesHealth, characters: ReadonlyArray<CharacterSummary>, connectors: ReadonlyArray<ConnectorPresence>, };
+packages: PackagesHealth, characters: ReadonlyArray<CharacterSummary>, connectors: ReadonlyArray<ConnectorPresence>, 
+/**
+ * The person's accounts her phone knows, which the home's settings
+ * hold the keys of.
+ */
+accounts: ReadonlyArray<PersonAccount>, };
 
 /**
  * The person's line into one conversation, with the two stamps its client
@@ -543,11 +554,19 @@ deadlineAt: number,
 turn?: TurnIdentity, };
 
 /**
+ * An account of the person's at a service her apps may use: the id her
+ * phone knows it by, its name, whether the person gave her phone its key,
+ * and where a key comes from, in a sentence.
+ */
+export type PersonAccount = { id: Identifier, name: string, hasKey: boolean, keyFrom: string, };
+
+/**
  * An app on her phone as her window draws it and her settings show it:
  * the line she knows it by, its version and where it came from; its icon
  * and the tint of its tile, names of the page's own set, which falls back
  * for one it does not know; whether it says it wakes her, and whether the
- * person lets it; its views, in its order; and the view it opens on.
+ * person lets it; what it may do, and the person's account it uses; its
+ * views, in its order; and the view it opens on.
  */
 export type PhoneApp = { id: Identifier, name: string, summary: string, version: string, source: AppSource, icon: string, tint: string, 
 /**
@@ -558,7 +577,15 @@ wakes: boolean,
  * Whether the person lets it wake her: yes unless they said it may
  * not.
  */
-mayWake: boolean, views: ReadonlyArray<AppView>, opensOn: Identifier, };
+mayWake: boolean, 
+/**
+ * What it may do, a line each, as the App Store says it.
+ */
+itMay: ReadonlyArray<string>, 
+/**
+ * The account of the person's it uses, when it uses one.
+ */
+account?: AppAccount, views: ReadonlyArray<AppView>, opensOn: Identifier, };
 
 /**
  * What she last did on her phone: the app, a few words in the past tense,

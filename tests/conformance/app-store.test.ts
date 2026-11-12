@@ -6,6 +6,7 @@ import {expect, it} from 'vitest';
 import {
   entryOf,
   fileOf,
+  lookup,
   publish,
   quiet,
   reminders,
@@ -286,6 +287,7 @@ it('store.install-approved: phone_install asks the person first, its preview say
           tint: 'orange',
           version: '1.0.0',
           wakes: true,
+          reachesInternet: false,
         },
         source: 'catalog',
       },
@@ -356,7 +358,7 @@ it('store.install-approved: phone_install asks the person first, its preview say
   ]);
 });
 
-it("store.not-installed: a denied ask leaves her phone as it was and she reads the host's refusal; an app the store does not have, the Clock, the store itself, an app whose file does not match its SHA-256 and one already on her phone are each refused to her in a sentence with nobody asked; with Ask to Install Apps off she is offered no such tool and still opens the store", async () => {
+it("store.not-installed: a denied ask, whose preview says the app reaches the internet on the person's Tavily account, leaves her phone as it was and she reads the host's refusal; an app the store does not have, the Clock, the store itself, an app whose file does not match its SHA-256 and one already on her phone are each refused to her in a sentence with nobody asked; with Ask to Install Apps off she is offered no such tool and still opens the store", async () => {
   const model = await startModelServer();
   const catalog = await startCatalogServer();
   const notes = quiet('notes', 'Notes', '1.0.0');
@@ -364,7 +366,7 @@ it("store.not-installed: a denied ask leaves her phone as it was and she reads t
 
   publish(
     catalog,
-    [reminders],
+    [lookup],
     [notes],
     [broken, entryOf(broken, 'another file')],
   );
@@ -382,18 +384,29 @@ it("store.not-installed: a denied ask leaves her phone as it was and she reads t
   });
 
   model.answer(
-    calling(['phone_install', {app: 'reminders'}]),
+    calling(['phone_install', {app: 'lookup'}]),
     reply('Never mind.'),
   );
 
-  const denied = say('Get reminders.', 'denied');
+  const denied = say('Get lookup.', 'denied');
+  const asked = await events.next(frameOf('confirmation_requested'));
 
-  expect(
-    await wire.answer(
-      confirmationId(await events.next(frameOf('confirmation_requested'))),
-      'denied',
-    ),
-  ).toEqual({status: 'answered'});
+  expect(JSON.parse(asked.data ?? '')).toMatchObject({
+    request: {
+      preview: {
+        kind: 'phone_app_install',
+        app: {
+          id: 'lookup',
+          wakes: false,
+          reachesInternet: true,
+          account: 'Tavily',
+        },
+      },
+    },
+  });
+  expect(await wire.answer(confirmationId(asked), 'denied')).toEqual({
+    status: 'answered',
+  });
   await denied;
   expect(toolResults(model.requests.at(-1))).toEqual([
     refused(
@@ -417,7 +430,7 @@ it("store.not-installed: a denied ask leaves her phone as it was and she reads t
   expect(toolResults(model.requests.at(-1)).slice(1)).toEqual([
     refused(
       'not_in_store',
-      'There is no app "weather" in the App Store. Its apps: Reminders ("reminders"), Notes ("notes"), Broken ("broken").',
+      'There is no app "weather" in the App Store. Its apps: Lookup ("lookup"), Notes ("notes"), Broken ("broken").',
     ),
     refused(
       'comes_with_phone',
@@ -570,6 +583,7 @@ it('store.person-gives: the person gives her an app of the App Store and nobody 
       tint: 'orange',
       wakes: true,
       mayWake: true,
+      itMay: ['Keep its own data', 'Wake her when something is due'],
       views: [{id: 'all', title: 'All', icon: 'list'}],
       opensOn: 'all',
     },

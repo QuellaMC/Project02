@@ -5,6 +5,7 @@ import {expect, type Locator, type Page} from '@playwright/test';
 
 import {
   fileOf,
+  lookup,
   publish,
   quiet,
   reminders,
@@ -25,7 +26,7 @@ import {test} from './fixture.ts';
 /**
  * A home where Mira answers through `model`, the person goes by Sam and her
  * heartbeat is off, and `installed` is on her phone from the App Store, as
- * her phone keeps an app installed.
+ * her phone keeps an app installed, with what it asks of her phone.
  */
 function appsHome(model: ModelServer, ...installed: readonly App[]): string {
   const listed = installed.map(({manifest}) => ({
@@ -36,6 +37,8 @@ function appsHome(model: ModelServer, ...installed: readonly App[]): string {
     icon: manifest.icon,
     tint: manifest.tint,
     wakes: manifest.wakes,
+    reaches: manifest.reaches,
+    account: manifest.account,
     views: manifest.views,
     opensOn: manifest.opensOn,
     source: 'catalog',
@@ -78,6 +81,11 @@ function miraConfig(home: string): unknown {
   const path = join(home, 'character-data', 'mira', 'config.json');
 
   return existsSync(path) ? JSON.parse(readFileSync(path, 'utf8')) : undefined;
+}
+
+/** The home's config.json as it stands. */
+function homeConfig(home: string): unknown {
+  return JSON.parse(readFileSync(join(home, 'config.json'), 'utf8'));
 }
 
 /** Her apps' ids and where each came from, as a client reads her phone. */
@@ -226,6 +234,65 @@ test("page.apps-page: on her app's page, Can Wake Her Up off is what the daemon 
   expect(appsOf(await wire.phone('mira'))).toEqual([
     'clock built_in',
     'store built_in',
+  ]);
+});
+
+test("page.apps-account: an app's page lists what it may do and, for one that uses the person's Tavily account, Set Up, which opens the account's page; a key pasted there is saved and never shown back, the app's page then says the account by name, and Connections lists it; the key taken away, Connections no longer does", async ({
+  page,
+}) => {
+  const model = await startModelServer();
+  const catalog = await startCatalogServer();
+  const home = appsHome(model, lookup);
+  const daemon = await startDaemon(home, catalog.env);
+  const main = page.getByRole('main');
+  const tavily = page
+    .getByRole('navigation', {name: 'Settings'})
+    .getByRole('button', {name: /^Tavily/u});
+  const key = main.getByLabel('API Key', {exact: true});
+  const pasted = 'tvly-pasted-0123456789';
+
+  await page.goto(daemon.url);
+  await herPage(page);
+  await strip(page).filter({hasText: 'Lookup'}).click();
+
+  for (const line of [
+    'Keep its own data',
+    'Reach the internet at api.tavily.com and api.open-meteo.com',
+    'Use your Tavily account',
+    'What she does in it uses your Tavily account.',
+  ]) {
+    await expect(main.getByText(line, {exact: true})).toBeVisible();
+  }
+
+  await expect(tavily).toHaveCount(0);
+
+  await main.getByRole('button', {name: 'Set Up'}).click();
+  await expect(main.getByRole('heading', {name: 'Tavily'})).toBeVisible();
+  await expect(main.getByText('Get a free key at tavily.com.')).toBeVisible();
+  await key.fill(pasted);
+  await key.press('Enter');
+  await expect
+    .poll(() => homeConfig(home))
+    .toMatchObject({plugins: {phone: {config: {tavilyApiKey: pasted}}}});
+  await expect(key).toHaveValue('');
+  await expect(tavily).toContainText('On');
+  expect(await page.content()).not.toContain(pasted);
+
+  await main.getByRole('button', {name: 'Lookup', exact: true}).click();
+  await expect(
+    main.getByRole('button', {name: 'Tavily', exact: true}),
+  ).toBeVisible();
+  await expect(main.getByRole('button', {name: 'Set Up'})).toHaveCount(0);
+
+  await tavily.click();
+  await key.focus();
+  await main.getByRole('button', {name: 'Remove API Key'}).click();
+  await expect(tavily).toHaveCount(0);
+  expect(homeConfig(home)).not.toHaveProperty([
+    'plugins',
+    'phone',
+    'config',
+    'tavilyApiKey',
   ]);
 });
 

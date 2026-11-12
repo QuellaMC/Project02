@@ -2,7 +2,7 @@ import {expect, it} from 'vitest';
 
 import {fileOf, lookup} from './harness/apps.ts';
 import {inspect, startDaemon} from './harness/daemon.ts';
-import {openEvents} from './harness/events.ts';
+import {frameOf, openEvents} from './harness/events.ts';
 import {configJson, createHome} from './harness/home.ts';
 import {startInternetServer} from './harness/internet-server.ts';
 import {
@@ -12,7 +12,7 @@ import {
   toolResults,
   type ModelServer,
 } from './harness/model-server.ts';
-import {conversationOf, converse, wireOf} from './harness/wire.ts';
+import {conversationOf, converse, saveConfig, wireOf} from './harness/wire.ts';
 
 /** The person's key for their Tavily account, which nothing a client reads may hold. */
 const key = 'tvly-test-secret-0123456789';
@@ -21,11 +21,8 @@ const key = 'tvly-test-secret-0123456789';
 const unreached =
   'TypeError: phone.net.fetch reaches nothing here: only an action reaches the internet';
 
-/** A home where Mira answers through `model`, the person goes by Sam, her heartbeat is off, Lookup is on her phone from a file, and the home's settings hold `tavilyKey` when given one. */
+/** A home where Mira answers through `model`, the person goes by Sam, her heartbeat is off, and the home's settings hold `tavilyKey` when given one. */
 function internetHome(model: ModelServer, tavilyKey?: string): string {
-  const {id, name, summary, version, icon, tint, wakes, views, opensOn} =
-    lookup.manifest;
-
   return createHome({
     'config.json': configJson({
       project02: {...model.settings, userDisplayName: 'Sam'},
@@ -34,32 +31,32 @@ function internetHome(model: ModelServer, tavilyKey?: string): string {
         : {plugins: {phone: {config: {tavilyApiKey: tavilyKey}}}}),
     }),
     'character-data': {
-      mira: {
-        'config.json': configJson({project02: {heartbeat: 'off'}}),
-        'plugin-data': {
-          phone: {
-            'installed.json': JSON.stringify({
-              apps: [
-                {
-                  id,
-                  name,
-                  summary,
-                  version,
-                  icon,
-                  tint,
-                  wakes,
-                  views,
-                  opensOn,
-                  source: 'file',
-                },
-              ],
-            }),
-            apps: {'lookup.txt': fileOf(lookup)},
-          },
-        },
-      },
+      mira: {'config.json': configJson({project02: {heartbeat: 'off'}})},
     },
   });
+}
+
+/** The person's Tavily account as health says it, its key set or not. */
+function tavily(hasKey: boolean): object {
+  return {
+    id: 'tavily',
+    name: 'Tavily',
+    hasKey,
+    keyFrom: 'Get a free key at tavily.com.',
+  };
+}
+
+/** Lookup as a client reads it among her apps: what it may do, and the person's Tavily account, its key set or not. */
+function lookupUsing(hasKey: boolean): object {
+  return {
+    id: 'lookup',
+    itMay: [
+      'Keep its own data',
+      'Reach the internet at api.tavily.com and api.open-meteo.com',
+      'Use your Tavily account',
+    ],
+    account: {id: 'tavily', name: 'Tavily', hasKey},
+  };
 }
 
 /** Her taking Lookup's fetch_all on these requests. */
@@ -74,6 +71,11 @@ it("internet.fetch: she uses an app that reaches the internet and reads what eac
   const daemon = await startDaemon(home, internet.env);
   const wire = wireOf(daemon);
   const events = await openEvents(daemon);
+
+  expect(await wire.addApp('mira', fileOf(lookup))).toMatchObject({
+    status: 'ok',
+  });
+
   const say = await converse(wire, 'mira');
 
   internet.answer('/api.tavily.com/search', request => ({
@@ -193,13 +195,23 @@ it("internet.fetch: she uses an app that reaches the internet and reads what eac
   }
 });
 
-it("internet.no-key: with no key for Tavily in Settings, a request on the person's Tavily account is not made, and the app is told in a sentence naming the person, which she reads", async () => {
+it("internet.no-key: health says the person's Tavily account, its key not set and where one comes from; Lookup, once the person adds it, says among her apps what it may do and that it uses that account; with no key a request on it is not made, and the app is told in a sentence naming the person, which she reads; once the person sets the key, health says so on the stream, her phone says so too, and neither holds the key", async () => {
   const model = await startModelServer();
   const internet = await startInternetServer();
-  const say = await converse(
-    wireOf(await startDaemon(internetHome(model), internet.env)),
-    'mira',
-  );
+  const daemon = await startDaemon(internetHome(model), internet.env);
+  const wire = wireOf(daemon);
+  const events = await openEvents(daemon);
+
+  expect(await wire.health()).toMatchObject({accounts: [tavily(false)]});
+  expect(await wire.addApp('mira', fileOf(lookup))).toMatchObject({
+    status: 'ok',
+    app: lookupUsing(false),
+  });
+  expect(await wire.phone('mira')).toMatchObject({
+    apps: [{id: 'clock'}, lookupUsing(false), {id: 'store'}],
+  });
+
+  const say = await converse(wire, 'mira');
 
   model.answer(
     calling(
@@ -228,4 +240,26 @@ it("internet.no-key: with no key for Tavily in Settings, a request on the person
     },
   ]);
   expect(internet.requests).toEqual([]);
+
+  await saveConfig(
+    wire,
+    {scope: 'global'},
+    {
+      kind: 'section_field_set',
+      namespace: 'plugins',
+      id: 'phone',
+      field: 'tavilyApiKey',
+      value: key,
+    },
+  );
+  await events.next(
+    frameOf('health_changed', {health: {accounts: [tavily(true)]}}),
+  );
+
+  const phone = await wire.phone('mira');
+
+  expect(phone).toMatchObject({
+    apps: [{id: 'clock'}, lookupUsing(true), {id: 'store'}],
+  });
+  expect(JSON.stringify([events.frames, phone])).not.toContain(key);
 });

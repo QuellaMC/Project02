@@ -41,9 +41,10 @@ person said may not wake her saying so beside its name, with the person's
 name as her notes say it; she opens and acts in them through two tools,
 and, while her settings' Ask to Install Apps is on, asks the person to
 install from the App Store through a third, which is prepared reading the
-catalog and fetching and judging the app, and installs the text judged on
-their yes; and reply-style, the tone she writes in and a signoff, each
-character's own.
+catalog and fetching and judging the app, its preview saying whether the
+app wakes her, whether it reaches the internet and the name of the
+person's account it uses, and installs the text judged on their yes; and
+reply-style, the tone she writes in and a signoff, each character's own.
 
 `AppCatalog` is the one reader of the App Store's catalog, which the daemon
 makes from the base the binary resolved: `catalog.json`, and one entry's
@@ -70,6 +71,8 @@ at the same moment with what came of it. A request for an account of the
 person's carries `Authorization: Bearer` and the key the home's settings
 hold for it, `tavilyApiKey`, a secret of the home's alone that she cannot
 change; with none set the request is not made, and the app is told so in
-a sentence naming the person. The key reaches no log, record or app, and
-an answer that echoes it has it redacted. The phone's budget, 100
-seconds, is the room a call that fetches has.
+a sentence naming the person. `keyed_accounts` says which accounts have a
+key her phone sends, by the rule her phone takes one by, so what a client
+is told of an account is what her phone does. The key reaches no log,
+record or app, and an answer that echoes it has it redacted. The phone's
+budget, 30 seconds, is the room a call that fetches has.

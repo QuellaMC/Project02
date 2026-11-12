@@ -38,9 +38,10 @@ the blocking pool.
   is due", "Reach the internet at api.tavily.com" (two hosts joined by
   "and", more by commas and "and") and "Use your Tavily account".
 - **The accounts** are the phone's own short list, each at one host, so a
-  key the person gives for one only ever goes there; an app names the one
-  it uses and never says where its key goes. Today: Tavily (`tavily`, at
-  `api.tavily.com`).
+  key the person gives for one only ever goes there, and each with one
+  sentence on where the person gets a key; an app names the one it uses
+  and never says where its key goes. Today: Tavily (`tavily`, at
+  `api.tavily.com`, "Get a free key at tavily.com.").
 - **A script reaches** the language and `phone`, nothing else:
   `storage.get`, `set` and `remove`, a JSON value under each key;
   `rings.set({id, at, title, body})`, `rings.cancel(id)` and `rings.list()`,
@@ -115,9 +116,11 @@ the blocking pool.
   it by name, then the App Store, each character her own. An installed app
   is its one file, kept as text in `apps/<app-id>.txt`, and
   `installed.json` lists each with what her phone shows of it without
-  running it: its id, name, summary, version, icon, tint, whether it wakes
-  her, its views and the view it opens on, and where it came from, the
-  catalog or a file.
+  running it: its id, name, summary, version, icon, tint, what it asks
+  for, whether it wakes her, the hosts it reaches and its account, none of
+  the last two in a list written before an app could reach the internet,
+  its views and the view it opens on, and where it came from, the catalog
+  or a file.
   Installing makes the app first, so a broken one is refused and writes
   nothing; an id the phone comes with is refused; an id already installed
   is replaced, whatever its version or source, keeping what it keeps, and

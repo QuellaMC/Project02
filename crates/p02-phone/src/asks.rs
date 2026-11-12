@@ -27,8 +27,21 @@ pub struct Asks {
 }
 
 impl Asks {
+    /// Whether the app says it wakes her: only then can it set a ring.
+    #[must_use]
+    pub fn wakes(&self) -> bool {
+        self.wakes
+    }
+
+    /// The hosts the app reaches, none when it reaches the internet nowhere.
+    #[must_use]
+    pub fn reaches(&self) -> &[String] {
+        &self.reaches
+    }
+
     /// The account of the person's the app uses, at one of its hosts.
-    pub(crate) fn account(&self) -> Option<&'static Account> {
+    #[must_use]
+    pub fn account(&self) -> Option<&'static Account> {
         self.account.as_deref().and_then(Account::of)
     }
 

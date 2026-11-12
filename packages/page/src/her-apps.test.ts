@@ -52,6 +52,7 @@ function app(
     tint: 'gray',
     wakes: false,
     mayWake: true,
+    itMay: ['Keep its own data'],
     views: [{id: 'all', title: 'All', icon: 'doc'}],
     opensOn: 'all',
     ...shape,
@@ -192,7 +193,7 @@ describe('her apps in the settings window', () => {
     });
   });
 
-  it("draws an app's page: whose phone it is on, its version and where it came from, for an app she came with, one from the App Store and one from a file; what letting it wake her does, for the Clock and for another app that wakes her; an update only when the App Store says it has a newer version; and Remove App for every app but one she came with", () => {
+  it("draws an app's page: whose phone it is on, its version and where it came from, for an app she came with, one from the App Store and one from a file; what letting it wake her does, for the Clock and for another app that wakes her; an update only when the App Store says it has a newer version; Remove App for every app but one she came with; and, for an app that uses an account of the person's, Set Up until her phone has its key and the account's name once it has, either opening the account's page with its way back to the app, over the line saying what uses the account", () => {
     const settings = settingsOf(
       windowOn(herPage, {
         phone,
@@ -225,6 +226,42 @@ describe('her apps in the settings window', () => {
       removable: true,
     });
     expect(appShownOf(settings, mira, 'chess')).toBeUndefined();
+
+    const search = (hasKey: boolean) =>
+      settingsOf(
+        windowOn(herPage, {
+          phone: {
+            ...phone,
+            apps: [
+              clock,
+              app('search', 'Web Search', {
+                itMay: [
+                  'Keep its own data',
+                  'Reach the internet at api.tavily.com',
+                  'Use your Tavily account',
+                ],
+                account: {id: 'tavily', name: 'Tavily', hasKey},
+              }),
+              appStore,
+            ],
+          },
+        }),
+      );
+
+    expect(appShownOf(search(false), mira, 'search')?.account).toEqual({
+      name: 'Tavily',
+      hasKey: false,
+      opens: {
+        kind: 'account',
+        accountId: 'tavily',
+        from: {characterId: 'mira', appId: 'search'},
+      },
+      line: 'What she does in it uses your Tavily account.',
+    });
+    expect(appShownOf(search(true), mira, 'search')?.account).toMatchObject({
+      name: 'Tavily',
+      hasKey: true,
+    });
 
     // A store that could not be read offers no update, and says nothing here.
     const unread = settingsOf(
@@ -422,7 +459,7 @@ describe('her apps in the settings window', () => {
     expect(catalogRead(initialState, 'mira', store)).toBe(initialState);
   });
 
-  it("reads her phone for every page about her apps, and the App Store's apps for her for Get More Apps and an app's page", () => {
+  it("reads her phone for every page about her apps, an account's page opened from one of them among them, and the App Store's apps for her for Get More Apps and an app's page", () => {
     const pages: readonly SettingsPage[] = [
       herPage,
       {kind: 'remove', characterId: 'mira'},
@@ -434,6 +471,12 @@ describe('her apps in the settings window', () => {
         fileName: 'notes.js',
         preview: {status: 'failed', message: 'No.'},
       },
+      {
+        kind: 'account',
+        accountId: 'tavily',
+        from: {characterId: 'mira', appId: 'search'},
+      },
+      {kind: 'account', accountId: 'tavily'},
       {kind: 'feature', characterId: 'mira', pluginId: 'reply-style'},
       {kind: 'you'},
     ];
@@ -444,6 +487,8 @@ describe('her apps in the settings window', () => {
       'mira',
       'mira',
       'mira',
+      'mira',
+      undefined,
       undefined,
       undefined,
     ]);
@@ -452,6 +497,8 @@ describe('her apps in the settings window', () => {
       undefined,
       'mira',
       'mira',
+      undefined,
+      undefined,
       undefined,
       undefined,
       undefined,

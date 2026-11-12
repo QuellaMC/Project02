@@ -567,7 +567,7 @@ it('phone.may-not-wake: while Sam says the Clock may not wake her, its ring long
   expect(openingOf(model.requests.at(-1))).toEqual(ringing(lateAlarm));
 });
 
-it("phone.on-the-wire: a client reads her phone: before she touches it, her apps, the Clock with its icon, tint and views, and nothing in front, done or ringing; once she opens the Clock and sets an alarm, the stream has named her phone as the plugin of each call and said her phone changed after each, and her phone has the Alarms view in front with the alarm on its screen and what she did in the action's words; a view she is not on, read on request, shows its screen and leaves her phone as it was; a character, an app and a view that are not there are each refused in a sentence", async () => {
+it("phone.on-the-wire: a client reads her phone: before she touches it, her apps, the Clock with its icon, tint, views and what it may do, and nothing in front, done or ringing; once she opens the Clock and sets an alarm, the stream has named her phone as the plugin of each call and said her phone changed after each, and her phone has the Alarms view in front with the alarm on its screen and what she did in the action's words; a view she is not on, read on request, shows its screen and leaves her phone as it was; a character, an app and a view that are not there are each refused in a sentence", async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
@@ -585,6 +585,7 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
     tint: 'graphite',
     wakes: true,
     mayWake: true,
+    itMay: ['Keep its own data', 'Wake her when something is due'],
     views: [
       {id: 'world', title: 'World Clock', icon: 'globe'},
       {id: 'alarms', title: 'Alarms', icon: 'alarm'},
@@ -603,6 +604,7 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
     tint: 'blue',
     wakes: false,
     mayWake: true,
+    itMay: ['Keep its own data'],
     views: [{id: 'apps', title: 'App Store', icon: 'bag'}],
     opensOn: 'apps',
   };

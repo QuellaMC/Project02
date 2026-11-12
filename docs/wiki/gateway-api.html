@@ -329,9 +329,13 @@
               and package diagnostics, the roster with each character's state,
               whether she comes with the app (<code>builtIn</code>: she can be
               switched off, never removed) and her last maintenance failure,
-              and <code>connectors</code>: for
+              <code>connectors</code>: for
               each built-in connector, whether a process of it is on the stream,
-              and the bots it last said it runs.
+              and the bots it last said it runs, and <code>accounts</code>:
+              each account of the person's her phone knows, by its
+              <code>id</code> and <code>name</code>, whether the home's
+              settings hold its key, <code>hasKey</code>, and
+              <code>keyFrom</code>, one sentence on where a key comes from.
             </td>
           </tr>
           <tr>
@@ -928,8 +932,9 @@ data: {…}</code></pre>
               it, or the moment a
               connector's process came onto the stream, left it, or said its
               bots stand otherwise than the daemon held: the roster as config
-              now says it, the connectors on the stream with their bots, and the
-              config and package problems as they stand, the shape
+              now says it, the connectors on the stream with their bots, the
+              accounts her phone knows with whether each one's key is set, and
+              the config and package problems as they stand, the shape
               <code>GET /api/health</code> returns. Every surface hears it, not
               only the one that wrote, and one showing config reads its view
               again on it, so two windows on one screen stay in step; what the
@@ -1118,9 +1123,12 @@ data: {…}</code></pre>
         <code>tint</code> of its tile — names of the page's own set, which
         falls back for one it does not know — whether it says it
         <code>wakes</code> her and whether the person lets it,
-        <code>mayWake</code>, its <code>views</code>, each an
-        <code>id</code>, a <code>title</code> and an <code>icon</code>, and
-        the view it <code>opensOn</code>.
+        <code>mayWake</code>, what it may do, its <code>itMay</code> lines,
+        the <code>account</code> of the person's it uses, when it uses one,
+        by its <code>id</code> and <code>name</code> with whether the home's
+        settings hold its key, <code>hasKey</code>, its <code>views</code>,
+        each an <code>id</code>, a <code>title</code> and an
+        <code>icon</code>, and the view it <code>opensOn</code>.
         <code>front</code> is the app she has in front, by its
         <code>appId</code> and <code>viewId</code>, with that view's
         <code>screen</code>, or, when the app fails to show it, the
@@ -1215,7 +1223,24 @@ data: {…}</code></pre>
         the phone's, a secret no read shows back and no app holds; with none
         set the request is not made, and the app is told so. What an app may
         do, its <code>itMay</code> lines, says the hosts it reaches and the
-        account it uses.
+        account it uses. Whether a key is set is said where a client reads
+        the account, in health's <code>accounts</code> and in an app's
+        <code>account</code>, by the rule her phone takes a key by, and a
+        change of a key goes out as <code>health_changed</code>, as any
+        change of the settings does.
+      </p>
+
+      <p>
+        Her ask to install an app of the App Store is a confirmation whose
+        <code>preview</code> is
+        <code>{kind: "phone_app_install", app, source: "catalog", replaces}</code>:
+        the <code>app</code> by its <code>id</code>, <code>name</code>,
+        <code>summary</code>, <code>icon</code>, <code>tint</code> and
+        <code>version</code>, whether it <code>wakes</code> her, whether it
+        <code>reachesInternet</code>, and the name of the
+        <code>account</code> of the person's it uses there, when it uses one;
+        <code>replaces</code> is the version on her phone it updates, when
+        there is one. The web page words its card from these.
       </p>
 
       <p>

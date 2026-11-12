@@ -53,8 +53,9 @@ pub enum NotInstallable {
     /// The App Store lists no app of that id: the catalog it read.
     NotInStore(Catalog),
     /// Her phone holds the app in the version the App Store lists or a
-    /// newer one: as her phone lists it.
-    AlreadyInstalled(Listed),
+    /// newer one: as her phone lists it, boxed, since a listing is many
+    /// times the size of the others.
+    AlreadyInstalled(Box<Listed>),
     /// The catalog could not be read, or the app's file is not what it
     /// lists.
     Catalog(CatalogError),
@@ -96,7 +97,9 @@ pub async fn installable(
     let on_phone = blocking(on_phone).await??;
     let replaces = match (app.status(&on_phone.apps), on_phone.app(id)) {
         (StoreAppStatus::Installed, Some(held)) => {
-            return Ok(Err(NotInstallable::AlreadyInstalled(held.clone())));
+            return Ok(Err(NotInstallable::AlreadyInstalled(Box::new(
+                held.clone(),
+            ))));
         }
         (_, held) => held.map(|held| held.version.clone()),
     };
@@ -175,23 +178,31 @@ pub(super) async fn prepare(
     })
 }
 
-/// What the person is shown: the app, where it comes from, and the version
-/// it replaces on her phone, when there is one.
+/// What the person is shown: the app, with what it asks of her phone that
+/// the card says, whether it wakes her, whether it reaches the internet and
+/// the name of the person's account it uses there, when it uses one; where
+/// it comes from; and the version it replaces on her phone, when there is
+/// one.
 fn preview(app: &CatalogApp, replaces: Option<String>) -> Map<String, Value> {
+    let asks = app.asks();
+    let mut listed = json!({
+        "id": app.id(),
+        "name": app.name(),
+        "summary": app.summary(),
+        "icon": app.icon(),
+        "tint": app.tint(),
+        "version": app.version(),
+        "wakes": asks.wakes(),
+        "reachesInternet": !asks.reaches().is_empty(),
+    });
+
+    if let Some(account) = asks.account() {
+        listed["account"] = Value::from(account.name());
+    }
+
     let mut preview = Map::from_iter([
         ("kind".to_owned(), Value::from(PREVIEW_KIND)),
-        (
-            "app".to_owned(),
-            json!({
-                "id": app.id(),
-                "name": app.name(),
-                "summary": app.summary(),
-                "icon": app.icon(),
-                "tint": app.tint(),
-                "version": app.version(),
-                "wakes": app.wakes(),
-            }),
-        ),
+        ("app".to_owned(), listed),
         ("source".to_owned(), json!(Source::Catalog)),
     ]);
 

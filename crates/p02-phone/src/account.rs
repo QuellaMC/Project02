@@ -3,12 +3,13 @@
 //! app names the one it uses; it never says where its key goes.
 
 /// An account of the person's at a service an app may use, with the key
-/// the person gives for it.
+/// the person gives for it and where they get one.
 #[derive(Debug, PartialEq, Eq)]
 pub struct Account {
     id: &'static str,
     name: &'static str,
     host: &'static str,
+    key_from: &'static str,
 }
 
 /// Every account the phone knows. A new service is a new line here.
@@ -16,6 +17,7 @@ static ACCOUNTS: [Account; 1] = [Account {
     id: "tavily",
     name: "Tavily",
     host: "api.tavily.com",
+    key_from: "Get a free key at tavily.com.",
 }];
 
 impl Account {
@@ -47,5 +49,12 @@ impl Account {
     #[must_use]
     pub fn host(&self) -> &'static str {
         self.host
+    }
+
+    /// Where the person gets a key for it, in one sentence: `Get a free key
+    /// at tavily.com.`
+    #[must_use]
+    pub fn key_from(&self) -> &'static str {
+        self.key_from
     }
 }

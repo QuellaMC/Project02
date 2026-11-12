@@ -50,9 +50,11 @@ pub enum PhoneRefusal {
 /// the line she knows it by, its version and where it came from; its icon
 /// and the tint of its tile, names of the page's own set, which falls back
 /// for one it does not know; whether it says it wakes her, and whether the
-/// person lets it; its views, in its order; and the view it opens on.
+/// person lets it; what it may do, and the person's account it uses; its
+/// views, in its order; and the view it opens on.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub struct PhoneApp {
     pub id: Identifier,
     pub name: String,
@@ -66,8 +68,23 @@ pub struct PhoneApp {
     /// Whether the person lets it wake her: yes unless they said it may
     /// not.
     pub may_wake: bool,
+    /// What it may do, a line each, as the App Store says it.
+    pub it_may: Vec<String>,
+    /// The account of the person's it uses, when it uses one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub account: Option<AppAccount>,
     pub views: Vec<AppView>,
     pub opens_on: Identifier,
+}
+
+/// An account of the person's that an app uses: the id her phone knows it
+/// by, its name, and whether the person gave her phone its key.
+#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct AppAccount {
+    pub id: Identifier,
+    pub name: String,
+    pub has_key: bool,
 }
 
 /// Where an app on her phone came from: it comes with her phone, it is the

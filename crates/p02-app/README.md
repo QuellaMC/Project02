@@ -35,10 +35,11 @@ with an outcome of p02-wire, never an error.
   not asked again and again.
 - **Her phone** is read from her data whether she runs or not, under a
   lease of its store: her apps, those it comes with and those installed
-  on it, the App Store last, what she has in front with its screen and
-  what she last did, with what rings, which her actor publishes while a
-  ring's moment runs. A view of an app is read on request too, and changes
-  nothing of hers. One whose settings switch her phone off has none to
+  on it, the App Store last, each with what it may do and the person's
+  account it uses, with whether the home's settings hold its key; what
+  she has in front with its screen and what she last did, with what
+  rings, which her actor publishes while a ring's moment runs. A view of
+  an app is read on request too, and changes nothing of hers. One whose settings switch her phone off has none to
   read. The stream says her phone changed after a call of her phone's
   tools came back accepted, and as a ring's moment begins and once its
   rings went to their apps. The daemon makes the one reader of the App
@@ -60,12 +61,14 @@ with an outcome of p02-wire, never an error.
   log. A turn of her own carries no line's stamps, and is said running as
   it begins.
 - **Settings** change one way, a client's change or her own plugin's,
-  through p02-config; health then goes to every surface, and a reconcile
-  pass starts or stops whom the change switched and brings every other
-  running character up to date at once, built again when what she runs
-  on changed. A turn in flight meets it before its next request to her
-  model, where her settings are read again in any case. Whether they give
-  her a model is one judgement, which her settings' view asks too.
+  through p02-config; health, which says the accounts her phone knows,
+  each with whether the home's settings hold its key, then goes to every
+  surface, and a reconcile pass starts or stops whom the change switched
+  and brings every other running character up to date at once, built
+  again when what she runs on changed. A turn in flight meets it before
+  its next request to her model, where her settings are read again in any
+  case. Whether they give her a model is one judgement, which her
+  settings' view asks too.
 - **A character's package** is added from a file, updated or removed
   while the daemon runs: judged as discovery would publish it, written or
   removed under the locks of her settings, and then announced and
