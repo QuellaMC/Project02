@@ -1,10 +1,11 @@
 //! The tools as a provider is offered them: each tool's own input contract
 //! as its parameters, strict only where the provider can hold a call to the
-//! schema exactly, and under a name the provider can take.
+//! schema exactly, and under a name the provider can take; and her calls of
+//! them under ids a provider can take.
 
 use std::collections::HashSet;
 
-use p02_contracts::{ChatCompletionTool, ChatToolFunction, ModelToolDefinition};
+use p02_contracts::{ChatCompletionTool, ChatToolFunction, ModelToolDefinition, ToolCallId};
 use p02_shared::Identifier;
 use serde_json::{Map, Value};
 
@@ -121,6 +122,27 @@ pub(crate) fn runtime_name(provider_name: &str, mappings: &[ToolNameMapping]) ->
             || provider_name.to_owned(),
             |mapping| mapping.runtime_name.to_string(),
         )
+}
+
+/// The ids a request shows the service for the runtime's calls: `call_<n>`,
+/// numbered in the order the request first names each. The runtime's own
+/// are longer than a protocol takes.
+#[derive(Debug, Default)]
+pub(crate) struct CallIds(Vec<ToolCallId>);
+
+impl CallIds {
+    pub(crate) fn shown(&mut self, id: &ToolCallId) -> ToolCallId {
+        let at = self
+            .0
+            .iter()
+            .position(|named| named == id)
+            .unwrap_or_else(|| {
+                self.0.push(id.clone());
+                self.0.len() - 1
+            });
+
+        ToolCallId::new(&format!("call_{}", at + 1)).expect("a numbered call id is not empty")
+    }
 }
 
 /// Letters, digits, `_` and `-`, starting with a letter.

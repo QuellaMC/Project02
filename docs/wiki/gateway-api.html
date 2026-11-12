@@ -1426,6 +1426,15 @@ data: {…}</code></pre>
         a token or the account it went with.
       </p>
 
+      <p>
+        A character whose settings choose <code>anthropic</code> thinks with
+        the Claude API on the key her settings hold, of the model they name,
+        else Claude Opus 5.5. A message the model declines to write fails her
+        turn, saying Claude declined to answer, with the category the service
+        names; one cut short fails it too. Every failure is said in the
+        service's words after "Claude", and none repeats the key.
+      </p>
+
       <h2>The sync rule</h2>
 
       <p class="rule">

@@ -115,6 +115,7 @@ pub struct ReplyDelta {
 #[serde(rename_all = "snake_case")]
 pub enum ProviderName {
     Openai,
+    Anthropic,
     Nvidia,
 }
 

@@ -55,6 +55,8 @@ vocabulary! {
         Chatgpt = "chatgpt",
         /// The OpenAI API, on the person's key.
         Openai = "openai",
+        /// The Claude API, on the person's key.
+        Anthropic = "anthropic",
         /// A model on NVIDIA's cloud, or on a server of the person's own
         /// that speaks its wire.
         Nvidia = "nvidia",

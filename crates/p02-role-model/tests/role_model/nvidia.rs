@@ -8,7 +8,9 @@ use p02_contracts::{
     Invocation, ProviderAnswer, ProviderName, RoleModelAdapter, TextCompletion,
     TextCompletionRequest,
 };
-use p02_role_model::{NvidiaSettings, OpenaiSettings, ServiceSettings, select_adapter};
+use p02_role_model::{
+    AnthropicSettings, NvidiaSettings, OpenaiSettings, ServiceSettings, select_adapter,
+};
 use p02_shared::BaseUrl;
 use serde_json::{Value, json};
 use tokio::time::Instant;
@@ -267,7 +269,8 @@ async fn a_plain_completion_asks_the_same_model_without_tools_or_thinking() {
 /// Whether settings give a character a model is answered by building it:
 /// no service chosen makes none, a service without a key is refused saying
 /// what to add, and only a server of the person's own may go without one:
-/// the OpenAI API asks for its key wherever a harness puts it.
+/// the OpenAI API and the Claude API ask for their keys wherever a harness
+/// puts them.
 #[test]
 fn a_model_is_built_from_a_chosen_service_with_a_key_or_a_server_of_ones_own() {
     let built = |settings: Option<ServiceSettings>| {
@@ -280,6 +283,14 @@ fn a_model_is_built_from_a_chosen_service_with_a_key_or_a_server_of_ones_own() {
         ServiceSettings::Openai(OpenaiSettings {
             api_key: None,
             model: "gpt-6-luna".to_owned(),
+            base_url,
+        })
+    };
+    let anthropic = |base_url| {
+        ServiceSettings::Anthropic(AnthropicSettings {
+            api_key: None,
+            model: "claude-opus-5-5".to_owned(),
+            fallback: true,
             base_url,
         })
     };
@@ -299,8 +310,12 @@ fn a_model_is_built_from_a_chosen_service_with_a_key_or_a_server_of_ones_own() {
 
     for base_url in [None, own()] {
         assert_eq!(
-            built(Some(openai(base_url))),
+            built(Some(openai(base_url.clone()))),
             Err("add your OpenAI API key".to_owned())
+        );
+        assert_eq!(
+            built(Some(anthropic(base_url))),
+            Err("add your Claude API key".to_owned())
         );
     }
 }

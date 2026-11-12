@@ -167,12 +167,12 @@ impl Linked {
         }
     }
 
-    /// Whether `service` is connected now.
+    /// Whether `service` is connected now, as an app signs in with it.
     fn connects(&self, service: RoleModelProvider) -> bool {
         match service {
             RoleModelProvider::Chatgpt => self.plan.is_some(),
             RoleModelProvider::Openai => self.openai_key.is_some(),
-            RoleModelProvider::Nvidia => false,
+            RoleModelProvider::Anthropic | RoleModelProvider::Nvidia => false,
         }
     }
 

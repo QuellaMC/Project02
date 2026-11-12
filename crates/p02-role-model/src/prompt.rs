@@ -22,7 +22,7 @@ pub(crate) use history::{json_text, round_messages};
 pub use history::{newest_turns_within, select_history_window};
 pub(crate) use text::unusable_reply_note;
 pub use text::{Person, Recollection, summarizer_instructions, today_note};
-pub(crate) use tools::{ToolNameMapping, provider_name, provider_names, runtime_name};
+pub(crate) use tools::{CallIds, ToolNameMapping, provider_name, provider_names, runtime_name};
 
 use fence::{bullets, fenced, neutralize};
 use history::turn_messages;

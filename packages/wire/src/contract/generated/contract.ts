@@ -794,7 +794,7 @@ export type RemoveCharacterRefusal = "built_in" | "unknown_character";
  * harness's switch, never a setting, and a home has none until its
  * person chooses one.
  */
-export type RoleModelProvider = "chatgpt" | "openai" | "nvidia";
+export type RoleModelProvider = "chatgpt" | "openai" | "anthropic" | "nvidia";
 
 /**
  * Where an installed character stands as health reports her: her

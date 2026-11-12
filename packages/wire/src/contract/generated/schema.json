@@ -3372,6 +3372,11 @@
         },
         {
           "type": "string",
+          "const": "anthropic",
+          "description": "The Claude API, on the person's key."
+        },
+        {
+          "type": "string",
           "const": "nvidia",
           "description": "A model on NVIDIA's cloud, or on a server of the person's own\nthat speaks its wire."
         }

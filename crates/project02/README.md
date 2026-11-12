@@ -32,6 +32,8 @@ the same daemon in another program's process, as the desktop shell does.
   `<base>/<host>/<path>?<query>`, the rest of it unchanged;
   `PROJECT02_TEST_OPENAI_API=<base>` names where the OpenAI API is, in
   place of its own address; `PROJECT02_TEST_OPENAI_AUTH=<base>` names
-  where OpenAI's sign-in is, in place of `https://auth.openai.com`; and
+  where OpenAI's sign-in is, in place of `https://auth.openai.com`;
   `PROJECT02_TEST_CHATGPT_API=<base>` names where a ChatGPT plan's service
-  is, in place of `https://chatgpt.com/backend-api/codex`.
+  is, in place of `https://chatgpt.com/backend-api/codex`; and
+  `PROJECT02_TEST_ANTHROPIC_API=<base>` names where the Claude API is, in
+  place of `https://api.anthropic.com/v1`.

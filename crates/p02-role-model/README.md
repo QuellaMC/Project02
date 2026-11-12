@@ -45,13 +45,28 @@ a second is the sign-in turned down. A plan whose usage is used up is
 said so and asked no more until the next turn; too many requests at once
 are tried again and then said as the service busy.
 
+The Anthropic adapter speaks Anthropic's Messages protocol to the Claude
+API, on the person's key, in the protocol's version, every request
+streamed, plain completions too. The system's lines before the
+conversation are its system prompt, and a later one goes as the
+protocol's own system message, which the runtime puts only after the
+person's line or a round's results; her earlier calls go as tool uses
+and each round's results as one message of the person's, under ids
+numbered within each request, and each tool's arguments stream as the
+model writes them. It asks for no sampling, thinking, effort or
+forced tool choice, sends no thinking back, and gives an answer the room
+the OpenAI API gives. For a model the setting offers, a request asks for
+Anthropic's own fallback for a decline. A message is judged at its stop:
+a decline, said with its category, and a message cut short fail the
+round.
+
 An adapter is built only with a key, or for NVIDIA a server of the
 person's own, which may ask for none, or for the plan the home signed
 in; building one does no I/O, its HTTP client made at its first request.
-Both hand back the model's calls and text as written, and hear her reply
-as its arguments stream. The exchange is one for both: it retries a busy
-provider or a broken connection but never a timeout, bounds the
-provider's silence, reads an error under `error`, beside it or as its
-`detail`, and no failure repeats a key, a token or the account it went
-with, each said as its service's own. The test provider answers in fixed
-sentences, behind a test switch alone.
+Each hands back the model's calls and text as written, and hears her
+reply as its arguments stream. The exchange is one for all three: it
+retries a busy provider or a broken connection but never a timeout,
+bounds the provider's silence, reads an error under `error`, beside it or
+as its `detail`, and no failure repeats a key, a token or the account it
+went with, each said as its service's own. The test provider answers in
+fixed sentences, behind a test switch alone.

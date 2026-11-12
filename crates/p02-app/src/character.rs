@@ -20,7 +20,8 @@ use p02_core::{SpeakerName, Timestamp};
 use p02_phone::SetRing;
 use p02_plugins::{PHONE_PLUGIN, PluginHost};
 use p02_role_model::{
-    ChatgptSettings, NvidiaSettings, OpenaiSettings, PlanSignIn, ServiceSettings, select_adapter,
+    AnthropicSettings, ChatgptSettings, NvidiaSettings, OpenaiSettings, PlanSignIn,
+    ServiceSettings, select_adapter,
 };
 use p02_runtime::{Character, CompletedTurn, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{Identifier, error_sentence};
@@ -1342,10 +1343,10 @@ fn plan_sign_in(world: &World, host: &HostSettings) -> Option<PlanAccount> {
 }
 
 /// Her model: the service her settings choose, as [`built`] builds it, a
-/// service of OpenAI's at the stand-in the binary names when it names one,
-/// and the ChatGPT plan on the home's sign-in, as `account`, through
-/// `daemon`; or the sentence saying what they need for one. Her settings'
-/// view asks this too, so the page says what she says.
+/// service of OpenAI's or the Claude API at the stand-in the binary names
+/// when it names one, and the ChatGPT plan on the home's sign-in, as
+/// `account`, through `daemon`; or the sentence saying what they need for
+/// one. Her settings' view asks this too, so the page says what she says.
 pub(crate) fn model(
     world: &World,
     daemon: &WeakDaemon,
@@ -1364,6 +1365,12 @@ pub(crate) fn model(
             host.openai_api_key.clone(),
             host.openai_model.clone(),
         ),
+        RoleModelProvider::Anthropic => ServiceSettings::Anthropic(AnthropicSettings {
+            api_key: host.anthropic_api_key.clone(),
+            model: host.anthropic_model.clone(),
+            fallback: host.anthropic_fallback(),
+            base_url: world.anthropic_api.clone(),
+        }),
         RoleModelProvider::Nvidia => ServiceSettings::Nvidia(NvidiaSettings {
             api_key: host.nvidia_api_key.clone(),
             model: host.nvidia_model.clone(),

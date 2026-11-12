@@ -161,6 +161,9 @@ pub struct DaemonSettings {
     /// Where a ChatGPT plan's service is, under the test switch; none, and
     /// it is at its own address.
     pub chatgpt_api: Option<BaseUrl>,
+    /// Where the Claude API is, under the test switch; none, and it is at
+    /// its own address.
+    pub anthropic_api: Option<BaseUrl>,
 }
 
 /// A line a client delivers into a conversation.
@@ -184,10 +187,10 @@ pub struct OpenDaemonError {
 
 /// What every actor of the daemon reads: the home, the settings' sections,
 /// the plugins, the waits, the model that stands in for every character's,
-/// where the OpenAI API and a ChatGPT plan's service are when the binary
-/// names a stand-in for them, the App Store's catalog her phone reads, the
-/// internet her apps reach, the home's sign-in to a ChatGPT plan, and the
-/// events.
+/// where the OpenAI API, a ChatGPT plan's service and the Claude API are
+/// when the binary names a stand-in for them, the App Store's catalog her
+/// phone reads, the internet her apps reach, the home's sign-in to a
+/// ChatGPT plan, and the events.
 #[derive(Debug)]
 pub(crate) struct World {
     pub(crate) home: Home,
@@ -197,6 +200,7 @@ pub(crate) struct World {
     pub(crate) test_provider: Option<Arc<dyn RoleModelAdapter>>,
     pub(crate) openai_api: Option<BaseUrl>,
     pub(crate) chatgpt_api: Option<BaseUrl>,
+    pub(crate) anthropic_api: Option<BaseUrl>,
     pub(crate) catalog: Arc<AppCatalog>,
     pub(crate) internet: Arc<AppInternet>,
     pub(crate) chatgpt: Arc<Chatgpt>,
@@ -368,6 +372,7 @@ impl Daemon {
             openai_api,
             openai_auth,
             chatgpt_api,
+            anthropic_api,
         } = settings;
         let checked = home.clone();
         let chatgpt = blocking(move || {
@@ -391,6 +396,7 @@ impl Daemon {
                     test_provider,
                     openai_api,
                     chatgpt_api,
+                    anthropic_api,
                     catalog: Arc::new(AppCatalog::new(app_catalog)),
                     internet: Arc::new(AppInternet::new(app_internet)),
                     chatgpt: Arc::new(chatgpt),

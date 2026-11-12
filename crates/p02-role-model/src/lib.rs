@@ -1,6 +1,7 @@
 #![doc = include_str!("../README.md")]
 #![forbid(unsafe_code)]
 
+mod anthropic;
 mod draft;
 mod nvidia;
 mod prompt;
@@ -10,6 +11,7 @@ mod select;
 mod test_provider;
 mod transport;
 
+pub use anthropic::AnthropicSettings;
 pub use nvidia::NvidiaSettings;
 pub use prompt::{
     Opening, Person, Recollection, newest_turns_within, select_history_window,

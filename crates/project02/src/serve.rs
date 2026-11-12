@@ -84,6 +84,7 @@ pub(crate) async fn run(
         openai_api: switches.openai_api,
         openai_auth: switches.openai_auth,
         chatgpt_api: switches.chatgpt_api,
+        anthropic_api: switches.anthropic_api,
     };
 
     serve(home, claim, settings, &stop, console).await

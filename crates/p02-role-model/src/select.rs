@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use p02_contracts::RoleModelAdapter;
 
+use crate::anthropic::{AnthropicAdapter, AnthropicSettings};
 use crate::nvidia::{NvidiaAdapter, NvidiaSettings};
 use crate::responses::{ChatgptSettings, OpenaiSettings, ResponsesAdapter};
 use crate::test_provider::DeterministicAdapter;
@@ -38,6 +39,7 @@ impl FromStr for TestProvider {
 /// The service a character's settings choose, with what they set of it.
 #[derive(Clone, Debug)]
 pub enum ServiceSettings {
+    Anthropic(AnthropicSettings),
     Chatgpt(ChatgptSettings),
     Nvidia(NvidiaSettings),
     Openai(OpenaiSettings),
@@ -67,6 +69,7 @@ pub fn select_adapter(
     let silence = shortened_silence.unwrap_or(PROVIDER_SILENCE);
 
     Ok(Some(match service {
+        ServiceSettings::Anthropic(settings) => Arc::new(AnthropicAdapter::new(settings, silence)?),
         ServiceSettings::Chatgpt(settings) => {
             Arc::new(ResponsesAdapter::chatgpt(settings, silence)?)
         }
