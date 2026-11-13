@@ -413,7 +413,10 @@ it("config.applied-reload: a change saved while her reply runs is in effect from
       'character-data': {
         mira: {
           'config.json': configJson({
-            plugins: {'reply-style': {enabled: true}},
+            plugins: {
+              'reply-style': {enabled: true},
+              'runtime.plugin': {enabled: true},
+            },
           }),
         },
       },

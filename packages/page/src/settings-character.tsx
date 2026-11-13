@@ -5,7 +5,7 @@
  * view, and writes only what her view lists.
  */
 import type {CharacterSummary} from '@project02/wire/contract';
-import {askToInstallRow, hasPhone} from './her-apps.ts';
+import {hasPhone, herPhoneRow} from './her-apps.ts';
 import {HerApps} from './settings-apps.tsx';
 import {
   BackButton,
@@ -323,7 +323,7 @@ function CharacterCards({
 /**
  * What she may ask the person for: each plugin placed among her
  * permissions, a switch of hers, and while her settings give her a phone,
- * Ask to Install Apps, her phone's own field.
+ * her phone's own fields, Ask to Install Apps and beside it A Gift from You.
  */
 function HerPermissions({
   ctx,
@@ -336,10 +336,11 @@ function HerPermissions({
 }) {
   const target = characterTarget(characterId);
   const permissions = featuresPlaced(view, 'permission');
-  const install = askToInstallRow(characterId);
-  const installField = hasPhone(view)
-    ? fieldAt(view, install.place)
-    : undefined;
+  const install = herPhoneRow(characterId, 'askToInstall');
+  const gift = herPhoneRow(characterId, 'gift');
+  const phone = hasPhone(view);
+  const installField = phone ? fieldAt(view, install.place) : undefined;
+  const giftField = phone ? fieldAt(view, gift.place) : undefined;
 
   return permissions.length === 0 && installField === undefined ? null : (
     <Group
@@ -367,6 +368,14 @@ function HerPermissions({
           row={install}
           field={installField}
           leading={<Tile icon="download" tint="gray" />}
+        />
+      )}
+      {giftField === undefined ? null : (
+        <FieldRow
+          ctx={ctx}
+          row={gift}
+          field={giftField}
+          leading={<Tile icon="phone" tint="gray" />}
         />
       )}
     </Group>

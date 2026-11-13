@@ -11,11 +11,11 @@ pub(super) fn provided() -> Result<Vec<ProvidedTool>, PluginError> {
     Ok(vec![
         tool(
             SEARCH,
-            "Search your long-term memory for anything relevant.",
+            "Look in your long-term memory for what you remember of something.",
             json!({
                 "type": "object",
                 "properties": {
-                    "query": {"type": "string", "description": "Search query."},
+                    "query": {"type": "string", "description": "What to look for."},
                 },
                 "required": ["query"],
                 "additionalProperties": false,
@@ -28,7 +28,7 @@ pub(super) fn provided() -> Result<Vec<ProvidedTool>, PluginError> {
             json!({
                 "type": "object",
                 "properties": {
-                    "text": {"type": "string", "description": "Memory text."},
+                    "text": {"type": "string", "description": "What to remember, in a few words."},
                 },
                 "required": ["text"],
                 "additionalProperties": false,

@@ -40,7 +40,7 @@ async function fingerprintOf(wire: Wire): Promise<string> {
     .fingerprint;
 }
 
-/** Mira on the model server, her reply style switched on beside the plugins she runs by default. */
+/** Mira on the model server, her reply style and Ask to Change Settings switched on beside the plugins she runs by default. */
 async function replyStyleHome() {
   const model = await startModelServer();
   const daemon = await startDaemon(
@@ -49,7 +49,10 @@ async function replyStyleHome() {
       'character-data': {
         mira: {
           'config.json': configJson({
-            plugins: {'reply-style': {enabled: true}},
+            plugins: {
+              'reply-style': {enabled: true},
+              'runtime.plugin': {enabled: true},
+            },
           }),
         },
       },
@@ -65,7 +68,16 @@ async function replyStyleHome() {
 it('plugins.tool-exposure: the model is offered the tools of each plugin she runs, and once one is switched off on her screen, none of its tools', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
-    createHome({'config.json': configJson({project02: model.settings})}),
+    createHome({
+      'config.json': configJson({project02: model.settings}),
+      'character-data': {
+        mira: {
+          'config.json': configJson({
+            plugins: {'runtime.plugin': {enabled: true}},
+          }),
+        },
+      },
+    }),
   );
   const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');
@@ -121,7 +133,10 @@ it("plugins.config-tools-read: runtime_plugin_config shows the model one plugin'
           'character-data': {
             mira: {
               'config.json': configJson({
-                plugins: {'reply-style': {config: {signoff: 'Yours.'}}},
+                plugins: {
+                  'reply-style': {config: {signoff: 'Yours.'}},
+                  'runtime.plugin': {enabled: true},
+                },
               }),
             },
           },

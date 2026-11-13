@@ -117,7 +117,12 @@ it("model.history-replay: after the daemon dies in the middle of a turn, her nex
     'config.json': configJson({project02: model.settings}),
     'character-data': {
       mira: {
-        'config.json': configJson({plugins: {'reply-style': {enabled: true}}}),
+        'config.json': configJson({
+          plugins: {
+            'reply-style': {enabled: true},
+            'runtime.plugin': {enabled: true},
+          },
+        }),
       },
     },
   });

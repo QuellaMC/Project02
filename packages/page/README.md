@@ -151,10 +151,11 @@ character a model.
 While her settings give her a phone, her page has her apps, over the
 daemon's verbs for them: an icon for each app on her phone but the App
 Store, which has nothing to set, each opening the app's page; Get More
-Apps; and, among her permissions, Ask to Install Apps, her phone's own
-field, saved as any field is. A page about her apps reads her phone when
-the window comes to it and again on every `phone_changed` naming her and
-every `health_changed`, which the person's connections moving sends, and
+Apps; and, among her permissions, her phone's own fields, Ask to Install
+Apps and A Gift from You, each saved as any field is. A page about her
+apps reads her phone when the window comes to it and again on every
+`phone_changed` naming her and every `health_changed`, which the person's
+connections moving sends, and
 Get More Apps and an app's page read the App Store's apps for her; only
 the newest read of each lands. An app's page says whose phone it is on,
 its version and where it came from; offers Update while the App Store

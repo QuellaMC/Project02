@@ -59,7 +59,13 @@ async fn a_checkpoint_gone_or_outgrown_is_folded_anew_from_her_log() {
     patch(&host, "p1", json!({"mood": "curious"})).await;
     delete(&checkpoint);
 
-    assert!(notes(&host).await[0].contains("mood=curious; energy=medium"));
+    assert_eq!(
+        notes(&host).await,
+        [
+            "You feel curious. Your energy is middling. Your attention is here. You are not in the \
+             middle of anything. You feel like company."
+        ]
+    );
     assert!(
         text_of(&checkpoint).is_some(),
         "the rebuilt checkpoint is written"
@@ -84,7 +90,7 @@ async fn a_checkpoint_gone_or_outgrown_is_folded_anew_from_her_log() {
         .unwrap();
     drop(files);
 
-    assert!(notes(&host).await[0].contains("mood=curious; energy=high"));
+    assert!(notes(&host).await[0].starts_with("You feel curious. You have plenty of energy."));
 }
 
 #[tokio::test]

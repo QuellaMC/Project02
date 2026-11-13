@@ -1,8 +1,9 @@
 //! The phone package: her phone in her hands. Before each model call she
-//! is told the apps on it, and her tools let her open an app, to see its
-//! screen and what she can do in it, act in one, ask the person to sign an
-//! app in with a connection of theirs, and, unless her settings say
-//! otherwise, ask the person to install an app of the App Store. Her phone
+//! is told it is hers, a gift from the person while her settings say so,
+//! and the apps on it, and her tools let her open an app, to see its screen
+//! and what she can do in it, act in one, ask the person to sign an app in
+//! with a connection of theirs, and, unless her settings say otherwise, ask
+//! the person to install an app of the App Store. Her phone
 //! is the apps it comes with, the App Store among them, and those
 //! installed on it, which this plugin's store keeps with what each app
 //! keeps, read and written under the lease of the hook that calls it. Her
@@ -54,12 +55,16 @@ const USE: &str = "phone.use";
 /// an app.
 const ASK_TO_INSTALL: &str = "askToInstall";
 
+/// The field of her settings that has her know her phone as a gift from
+/// the person.
+const GIFT: &str = "gift";
+
 const STORE_UNAVAILABLE: &str = "store_unavailable";
 
-const OPEN_DESCRIPTION: &str = "Open an app on your phone to see its screen, its views, and the \
-     actions you can take in it, each with the input it takes.";
-const USE_DESCRIPTION: &str = "Take one of an app's actions on your phone, with the input it \
-     takes. You get back what it answered and the screen it shows after.";
+const OPEN_DESCRIPTION: &str = "Open an app on your phone and look at its screen: what it shows, \
+     and what you can do there.";
+const USE_DESCRIPTION: &str = "Do something in an app on your phone. You see what came of it, and \
+     its screen after.";
 const APP: &str = "The app's id, in quotes beside its name among your apps.";
 
 /// The list's factory of the phone, which a host builds itself, handing it
@@ -139,6 +144,7 @@ pub(crate) fn factory(
             internet: Arc::clone(&internet),
             connections: Arc::clone(&connections),
             keys,
+            gift: input.config().value(GIFT) == Some(&Value::Bool(true)),
             tools,
         }) as Arc<dyn RuntimePlugin>)
     })
@@ -187,6 +193,8 @@ struct PhonePlugin {
     connections: Arc<dyn Connections>,
     /// The person's key for each account they gave one for.
     keys: Vec<(&'static Account, Key)>,
+    /// Whether she knows her phone as a gift from the person.
+    gift: bool,
     tools: Vec<ProvidedTool>,
 }
 
@@ -242,10 +250,11 @@ impl RuntimePlugin for PhonePlugin {
         &self.tools
     }
 
-    /// Names her apps, as her phone lists them without running any, each
-    /// that the person said may not wake her saying so; what of the lists
-    /// her phone keeps does not read is passed over and said in the note's
-    /// record.
+    /// Says her phone is hers, a gift from the person while her settings
+    /// say so, and names her apps, as her phone lists them without running
+    /// any, each that the person said may not wake her saying so; what of
+    /// the lists her phone keeps does not read is passed over and said in
+    /// the note's record.
     async fn before_role_model_call(
         &self,
         context: &HookContext,
@@ -277,13 +286,19 @@ impl RuntimePlugin for PhonePlugin {
             ),
         };
 
+        let yours = if self.gift {
+            format!("Your phone is a gift from {}.", whom(person.as_ref()))
+        } else {
+            "Your phone.".to_owned()
+        };
+
         Ok(BeforeRoleModelCallOutput {
             context_items: vec![ContextItem::new(
                 note,
                 ContextItemKind::RuntimeNote,
                 format!(
-                    "On your phone: {}. Open an app with {OPEN} to see its screen and what you \
-                     can do in it, then act in it with {USE}.",
+                    "{yours} On it: {}. To use an app, open it first with {OPEN} and look at its \
+                     screen; then do what you want in it with {USE}.",
                     apps.join("; ")
                 ),
             )],
@@ -551,9 +566,9 @@ fn named(name: &str, id: &Identifier) -> String {
 }
 
 /// The person as a sentence to her names them: by the name they go by,
-/// as her notes do, or as them.
+/// as her notes do, or as the one she writes with.
 fn whom(person: Option<&SpeakerName>) -> &str {
-    person.map_or("them", SpeakerName::as_str)
+    person.map_or("the one you write with", SpeakerName::as_str)
 }
 
 /// What is the person's, as a sentence to her says it: `Sam's`, or
@@ -575,7 +590,7 @@ fn noted(app: &Listed, on_phone: &OnPhone, person: Option<&SpeakerName>) -> Stri
         format!(
             "{} (\"{id}\", which {} said may not wake you)",
             app.name,
-            person.map_or("they", SpeakerName::as_str)
+            whom(person)
         )
     } else {
         named(&app.name, id)

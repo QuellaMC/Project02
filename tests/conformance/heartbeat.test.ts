@@ -332,7 +332,7 @@ it("heartbeat.tools: a moment in which she uses a tool and says nothing ends wit
     messagesOf(prompt).some(
       message =>
         message.role === 'system' &&
-        message.content?.includes('mood=curious') === true,
+        message.content?.includes('You feel curious.') === true,
     ),
   ).toBe(true);
   expect(conversationIn(prompt)).toMatchObject([

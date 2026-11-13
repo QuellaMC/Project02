@@ -55,7 +55,7 @@ it('plugins.character-state-patch: a state patch shows in her next prompt, while
     messagesOf(model.requests.at(-1)).some(
       message =>
         message.role === 'system' &&
-        message.content?.includes('mood=playful') === true,
+        message.content?.includes('You feel playful.') === true,
     ),
   ).toBe(true);
 });

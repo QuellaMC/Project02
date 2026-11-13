@@ -1,11 +1,11 @@
 //! The character-state package: how the character is right now, five
-//! aspects of her own inner state, shown to her before each turn and
-//! changed by her alone through one tool. Each accepted patch is a line of
-//! her log, `events.jsonl`, the one truth of the state; `checkpoint.json`
-//! holds what the log folds to and how many lines it held then, so a read
-//! folds nothing. The checkpoint is a cache: one the log has outgrown,
-//! none, or one that does not read is folded anew from the log, and a line
-//! of the log that is no patch is passed over and said.
+//! aspects of her own inner state, told to her before each turn in a
+//! sentence each and changed by her alone through one tool. Each accepted
+//! patch is a line of her log, `events.jsonl`, the one truth of the state;
+//! `checkpoint.json` holds what the log folds to and how many lines it held
+//! then, so a read folds nothing. The checkpoint is a cache: one the log
+//! has outgrown, none, or one that does not read is folded anew from the
+//! log, and a line of the log that is no patch is passed over and said.
 
 use std::sync::Arc;
 
@@ -29,56 +29,72 @@ const CHECKPOINT: &str = "checkpoint.json";
 /// log this one cannot fold.
 const CHECKPOINT_VERSION: u64 = 1;
 
-const DESCRIPTION: &str = "Adjust how you are right now — your own mood, energy, attention, \
-     activity, or social orientation (yours, never theirs). Call it when the conversation \
-     genuinely shifts something in you.";
+const DESCRIPTION: &str = "Note how you feel now, when something in you has really changed: \
+     your mood, your energy, where your attention is, what you are doing, how much you want \
+     company.";
 
-/// One aspect of the state: its field in a patch and in the files, the
-/// word the note gives it, what the model is told of it, the values it
-/// takes, and its value before any patch.
+/// One aspect of the state: its field in a patch and in the files, what
+/// the model is told of it, the values it takes, each with the sentence
+/// the note says of it, and its value before any patch.
 struct Aspect {
     field: &'static str,
-    word: &'static str,
     description: &'static str,
-    values: &'static [&'static str],
+    values: &'static [(&'static str, &'static str)],
     initial: &'static str,
 }
 
-/// The aspects, in the order the note names them.
+/// The aspects, in the order the note says them.
 const ASPECTS: [Aspect; 5] = [
     Aspect {
         field: "mood",
-        word: "mood",
-        description: "Your own mood right now (yours, never theirs).",
-        values: &["steady", "curious", "concerned", "playful", "tired"],
+        description: "Your mood.",
+        values: &[
+            ("steady", "You feel steady."),
+            ("curious", "You feel curious."),
+            ("concerned", "You feel worried."),
+            ("playful", "You feel playful."),
+            ("tired", "You feel worn out."),
+        ],
         initial: "steady",
     },
     Aspect {
         field: "energy",
-        word: "energy",
-        description: "Your own energy right now (yours, never theirs).",
-        values: &["low", "medium", "high"],
+        description: "Your energy.",
+        values: &[
+            ("low", "Your energy is low."),
+            ("medium", "Your energy is middling."),
+            ("high", "You have plenty of energy."),
+        ],
         initial: "medium",
     },
     Aspect {
         field: "attention",
-        word: "attention",
-        description: "Where your attention is right now.",
-        values: &["present", "focused", "distracted"],
+        description: "Where your attention is.",
+        values: &[
+            ("present", "Your attention is here."),
+            ("focused", "You are focused."),
+            ("distracted", "Your mind keeps wandering."),
+        ],
         initial: "present",
     },
     Aspect {
         field: "currentActivity",
-        word: "activity",
-        description: "What you are doing right now.",
-        values: &["idle", "chatting", "reflecting"],
+        description: "What you are doing.",
+        values: &[
+            ("idle", "You are not in the middle of anything."),
+            ("chatting", "You are in the middle of talking."),
+            ("reflecting", "You are turning something over in your mind."),
+        ],
         initial: "idle",
     },
     Aspect {
         field: "socialOrientation",
-        word: "social",
-        description: "How open to company you feel right now.",
-        values: &["open", "supportive", "reserved"],
+        description: "How much you want company.",
+        values: &[
+            ("open", "You feel like company."),
+            ("supportive", "You want to be there for someone."),
+            ("reserved", "You would rather keep to yourself."),
+        ],
         initial: "open",
     },
 ];
@@ -88,9 +104,11 @@ pub(crate) fn create(_input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>
     let properties: Map<String, Value> = ASPECTS
         .iter()
         .map(|aspect| {
+            let values: Vec<&str> = aspect.values.iter().map(|(value, _)| *value).collect();
+
             (
                 aspect.field.to_owned(),
-                json!({"type": "string", "description": aspect.description, "enum": aspect.values}),
+                json!({"type": "string", "description": aspect.description, "enum": values}),
             )
         })
         .collect();
@@ -333,7 +351,7 @@ impl Aspect {
 
         self.values
             .iter()
-            .copied()
+            .map(|(candidate, _)| *candidate)
             .find(|candidate| *candidate == text)
     }
 }
@@ -355,17 +373,21 @@ impl State {
         Self(values)
     }
 
+    /// The note of the state: the sentence of each aspect's value, in
+    /// order, on one line.
     fn note(self) -> String {
-        let aspects: Vec<String> = ASPECTS
+        ASPECTS
             .iter()
             .zip(self.0)
-            .map(|(aspect, value)| format!("{}={value}", aspect.word))
-            .collect();
-
-        format!(
-            "How you are right now (your own inner state, not theirs): {}",
-            aspects.join("; ")
-        )
+            .flat_map(|(aspect, value)| {
+                aspect
+                    .values
+                    .iter()
+                    .filter(move |(candidate, _)| *candidate == value)
+                    .map(|(_, sentence)| *sentence)
+            })
+            .collect::<Vec<_>>()
+            .join(" ")
     }
 
     /// What each aspect `after` holds otherwise than this state.

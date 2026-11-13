@@ -12,8 +12,8 @@ import {
   appFileTypes,
   appShownOf,
   appsFooter,
-  askToInstallRow,
   hasPhone,
+  herPhoneRow,
   replacesLine,
   storeRows,
   stripOf,
@@ -63,7 +63,7 @@ export function HerApps({
   }
 
   const strip = stripOf(settings.phones.get(characterId));
-  const ask = askToInstallRow(characterId);
+  const ask = herPhoneRow(characterId, 'askToInstall');
   const field = fieldAt(view, ask.place);
   const mayAsk =
     field !== undefined && valueNow(settings, ask, field) === 'true';

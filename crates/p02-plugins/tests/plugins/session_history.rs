@@ -276,16 +276,13 @@ async fn a_read_scrolls_a_session_by_anchor_and_says_what_it_could_not_find() {
     );
     assert_eq!(
         refused(&unknown),
-        (
-            "session_not_found",
-            "Session \"nope\" is not in this character's history."
-        )
+        ("session_not_found", "You have no conversation \"nope\".")
     );
     assert_eq!(
         refused(&unanchored),
         (
             "message_not_found",
-            "Message \"chat.1:message-99\" is not in session \"chat.1\"."
+            "There is no message \"chat.1:message-99\" in conversation \"chat.1\"."
         )
     );
 

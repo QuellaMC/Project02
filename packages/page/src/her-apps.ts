@@ -64,16 +64,18 @@ export function hasPhone(view: OkView): boolean {
   return sectionOf(view, 'plugins', phonePlugin)?.enabled === true;
 }
 
-/** Her Ask to Install Apps: the field of her phone's that lets her ask the person to install an app. */
-export function askToInstallRow(characterId: string): Row {
+/**
+ * A field of her phone's that is hers: Ask to Install Apps, which lets her
+ * ask the person to install an app, or A Gift from You, which has her know
+ * her phone as the person's gift.
+ */
+export function herPhoneRow(
+  characterId: string,
+  name: 'askToInstall' | 'gift',
+): Row {
   return {
     target: characterTarget(characterId),
-    place: {
-      kind: 'field',
-      namespace: 'plugins',
-      id: phonePlugin,
-      name: 'askToInstall',
-    },
+    place: {kind: 'field', namespace: 'plugins', id: phonePlugin, name},
   };
 }
 

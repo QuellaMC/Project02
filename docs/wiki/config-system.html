@@ -386,8 +386,10 @@
     </p>
 
     <p>
-      Disabling <code>runtime.plugin</code> removes all three model-facing management tools together;
-      the daemon's config verbs remain the recovery path. <code>send_message</code>
+      <code>runtime.plugin</code> is off unless a character's settings or her package switch it
+      on, as with any plugin off by default: it is for a plain assistant, and a person is never
+      handed it. While it is off, none of its three model-facing tools is offered; the daemon's
+      config verbs remain the recovery path. <code>send_message</code>
       is not a plugin tool: it is how the character writes to the person, built into the role model
       and always offered, so no configuration can take it away.
     </p>
@@ -403,7 +405,8 @@
       <code>plugins.&lt;id&gt;</code> stanza naming no plugin of the build is reported as the
       warning <code>runtime_config_unknown_plugin</code> at its path, and blocks nothing.
       Bundled Character State is switched on where a character's package requires it: the
-      Mira package enables it in Mira's overlay rather than through a global manifest default.
+      Mira package enables it in Mira's overlay rather than through a global manifest default,
+      and sets her phone's <code>gift</code> field off there the same way.
     </p>
 
     <h2>Pre-release compatibility and future import</h2>

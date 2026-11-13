@@ -35,4 +35,5 @@ p02-shared.
   packages has her id in other capital letters, since writing her would
   leave a package unpublished.
 - **The bundled packages** are the folders of `packages/`, each read when
-  the crate builds.
+  the crate builds: today Mira, a person who lives in our world, whose
+  package says her phone is simply hers, not a gift from the person.

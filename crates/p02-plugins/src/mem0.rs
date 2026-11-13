@@ -253,7 +253,7 @@ impl Setup {
     }
 }
 
-/// A recalled memory, for the model's recalled-memory block.
+/// A recalled memory, for her `memories` fence.
 fn recalled(found: &Found) -> ContextItem {
     let item = ContextItem::new(
         item_id(&found.id),
@@ -416,11 +416,7 @@ fn text_input<'a>(call: &'a ToolCall, field: &str) -> Result<&'a str, PluginErro
         .get(field)
         .and_then(Value::as_str)
         .filter(|text| !text.trim().is_empty())
-        .ok_or_else(|| {
-            PluginError::new(format!(
-                "Memory tool input \"{field}\" must be a non-empty string."
-            ))
-        })
+        .ok_or_else(|| PluginError::new(format!("Nothing was done: {field} had no words.")))
 }
 
 fn failed(error: &BackendError) -> PluginError {

@@ -996,7 +996,6 @@ test('page.add-character: a character file shows who she is and what she comes w
     'Notebook',
     'Look Back',
     'Reply Style',
-    'Ask to Change Settings',
   ]);
   await expect(
     page.getByText('This app does not have: teleport.'),

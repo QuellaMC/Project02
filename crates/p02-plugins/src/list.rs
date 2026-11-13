@@ -140,7 +140,7 @@ mod tests {
         assert_eq!(
             listed,
             [
-                ("runtime.plugin", true),
+                ("runtime.plugin", false),
                 ("character-memory", true),
                 ("character-state", false),
                 ("mem0", false),

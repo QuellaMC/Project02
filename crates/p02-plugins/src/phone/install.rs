@@ -22,9 +22,9 @@ use crate::package::{FilesError, admitted, blocking, leased, tool, unasked};
 
 pub(super) const INSTALL: &str = "phone.install";
 
-const DESCRIPTION: &str = "Ask to install an app of the App Store on your phone, by its id there. \
-     The person is asked first; on their yes the app is on your phone, to open and use at once. \
-     Open the App Store to see what there is.";
+const DESCRIPTION: &str = "Install an app from the App Store on your phone, by its id there. The \
+     one you write with is asked first, and once they say yes it is on your phone, to open and use \
+     at once. Open the App Store to see what there is.";
 
 /// What a client shown the person the preparation reads it as.
 const PREVIEW_KIND: &str = "phone_app_install";

@@ -162,7 +162,7 @@ it('store.look-through: before she opens the App Store a look at it says so; her
   await say('Anything good in the App Store?', 'look');
 
   expect(systemLines(model.requests[0])).toContain(
-    '- On your phone: Clock ("clock") — Alarms, timers, and the time anywhere; Notes ("notes") — Notes, quietly; App Store ("store") — More apps, each reviewed by Project02. Open an app with phone.open to see its screen and what you can do in it, then act in it with phone.use.',
+    '- Your phone. On it: Clock ("clock") — Alarms, timers, and the time anywhere; Notes ("notes") — Notes, quietly; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
   );
   expect(toolResults(model.requests[2])).toMatchObject([
     {
@@ -600,7 +600,7 @@ it('store.person-gives: the person gives her an app of the App Store and nobody 
   );
   await say('Remind me to call the dentist.', 'dentist');
   expect(systemLines(model.requests[0])).toContain(
-    '- On your phone: Clock ("clock") — Alarms, timers, and the time anywhere; Reminders ("reminders") — Things to do, on a day and time; App Store ("store") — More apps, each reviewed by Project02. Open an app with phone.open to see its screen and what you can do in it, then act in it with phone.use.',
+    '- Your phone. On it: Clock ("clock") — Alarms, timers, and the time anywhere; Reminders ("reminders") — Things to do, on a day and time; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
   );
   expect(toolResults(model.requests[1])).toMatchObject([
     {

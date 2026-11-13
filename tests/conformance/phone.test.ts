@@ -217,7 +217,7 @@ it('phone.clock-alarm: she opens the Clock and is shown its views, its actions a
     messages: [{}, {text: 'Set for seven.'}],
   });
   expect(systemLines(model.requests[0])).toContain(
-    '- On your phone: Clock ("clock") — Alarms, timers, and the time anywhere; App Store ("store") — More apps, each reviewed by Project02. Open an app with phone.open to see its screen and what you can do in it, then act in it with phone.use.',
+    '- Your phone. On it: Clock ("clock") — Alarms, timers, and the time anywhere; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
   );
 
   const [opened, used] = toolResults(model.requests[2]);
@@ -334,7 +334,36 @@ it('phone.clock-alarm: she opens the Clock and is shown its views, its actions a
   });
 });
 
-it("phone.refusals: what her phone refuses she reads as its sentence with what there is instead: an app not on her phone with her apps, a view the app has not with its views, an action it has not with its actions, and input the action's contract refuses as the contract says it; the turn goes on to its reply, and nothing is saved", async () => {
+it("phone.gift: her note opens on how her phone is hers: Mira's package has it simply hers, and once her settings switch A Gift from You on, it is a gift from Sam", async () => {
+  const model = await startModelServer();
+  const wire = wireOf(await startDaemon(quietHome(model)));
+  const say = await converse(wire, 'mira');
+  const opening = (request: ModelRequest | undefined) =>
+    systemLines(request)
+      .find(line => line.includes(' On it: '))
+      ?.split(' On it: ')[0];
+
+  model.answer(reply('Hi.'), reply('Hi again.'));
+  await say('Hello.', 'hers');
+  await saveConfig(
+    wire,
+    {scope: 'character', characterId: 'mira'},
+    {
+      kind: 'section_field_set',
+      namespace: 'plugins',
+      id: 'phone',
+      field: 'gift',
+      value: true,
+    },
+  );
+  await say('Hello again.', 'gift');
+  expect(model.requests.map(opening)).toEqual([
+    '- Your phone.',
+    '- Your phone is a gift from Sam.',
+  ]);
+});
+
+it("phone.refusals:what her phone refuses she reads as its sentence with what there is instead: an app not on her phone with her apps, a view the app has not with its views, an action it has not with its actions, and input the action's contract refuses as the contract says it; the turn goes on to its reply, and nothing is saved", async () => {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({project02: model.settings}),
@@ -556,7 +585,7 @@ it('phone.may-not-wake: while Sam says the Clock may not wake her, its ring long
   model.answer(reply('Morning, Sam.'));
   await say('Morning.', 'morning');
   expect(systemLines(model.requests[0])).toContain(
-    '- On your phone: Clock ("clock", which Sam said may not wake you) — Alarms, timers, and the time anywhere; Notes ("notes") — What she writes down; App Store ("store") — More apps, each reviewed by Project02. Open an app with phone.open to see its screen and what you can do in it, then act in it with phone.use.',
+    '- Your phone. On it: Clock ("clock", which Sam said may not wake you) — Alarms, timers, and the time anywhere; Notes ("notes") — What she writes down; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
   );
 
   model.answer(reply('Up you get, Sam.'));
