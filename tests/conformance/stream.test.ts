@@ -23,7 +23,7 @@ function dataOf(frame: Frame | undefined): unknown {
   return JSON.parse(frame?.data ?? 'null');
 }
 
-/** A visible_reply of this many characters, its arguments streamed in 64 KiB pieces. */
+/** A send_message of this many characters, its arguments streamed in 64 KiB pieces. */
 function longReply(characters: number): unknown[] {
   const piece = 64 * 1024;
 
@@ -281,7 +281,7 @@ it('stream.drafts: a turn reaches the stream as its line, then the turn running 
       {
         index,
         id: `call_${String(index)}`,
-        name: 'visible_reply',
+        name: 'send_message',
         arguments: JSON.stringify({text}),
       },
       cut,
@@ -353,7 +353,7 @@ it('stream.drafts-withdrawn: the drafts of a round whose answer is refused, or t
         ...toolCall({
           index: 2,
           id: 'call_second_reply',
-          name: 'visible_reply',
+          name: 'send_message',
           arguments: JSON.stringify({text: 'And again.'}),
         }),
         ...search('tea'),

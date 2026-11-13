@@ -90,7 +90,7 @@ async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_no
     });
     stub.answer(reply("After a 503."));
 
-    let recovered = invoke(&adapter, &["visible_reply"]).await;
+    let recovered = invoke(&adapter, &["send_message"]).await;
     let [first, second] = stub.requests().try_into().unwrap();
 
     assert_eq!(output(&recovered)["text"], json!("After a 503."));
@@ -100,7 +100,7 @@ async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_no
     stub.drop_next_connection();
     stub.answer(reply("After a drop."));
 
-    let reconnected = invoke(&self::adapter(&stub), &["visible_reply"]).await;
+    let reconnected = invoke(&self::adapter(&stub), &["send_message"]).await;
 
     assert_eq!(output(&reconnected)["text"], json!("After a drop."));
     assert_eq!(stub.connections_still_to_drop(), 0);
@@ -109,7 +109,7 @@ async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_no
         stub.answer(slow_down(attempt));
     }
 
-    let exhausted = invoke(&adapter, &["visible_reply"]).await;
+    let exhausted = invoke(&adapter, &["send_message"]).await;
 
     assert_eq!(
         failure(&exhausted),
@@ -129,8 +129,8 @@ async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_no
         body: "not json".to_owned(),
     });
 
-    let unauthorized = invoke(&adapter, &["visible_reply"]).await;
-    let bad = invoke(&adapter, &["visible_reply"]).await;
+    let unauthorized = invoke(&adapter, &["send_message"]).await;
+    let bad = invoke(&adapter, &["send_message"]).await;
 
     assert_eq!(
         failure(&unauthorized),
@@ -151,7 +151,7 @@ async fn an_answer_that_is_no_whole_completion_fails_the_round_without_the_key()
     let adapter = adapter(&stub);
     let drafted = call_piece(
         0,
-        Some(("call_reply", "visible_reply")),
+        Some(("call_reply", "send_message")),
         "{\"text\": \"Half a th",
     );
     let cases = [
@@ -185,7 +185,7 @@ async fn an_answer_that_is_no_whole_completion_fails_the_round_without_the_key()
     for (frames, code, message) in cases {
         stub.answer(Answer::events(&frames));
 
-        let answer = invoke(&adapter, &["visible_reply"]).await;
+        let answer = invoke(&adapter, &["send_message"]).await;
 
         assert_eq!(
             failure(&answer),
@@ -326,7 +326,7 @@ async fn the_provider_s_silence_is_bounded_at_thirty_seconds_unless_shortened() 
     let adapter = adapter(&stub);
     let _release = stub.hold();
     let started = Instant::now();
-    let invoking = invoke(&adapter, &["visible_reply"]);
+    let invoking = invoke(&adapter, &["send_message"]);
 
     tokio::pin!(invoking);
 

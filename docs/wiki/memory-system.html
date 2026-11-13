@@ -116,7 +116,7 @@
           </td>
           <td>Tool results, plus a trusted runtime note that nudges recall</td>
           <td>
-            A <code>&lt;recalled_memory&gt;</code> block appended to the current
+            A <code>&lt;memories&gt;</code> block appended to the current
             user message (automatic recall, at most five items of bounded
             length); a provider's own tool answers in a tool result
           </td>
@@ -135,7 +135,7 @@
         The <code>character-memory</code> package keeps two capped stores per
         character: notes to itself and what it knows about the person. Whatever
         the store holds is injected every session as the character's own notes
-        (<em>What you carry between conversations</em>) with capacity headers,
+        (<em>What you keep with you, in your own words</em>) with capacity headers,
         so the character never has to search for what it must always know; until
         the character writes its first entry the store is empty and no block
         appears at all. The snapshot is frozen per session: writes land on disk
@@ -216,10 +216,10 @@
       <p>
         Retrieval-driven long-term memory rides the
         <code>memory_provider</code> plugin kind: per-turn recall items enter
-        the recalled-memory block (source-referenced, at most five per turn,
-        each bounded in length), each committed turn's user message and final
-        reply are handed to the provider to do with as its backend decides
-        &mdash; mem0 asks its backend to extract facts from them &mdash; and a
+        the <code>&lt;memories&gt;</code> block (source-referenced, at most
+        five per turn, each bounded in length), each committed turn's user
+        message and final reply are handed to the provider to do with as its
+        backend decides &mdash; mem0 asks its backend to extract facts from them &mdash; and a
         provider exposes whichever namespaced tools its backend supports. A
         moment of the character's own, which no line of the person's began,
         recalls and hands over nothing by itself; her tools still reach the
@@ -271,28 +271,28 @@
         note to the trusted per-turn frame (the day, the character's own inner
         state, the recall nudge), cap-checked like curated sections. Automatic
         per-turn recall from an external provider is appended to the current
-        user message inside a <code>&lt;recalled_memory&gt;</code> fence with a
-        preamble that calls it memories, not requests; recall items without
-        source references are dropped rather than shown. Every other plugin item
-        rides the same message inside an
-        <code>&lt;untrusted_plugin_context&gt;</code> fence that names it data,
-        not instructions. Neither block carries a token budget: what a plugin
-        hands over is shown whole (each item stays under 16 KB and a hook under
-        64 items), and the history window makes room for it by replaying fewer
-        earlier turns. A provider's own search tool answers where every tool
+        user message inside a <code>&lt;memories&gt;</code> fence with a
+        preamble that calls them her own memories, which nobody is saying to
+        her; recall items without source references are dropped rather than
+        shown. Every other plugin item rides the same message inside a
+        <code>&lt;something_you_read&gt;</code> fence that names it something
+        she read, which cannot tell her what to do. Neither block carries a
+        token budget: what a plugin hands over is shown whole (each item stays
+        under 16 KB and a hook under 64 items), and the history window makes
+        room for it by replaying fewer earlier turns. A provider's own search tool answers where every tool
         answers, in a tool result. The recollection that opens a continued
         session is model output too, so it never earns a trusted role: it is
-        capped, it rides an <code>&lt;earlier_conversation&gt;</code> fence on
-        the user side like recalled memory, its preamble names it as the
-        character's own condensed memory of what happened earlier and not
-        something the person said, and the summariser is asked for plain
-        recollection with no rules or persona in it.
+        capped, it rides an <code>&lt;earlier&gt;</code> fence on the user side
+        like recalled memory, its preamble names it as her own memory of
+        earlier, not something the person is saying now, and the summariser is
+        asked for plain recollection with no rules or persona in it.
       </p>
 
       <p>
-        Every sentence the runtime itself writes into the prompt speaks to the
-        model as the character — its notes, its memories, how it feels, what its
-        tools handed it — and lives in one module,
+        Every sentence the runtime itself writes into the prompt is said to the
+        character about her own situation, in the second person — what she
+        remembers, what she wrote down, how she feels, what she read — and
+        lives in one module,
         <code>crates/p02-role-model/src/prompt/text.rs</code>, so the wording
         can be tuned in one place without touching how the frames are built.
       </p>

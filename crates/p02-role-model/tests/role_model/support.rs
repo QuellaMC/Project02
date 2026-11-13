@@ -6,7 +6,7 @@ use p02_contracts::{
     ChatCompletionTool, ChatMessage, ChatToolFunction, ConversationTurn, DecisionContext,
     PluginToolDefinition, ProvidedTool, ReplyDelta, ReplyDraft, ToolInputContract,
 };
-use p02_core::{CharacterProfile, EventId, EventIdentity, SpeakerName, Timestamp, TraceId};
+use p02_core::{EventId, EventIdentity, SpeakerName, Timestamp, TraceId};
 use p02_shared::Identifier;
 use serde_json::json;
 
@@ -35,16 +35,10 @@ pub(crate) fn event() -> EventIdentity {
     .unwrap()
 }
 
-/// Mira's context, the person going by the name they have until they
-/// choose one.
+/// A context for a person going by the name they have until they choose
+/// one.
 pub(crate) fn context() -> DecisionContext {
-    DecisionContext::new(
-        CharacterProfile {
-            id: id("mira"),
-            display_name: SpeakerName::new("Mira").unwrap(),
-        },
-        SpeakerName::new("You").unwrap(),
-    )
+    DecisionContext::new(SpeakerName::new("You").unwrap())
 }
 
 /// A tool `name` of `plugin`, taking anything an object holds.

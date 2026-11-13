@@ -158,7 +158,7 @@ fn failure(answer: &ProviderAnswer) -> (String, String, Option<u16>) {
 
 /// A round of the loop with only her reply offered.
 async fn invoke(adapter: &Adapter) -> ProviderAnswer {
-    let (messages, tools) = wire(&["visible_reply"]);
+    let (messages, tools) = wire(&["send_message"]);
 
     adapter.invoke(&Invocation::new(&messages, &tools)).await
 }
@@ -234,7 +234,7 @@ fn offered(name: &str) -> Value {
 #[tokio::test]
 async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as_written() {
     let stub = Stub::start().await;
-    let (mut messages, tools) = wire(&["visible_reply", "memory.search"]);
+    let (mut messages, tools) = wire(&["send_message", "memory.search"]);
 
     messages.insert(
         1,
@@ -244,12 +244,12 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
     );
     messages.extend(searches());
     messages.push(ChatMessage::System {
-        content: "Your last reply could not be used.".to_owned(),
+        content: "That did not go through.".to_owned(),
     });
     stub.answer(message(&[
         thinking(0),
         text(1, "A note."),
-        tool_use(2, "visible_reply", &["{\"text\":\"Hel", "lo.\"}"]),
+        tool_use(2, "send_message", &["{\"text\":\"Hel", "lo.\"}"]),
         tool_use(3, "memory_search", &["{\"q\":", "\"sky\"}"]),
         stopped("tool_use"),
     ]));
@@ -298,9 +298,9 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
                 {"role": "user", "content": [shown_result(1, 1), shown_result(2, 2)]},
                 {"role": "assistant", "content": [shown_search(3, "rain")]},
                 {"role": "user", "content": [shown_result(3, 3)]},
-                {"role": "system", "content": "Your last reply could not be used."},
+                {"role": "system", "content": "That did not go through."},
             ],
-            "tools": [offered("visible_reply"), offered("memory_search")],
+            "tools": [offered("send_message"), offered("memory_search")],
             "stream": true,
             "fallbacks": "default",
         })
@@ -325,7 +325,7 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
         (
             json!({
                 "toolCalls": [
-                    {"name": "visible_reply", "input": {"text": "Hello."}},
+                    {"name": "send_message", "input": {"text": "Hello."}},
                     {"name": "memory.search", "input": {"q": "sky"}},
                 ],
                 "text": "A note.",
@@ -343,11 +343,11 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
 #[tokio::test]
 async fn a_fallback_taking_over_lets_go_the_reply_before_it_and_drafts_its_own_in_its_place() {
     let stub = Stub::start().await;
-    let (messages, tools) = wire(&["visible_reply"]);
+    let (messages, tools) = wire(&["send_message"]);
 
     stub.answer(message(&[
         text(0, "A note."),
-        tool_use(1, "visible_reply", &["{\"text\":\"Half a"]),
+        tool_use(1, "send_message", &["{\"text\":\"Half a"]),
         block(
             2,
             &json!({
@@ -357,7 +357,7 @@ async fn a_fallback_taking_over_lets_go_the_reply_before_it_and_drafts_its_own_i
             }),
             Vec::new(),
         ),
-        tool_use(3, "visible_reply", &["{\"text\":\"Who", "le.\"}"]),
+        tool_use(3, "send_message", &["{\"text\":\"Who", "le.\"}"]),
         stopped("tool_use"),
     ]));
 
@@ -384,7 +384,7 @@ async fn a_fallback_taking_over_lets_go_the_reply_before_it_and_drafts_its_own_i
     assert_eq!(
         serde_json::to_value(output).unwrap(),
         json!({
-            "toolCalls": [{"name": "visible_reply", "input": {"text": "Whole."}}],
+            "toolCalls": [{"name": "send_message", "input": {"text": "Whole."}}],
             "text": "A note.",
         })
     );
@@ -394,11 +394,11 @@ async fn a_fallback_taking_over_lets_go_the_reply_before_it_and_drafts_its_own_i
 async fn every_end_of_a_round_short_of_an_answer_is_said_as_claude_s_without_the_key() {
     let stub = Stub::start().await;
     let adapter = adapter(&stub);
-    let reply = tool_use(0, "visible_reply", &["{\"text\":\"Half a th"]);
+    let reply = tool_use(0, "send_message", &["{\"text\":\"Half a th"]);
 
     stub.answer(refused(529, "overloaded_error", "Overloaded."));
     stub.answer(message(&[
-        tool_use(0, "visible_reply", &["{\"text\":\"After a 529.\"}"]),
+        tool_use(0, "send_message", &["{\"text\":\"After a 529.\"}"]),
         stopped("end_turn"),
     ]));
 

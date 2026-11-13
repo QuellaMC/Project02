@@ -19,7 +19,10 @@ nothing until they say yes, and one rule decides whether a value fits a
 settings field.
 
 A provider is a `RoleModelAdapter`, answering with what the model wrote or
-how it failed. `DecisionResult::judge` is the one verdict on a round,
-given what began its turn: the person's line, which the character
-answers, or a moment of her own, in which she owes nothing. What a record
-keeps of a round holds no credential-named value.
+how it failed. The character writes to the person with the built-in
+`send_message`, a name no plugin tool may take. `DecisionResult::judge` is
+the one verdict on a round, given what began its turn: the person's line,
+which the character answers, or a moment of her own, in which she owes
+nothing. What a record keeps of a round holds no credential-named value,
+and keeps each message she sent in it under the name `visible_reply`,
+whatever the model is offered the tool as.

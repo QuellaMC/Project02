@@ -110,7 +110,7 @@ it("services.openai-turn: a home on the OpenAI API answers through its Responses
   ).toEqual(
     expect.objectContaining({
       type: 'function',
-      name: 'visible_reply',
+      name: 'send_message',
       strict: false,
     }),
   );
@@ -264,11 +264,11 @@ it("services.claude-turn: a home on the Claude API answers through Anthropic's M
   expect(body).toMatchObject({
     max_tokens: 32768,
     stream: true,
-    system: expect.stringContaining('visible_reply') as string,
+    system: expect.stringContaining('send a message') as string,
   });
   expect(turnsOf(first)).toEqual([{role: 'user', content: 'Hello?'}]);
   expect((body['tools'] as readonly unknown[] | undefined)?.[0]).toEqual({
-    name: 'visible_reply',
+    name: 'send_message',
     description: expect.any(String) as string,
     input_schema: expect.objectContaining({type: 'object'}) as object,
     eager_input_streaming: true,

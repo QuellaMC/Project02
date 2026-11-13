@@ -75,7 +75,7 @@ async function toldACode(
   );
 }
 
-/** A visible_reply whose arguments, `{"text":"…"}`, stream one piece for each of the words. */
+/** A send_message whose arguments, `{"text":"…"}`, stream one piece for each of the words. */
 function inPieces(...words: readonly string[]): unknown[] {
   const opening = '{"text":"'.length;
 

@@ -223,7 +223,7 @@ mod tests {
     fn a_tool_is_shown_under_a_name_the_provider_takes_and_called_back_by_its_own() {
         let schema = json!({"type": "object"});
         let tools: Vec<ChatCompletionTool> = [
-            "visible_reply",
+            "send_message",
             "memory.search",
             "memory_search",
             "memory_search_2",
@@ -240,7 +240,7 @@ mod tests {
         assert_eq!(
             shown,
             [
-                "visible_reply",
+                "send_message",
                 "memory_search",
                 "memory_search_2",
                 "memory_search_2_2"

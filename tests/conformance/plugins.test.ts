@@ -75,7 +75,7 @@ it('plugins.tool-exposure: the model is offered the tools of each plugin she run
     'runtime_plugin_config_update',
   ];
   const others = [
-    'visible_reply',
+    'send_message',
     'memory_update',
     'character_state_patch',
     'phone_open',

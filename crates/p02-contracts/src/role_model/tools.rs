@@ -9,18 +9,22 @@ use serde_json::{Map, Value, json};
 use crate::role_model::reasoning::scrub_reasoning_blocks;
 use crate::tool::ProvidedTool;
 
-/// The built-in tool a character speaks with. It is always offered, ahead
-/// of every plugin tool, so no configuration can take a character's voice.
-pub const VISIBLE_REPLY: &str = "visible_reply";
+/// The built-in tool a character writes to the person with. It is always
+/// offered, ahead of every plugin tool, so no configuration can take a
+/// character's voice.
+pub const SEND_MESSAGE: &str = "send_message";
 
 /// The tool that lists the plugins installed, offered by the runtime's own
 /// plugin. While it is offered, the model is told it can ask for the
 /// inventory rather than take the tools it sees for all there is.
 pub const PLUGIN_LIST_TOOL: &str = "runtime.plugin.list";
 
-const VISIBLE_REPLY_DESCRIPTION: &str =
-    "Say something to the person you are talking with — this is how your words reach them.";
-const VISIBLE_REPLY_TEXT_DESCRIPTION: &str = "Exactly what you say, word for word.";
+/// The name a record keeps each of her messages under, whatever the model
+/// is offered the tool as: every stored round has it.
+const RECORDED_REPLY: &str = "visible_reply";
+
+const SEND_MESSAGE_DESCRIPTION: &str = "Send a message to the one you write with.";
+const SEND_MESSAGE_TEXT_DESCRIPTION: &str = "The message, exactly as you write it.";
 
 /// A tool as the model is offered it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -32,18 +36,18 @@ pub struct ModelToolDefinition {
 }
 
 impl ModelToolDefinition {
-    /// The definition of [`VISIBLE_REPLY`].
+    /// The definition of [`SEND_MESSAGE`].
     #[must_use]
-    pub fn visible_reply() -> Self {
+    pub fn send_message() -> Self {
         Self {
-            name: VISIBLE_REPLY.to_owned(),
-            description: VISIBLE_REPLY_DESCRIPTION.to_owned(),
+            name: SEND_MESSAGE.to_owned(),
+            description: SEND_MESSAGE_DESCRIPTION.to_owned(),
             input_contract: Map::from_iter([
                 ("type".to_owned(), json!("object")),
                 (
                     "properties".to_owned(),
                     json!({
-                        "text": {"type": "string", "description": VISIBLE_REPLY_TEXT_DESCRIPTION},
+                        "text": {"type": "string", "description": SEND_MESSAGE_TEXT_DESCRIPTION},
                     }),
                 ),
                 ("required".to_owned(), json!(["text"])),
@@ -94,7 +98,7 @@ pub struct ParseModelToolCallError;
 /// What the model wrote is no reply: nothing is left once its reasoning is
 /// taken out.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
-#[error("visible_reply text must not be empty")]
+#[error("Nothing was sent. The message was empty")]
 pub(crate) struct BlankReplyError;
 
 impl ModelToolCall {
@@ -139,21 +143,13 @@ impl ModelToolCall {
             }
         }
     }
-
-    #[must_use]
-    pub fn name(&self) -> &str {
-        match self {
-            Self::VisibleReply { .. } => VISIBLE_REPLY,
-            Self::Plugin { name, .. } => name.as_str(),
-        }
-    }
 }
 
 impl From<ModelToolCall> for WireCall {
     fn from(call: ModelToolCall) -> Self {
         match call {
             ModelToolCall::VisibleReply { text } => Self {
-                name: VISIBLE_REPLY.to_owned(),
+                name: RECORDED_REPLY.to_owned(),
                 input: Map::from_iter([("text".to_owned(), Value::from(text.as_str()))]),
             },
             ModelToolCall::Plugin { name, input } => Self {
@@ -169,7 +165,7 @@ impl TryFrom<WireCall> for ModelToolCall {
     type Error = ParseModelToolCallError;
 
     fn try_from(call: WireCall) -> Result<Self, Self::Error> {
-        if call.name != VISIBLE_REPLY {
+        if call.name != RECORDED_REPLY {
             return Identifier::new(&call.name)
                 .map(|name| Self::Plugin {
                     name,

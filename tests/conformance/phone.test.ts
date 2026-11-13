@@ -175,12 +175,12 @@ function openingOf(request: ModelRequest | undefined): readonly string[] {
 /** Her phone ringing as the model reads it where a line would be, what rang a line each. */
 function ringing(...rang: readonly string[]): readonly string[] {
   return [
-    '<moment_of_your_own>',
-    'Your phone is ringing — nobody has written to you, and nothing here is something Sam said.',
+    '<time_of_your_own>',
+    'Your phone is ringing. Nobody has written to you.',
     expect.stringMatching(/^It is .+\.$/u) as string,
     ...rang,
-    'What you do about it is yours. If there is something you want Sam to read, send it with visible_reply; anything else you write stays your own thought.',
-    '</moment_of_your_own>',
+    'What you do about it is yours. If there is something you want Sam to read, send a message. Anything else stays your own thought.',
+    '</time_of_your_own>',
   ];
 }
 

@@ -358,7 +358,7 @@ it("chatgpt.plan-turn: a home on a ChatGPT plan answers a turn through the plan'
     reasoning: {effort: 'low'},
     include: ['reasoning.encrypted_content'],
     tools: expect.arrayContaining([
-      expect.objectContaining({type: 'function', name: 'visible_reply'}),
+      expect.objectContaining({type: 'function', name: 'send_message'}),
     ]) as unknown,
   });
   expect(body).not.toHaveProperty('max_output_tokens');

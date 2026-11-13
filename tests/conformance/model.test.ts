@@ -94,7 +94,7 @@ it('model.provider-streaming: an answer cut anywhere, inside a frame or a charac
     {
       index: 0,
       id: 'call_first',
-      name: 'visible_reply',
+      name: 'send_message',
       arguments: '{"text":"First 🌱."}',
     },
     12,
@@ -103,7 +103,7 @@ it('model.provider-streaming: an answer cut anywhere, inside a frame or a charac
     {
       index: 1,
       id: 'call_second',
-      name: 'visible_reply',
+      name: 'send_message',
       arguments: '{"text":"Second."}',
     },
     13,
@@ -296,7 +296,7 @@ it('model.provider-timeout: a provider that never answers fails the round provid
   });
 });
 
-it('model.reasoning-blocks: a leaked think or reasoning block is scrubbed from the reply before anything shows it, whole in plain content or split across the pieces of a streamed visible_reply: never drafted, committed or read back', async () => {
+it('model.reasoning-blocks: a leaked think or reasoning block is scrubbed from the reply before anything shows it, whole in plain content or split across the pieces of a streamed send_message: never drafted, committed or read back', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),

@@ -1,4 +1,4 @@
-use p02_core::{CharacterProfile, SpeakerName};
+use p02_core::SpeakerName;
 use p02_shared::{Identifier, vocabulary};
 use serde::{Deserialize, Serialize};
 
@@ -152,12 +152,10 @@ fn non_blank(text: String) -> Result<String, BlankContextTextError> {
     }
 }
 
-/// What a model call is told besides the conversation: who the character
-/// is, the name the person goes by, and what the runtime and the plugins
-/// contribute.
+/// What a model call is told besides the conversation: the name the person
+/// goes by, and what the runtime and the plugins contribute.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecisionContext {
-    character: CharacterProfile,
     person: SpeakerName,
     /// The condensed earlier conversation a continued session opens with.
     context_summary: Option<String>,
@@ -168,9 +166,8 @@ pub struct DecisionContext {
 
 impl DecisionContext {
     #[must_use]
-    pub fn new(character: CharacterProfile, person: SpeakerName) -> Self {
+    pub fn new(person: SpeakerName) -> Self {
         Self {
-            character,
             person,
             context_summary: None,
             runtime_notes: Vec::new(),
@@ -200,11 +197,6 @@ impl DecisionContext {
         self.plugin_context_items = items;
         self.curated_sections = sections;
         self
-    }
-
-    #[must_use]
-    pub fn character(&self) -> &CharacterProfile {
-        &self.character
     }
 
     #[must_use]

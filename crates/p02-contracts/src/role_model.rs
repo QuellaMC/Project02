@@ -21,5 +21,5 @@ pub use history::{ConversationToolCall, ConversationTurn, Rang, ToolCallResult, 
 pub use reasoning::{ReasoningFilter, scrub_reasoning_blocks};
 pub use tools::{
     DuplicateToolError, ModelToolCall, ModelToolDefinition, PLUGIN_LIST_TOOL,
-    ParseModelToolCallError, PluginToolDefinition, PluginToolDefinitions, VISIBLE_REPLY,
+    ParseModelToolCallError, PluginToolDefinition, PluginToolDefinitions, SEND_MESSAGE,
 };

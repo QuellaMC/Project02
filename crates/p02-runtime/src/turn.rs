@@ -568,10 +568,9 @@ impl OpenTurn<'_> {
         let notes = std::iter::once(today_note(self.now.date()))
             .chain(runtime_notes)
             .collect();
-        let mut context =
-            DecisionContext::new(self.character.profile.clone(), mind.person().clone())
-                .with_runtime_notes(notes)
-                .with_plugin_context(context_items, curated_sections);
+        let mut context = DecisionContext::new(mind.person().clone())
+            .with_runtime_notes(notes)
+            .with_plugin_context(context_items, curated_sections);
 
         if let Some(summary) = self.summary {
             context = context.with_summary(summary);

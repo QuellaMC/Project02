@@ -61,7 +61,7 @@ pub(crate) fn reply(replies: &[&str]) -> ModelOutput {
     ModelOutput {
         tool_calls: replies
             .iter()
-            .map(|text| written("visible_reply", json!({"text": text})))
+            .map(|text| written("send_message", json!({"text": text})))
             .collect(),
         text: None,
     }

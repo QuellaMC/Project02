@@ -30,13 +30,13 @@ function conversationIn(
   );
 }
 
-/** The `<earlier_conversation>` fence of a request, when it has one. */
+/** The `<earlier>` fence of a request, when it has one. */
 function earlierConversation(request: ModelRequest | undefined): string {
   return (
     messagesOf(request).find(
       message =>
         message.role === 'user' &&
-        message.content?.startsWith('<earlier_conversation>\n') === true,
+        message.content?.startsWith('<earlier>\n') === true,
     )?.content ?? ''
   );
 }
@@ -209,7 +209,7 @@ it('model.continued-session-summary: once a session continues, its summary is a 
     {
       role: 'user',
       content: expect.stringMatching(
-        /^<earlier_conversation>\n.*\nWe spoke of one and two\.\n<\/earlier_conversation>$/su,
+        /^<earlier>\n.*\nWe spoke of one and two\.\n<\/earlier>$/su,
       ) as string,
     },
     {role: 'user', content: line('Three')},
