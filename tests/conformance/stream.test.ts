@@ -35,30 +35,6 @@ function dataOf(frame: Frame | undefined): unknown {
   return JSON.parse(frame?.data ?? 'null');
 }
 
-/**
- * A message of hers longer than the daemon's bounded send buffer, its
- * response's own buffer and a client's receive buffer hold together, its
- * arguments streamed in 4 KiB pieces: the one frame that carries it stalls
- * a client that stops reading.
- */
-function overflowingMessage(): Answer {
-  const characters = 4 * 1024 * 1024;
-  const piece = 4 * 1024;
-
-  return {
-    chunks: [
-      ...visibleReply(
-        'x'.repeat(characters),
-        ...Array.from(
-          {length: characters / piece},
-          (_, at) => (at + 1) * piece,
-        ),
-      ),
-      finish('tool_calls'),
-    ],
-  };
-}
-
 it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, the daemon snapshot of health, waiting confirmations and pairings and running turns', async () => {
   const daemon = await startDaemon(createHome(), fixedReplies);
   const wire = wireOf(daemon);
@@ -134,50 +110,6 @@ it('stream.resume-last-event-id: a stream that returns with a Last-Event-ID the 
   expect(framesOf(newest.body().slice(resumed.length)).map(idOf)).toEqual(
     live.map(idOf),
   );
-});
-
-it('stream.slow-client-drop: a client that stops taking frames is dropped within the grace and its stream closed', async () => {
-  const model = await startModelServer();
-  const daemon = await startDaemon(
-    createHome({'config.json': configJson({project02: model.settings})}),
-    {PROJECT02_TEST_DURATIONS: 'grace=1000'},
-  );
-  const say = await converse(wireOf(daemon), 'mira');
-  const watching = await openEvents(daemon);
-  const telegram = (connected: boolean) =>
-    frameOf('health_changed', {
-      health: {connectors: [{id: 'telegram', connected}]},
-    });
-  // A connector's stream: the presence it holds shows when the daemon
-  // lets the stream go.
-  const stalled = await exchange(daemon, {
-    path: '/api/events?connector=telegram',
-    headers: bearer(daemon),
-  });
-
-  await stalled.received('event: ready');
-  stalled.pause();
-  await watching.next(telegram(true));
-
-  const submitted = performance.now();
-
-  model.answer(overflowingMessage());
-  await say('Talk a lot.', 'long');
-
-  const answered = performance.now();
-
-  await watching.next(telegram(false));
-
-  const dropped = performance.now();
-
-  // The grace of one second runs from the stall, which her message brings
-  // on as it is committed, then the drop: at the latest a grace after the
-  // turn ends.
-  expect(dropped - submitted).toBeGreaterThanOrEqual(900);
-  expect(dropped - answered).toBeLessThan(5_000);
-  stalled.resume();
-  await stalled.ended();
-  expect(stalled.body()).not.toContain('event: turn_completed');
 });
 
 it('stream.running-turns: a stream opened while she writes finds her turn in ready, writing, and one opened after the turn ends none', async () => {

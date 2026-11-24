@@ -1,23 +1,18 @@
 //! A streamed response, the Responses protocol's events read until the one
-//! that ends it: each function call's arguments are told as they arrive,
-//! under the name its item carried when it was added, so a draft can be
-//! shown while the model writes, and each item is kept as its done event
-//! gives it whole; how the response ended, the response its ending event
-//! carries and those items are what is judged.
+//! that ends it: each item is kept as its done event gives it whole; how the
+//! response ended, the response its ending event carries and those items
+//! are what is judged.
 
 use std::collections::BTreeMap;
 
 use p02_shared::SseFrameSplitter;
 use serde_json::{Map, Value};
 
-use crate::draft::Fragment;
 use crate::transport::{FailureCode, StreamError, malformed, provider_error, typed_event};
 
 #[derive(Debug, Default)]
 pub(super) struct EventFold {
     frames: SseFrameSplitter,
-    /// Each function call's name, by its item's place in the output.
-    names: BTreeMap<u64, String>,
     /// Each item as its done event gave it, by its place in the output.
     done: BTreeMap<u64, Value>,
 }
@@ -41,18 +36,13 @@ pub(super) struct Ended {
 }
 
 impl EventFold {
-    /// Takes the next bytes, cut anywhere, and tells `heard` each function
-    /// call's pieces: the response once an event ends it, whichever of the
-    /// protocol's ends that is, or a `[DONE]` line, which completes it;
-    /// what follows it is not read.
-    pub(super) fn push(
-        &mut self,
-        bytes: &[u8],
-        heard: &mut impl FnMut(Fragment<'_>),
-    ) -> Result<Option<Ended>, StreamError> {
+    /// Takes the next bytes, cut anywhere: the response once an event ends
+    /// it, whichever of the protocol's ends that is, or a `[DONE]` line,
+    /// which completes it; what follows it is not read.
+    pub(super) fn push(&mut self, bytes: &[u8]) -> Result<Option<Ended>, StreamError> {
         for frame in self.frames.push(bytes) {
             if let Some(data) = frame.data.as_deref()
-                && let Some(ending) = self.take(data, heard)?
+                && let Some(ending) = self.take(data)?
             {
                 return Ok(Some(ending));
             }
@@ -61,11 +51,7 @@ impl EventFold {
         Ok(None)
     }
 
-    fn take(
-        &mut self,
-        data: &str,
-        heard: &mut impl FnMut(Fragment<'_>),
-    ) -> Result<Option<Ended>, StreamError> {
+    fn take(&mut self, data: &str) -> Result<Option<Ended>, StreamError> {
         if data == "[DONE]" {
             return Ok(Some(self.ended(Ending::Completed, None)?));
         }
@@ -80,14 +66,6 @@ impl EventFold {
                     code: FailureCode::ProviderError,
                     message: provider_error(&event).unwrap_or_else(|| "provider error.".to_owned()),
                 });
-            }
-            "response.output_item.added" => {
-                self.added(&event, heard);
-                return Ok(None);
-            }
-            "response.function_call_arguments.delta" => {
-                self.delta(&event, heard);
-                return Ok(None);
             }
             "response.output_item.done" => {
                 self.item_done(&mut event);
@@ -124,45 +102,6 @@ impl EventFold {
             self.done.insert(index, item);
         }
     }
-
-    /// A function call's item, added: its name, and the arguments it opens
-    /// with. A draft is only a preview, so one that cannot be read is let
-    /// go.
-    fn added(&mut self, event: &Map<String, Value>, heard: &mut impl FnMut(Fragment<'_>)) {
-        let item = event.get("item");
-        let index = event.get("output_index").and_then(Value::as_u64);
-        let name = item
-            .filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call"))
-            .and_then(|item| item.get("name"))
-            .and_then(Value::as_str)
-            .filter(|name| !name.is_empty());
-
-        if let (Some(index), Some(name)) = (index, name) {
-            let name = self.names.entry(index).or_insert_with(|| name.to_owned());
-
-            heard(Fragment {
-                index,
-                name,
-                text: item
-                    .and_then(|item| item.get("arguments"))
-                    .and_then(Value::as_str)
-                    .unwrap_or(""),
-            });
-        }
-    }
-
-    /// The next piece of a named call's arguments.
-    fn delta(&self, event: &Map<String, Value>, heard: &mut impl FnMut(Fragment<'_>)) {
-        let index = event.get("output_index").and_then(Value::as_u64);
-        let text = event.get("delta").and_then(Value::as_str);
-
-        if let (Some(index), Some(text)) = (index, text)
-            && let Some(name) = self.names.get(&index)
-            && !text.is_empty()
-        {
-            heard(Fragment { index, name, text });
-        }
-    }
 }
 
 #[cfg(test)]
@@ -194,62 +133,41 @@ mod tests {
         "data: {\"type\":\"error\",\"message\":\"never read\"}\n\n",
     );
 
-    type Heard = Vec<(u64, String, String)>;
-
-    fn read(pieces: &[&[u8]]) -> (Result<Option<Ended>, StreamError>, Heard) {
+    fn read(pieces: &[&[u8]]) -> Result<Option<Ended>, StreamError> {
         let mut fold = EventFold::default();
-        let mut heard = Vec::new();
-        let mut record = |fragment: Fragment<'_>| {
-            heard.push((
-                fragment.index,
-                fragment.name.to_owned(),
-                fragment.text.to_owned(),
-            ));
-        };
 
         for piece in pieces {
-            match fold.push(piece, &mut record) {
-                Ok(None) => {}
-                ended => return (ended, heard),
+            if let Some(ended) = fold.push(piece)? {
+                return Ok(Some(ended));
             }
         }
 
-        (Ok(None), heard)
+        Ok(None)
     }
 
     #[test]
-    fn a_stream_cut_at_any_byte_tells_the_same_pieces_and_ends_with_the_same_response() {
+    fn a_stream_cut_at_any_byte_ends_with_the_same_response() {
         let bytes = SAMPLE.as_bytes();
         let whole = read(&[bytes]);
 
         assert_eq!(
             whole,
-            (
-                Ok(Some(Ended {
-                    ending: Ending::Completed,
-                    response: json!({"status": "completed", "output": []}),
-                    done: vec![
-                        json!({
-                            "type": "function_call",
-                            "name": "send_message",
-                            "arguments": "{\"text\":\"ゼロツー💖\"}",
-                        }),
-                        json!({
-                            "type": "function_call",
-                            "name": "memory_search",
-                            "arguments": "{\"q\":\"sky\"}",
-                        }),
-                    ],
-                })),
-                vec![
-                    (2, "send_message".to_owned(), String::new()),
-                    (2, "send_message".to_owned(), "{\"text\":\"ゼロ".to_owned()),
-                    (3, "memory_search".to_owned(), String::new()),
-                    (3, "memory_search".to_owned(), "{\"q\":".to_owned()),
-                    (2, "send_message".to_owned(), "ツー💖\"}".to_owned()),
-                    (3, "memory_search".to_owned(), "\"sky\"}".to_owned()),
-                ]
-            )
+            Ok(Some(Ended {
+                ending: Ending::Completed,
+                response: json!({"status": "completed", "output": []}),
+                done: vec![
+                    json!({
+                        "type": "function_call",
+                        "name": "send_message",
+                        "arguments": "{\"text\":\"ゼロツー💖\"}",
+                    }),
+                    json!({
+                        "type": "function_call",
+                        "name": "memory_search",
+                        "arguments": "{\"q\":\"sky\"}",
+                    }),
+                ],
+            }))
         );
 
         for cut in 0..=bytes.len() {
@@ -298,7 +216,7 @@ mod tests {
             let frame = format!("data: {data}\n\n");
 
             assert_eq!(
-                read(&[frame.as_bytes()]).0,
+                read(&[frame.as_bytes()]),
                 Err(StreamError {
                     code,
                     message: message.to_owned(),
@@ -350,7 +268,7 @@ mod tests {
             let stream = format!("data: {done}\n\ndata: {end}\n\n");
 
             assert_eq!(
-                read(&[stream.as_bytes()]).0,
+                read(&[stream.as_bytes()]),
                 Ok(Some(Ended {
                     ending,
                     response,

@@ -451,3 +451,140 @@ impl hyper::body::Body for Frames {
             .map(|frame| frame.map(|bytes| Ok(Frame::data(bytes))))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use hyper::body::Body as _;
+    use p02_app::{DaemonSettings, Durations};
+    use p02_shared::{BaseUrl, DanglingLinks, Identifier, canonical_path};
+    use p02_store::Home;
+    use tempfile::TempDir;
+    use tokio::time::Instant;
+
+    use super::*;
+
+    /// A daemon over a home of the test's own, on which nothing starts.
+    async fn daemon(home: &TempDir) -> Daemon {
+        Daemon::open(
+            Home::new(canonical_path(home.path(), DanglingLinks::Keep).unwrap()),
+            DaemonSettings {
+                test_provider: None,
+                durations: Durations::default(),
+                plugins: Vec::new(),
+                // An App Store nothing serves: the test reaches none.
+                app_catalog: BaseUrl::parse("http://127.0.0.1:9").unwrap(),
+                app_internet: None,
+                openai_api: None,
+                openai_auth: None,
+                chatgpt_api: None,
+                anthropic_api: None,
+            },
+        )
+        .await
+        .unwrap()
+    }
+
+    /// Whether health shows `connector` on the stream.
+    async fn connected(daemon: &Daemon, connector: &Connector) -> bool {
+        daemon
+            .health()
+            .await
+            .connectors
+            .iter()
+            .any(|presence| presence.id == *connector.id() && presence.connected)
+    }
+
+    /// The next frame of a stream, as its client takes it; none once the
+    /// stream ended.
+    async fn take(body: &mut Body) -> Option<Bytes> {
+        std::future::poll_fn(|context| Pin::new(&mut *body).poll_frame(context))
+            .await
+            .map(|frame| frame.unwrap().into_data().unwrap())
+    }
+
+    /// The kind of event a frame names.
+    fn kind_of(frame: &[u8]) -> Option<String> {
+        String::from_utf8_lossy(frame)
+            .lines()
+            .find_map(|line| line.strip_prefix("event: ").map(str::to_owned))
+    }
+
+    /// A client that takes no frame within the grace is cut and nothing
+    /// more is queued for it: its stream ends with the frame it never took,
+    /// and the connector's presence the stream held is let go, which health
+    /// then shows. A client beside it that takes each frame within the
+    /// grace is not cut, though a burst takes it many graces to read.
+    #[tokio::test(start_paused = true)]
+    async fn a_client_that_takes_no_frame_within_the_grace_is_cut_and_one_that_reads_on_is_not() {
+        let home = TempDir::new().unwrap();
+        let daemon = daemon(&home).await;
+        let grace = daemon.durations().grace;
+        let streams = Streams::new(daemon.clone());
+        let telegram = p02_config::connector("telegram").unwrap();
+        let stalled_link = CancellationToken::new();
+        let reading_link = CancellationToken::new();
+        let mut stalled = streams
+            .open(None, Some(telegram), stalled_link.clone())
+            .await
+            .unwrap()
+            .into_body();
+        let mut reading = streams
+            .open(None, None, reading_link.clone())
+            .await
+            .unwrap()
+            .into_body();
+        let opened = Instant::now();
+        let burst = |frames: usize| {
+            let mut hub = streams.0.hub();
+            let event = Event::PhoneChanged {
+                character_id: Identifier::new("mira").unwrap(),
+            };
+
+            for _ in 0..frames {
+                hub.publish(&streams.0.run, &event);
+            }
+        };
+
+        assert!(connected(&daemon, telegram).await);
+
+        // Each frame taken half a grace after the one before.
+        let reader = tokio::spawn(async move {
+            let mut taken = Vec::new();
+
+            while let Some(frame) = take(&mut reading).await {
+                taken.push(frame);
+                tokio::time::sleep(grace / 2).await;
+            }
+
+            taken
+        });
+
+        burst(8);
+        tokio::time::timeout(grace * 2, stalled_link.cancelled())
+            .await
+            .expect("the client that takes nothing is cut");
+        assert!(opened.elapsed() >= grace);
+        assert!(!connected(&daemon, telegram).await);
+
+        burst(1);
+        assert_eq!(streams.0.hub().open.len(), 1);
+
+        let handed = take(&mut stalled).await.unwrap();
+
+        assert_eq!(kind_of(&handed).as_deref(), Some("ready"));
+        assert_eq!(take(&mut stalled).await, None);
+
+        streams.close().await;
+
+        let taken = reader.await.unwrap();
+
+        assert!(!reading_link.is_cancelled());
+        assert_eq!(
+            taken
+                .iter()
+                .filter(|frame| kind_of(frame).as_deref() == Some("phone_changed"))
+                .count(),
+            9
+        );
+    }
+}

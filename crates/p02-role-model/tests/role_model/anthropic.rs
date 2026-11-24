@@ -3,17 +3,17 @@
 
 use std::iter::once;
 use std::num::NonZeroUsize;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use p02_contracts::{
     ChatFunctionCall, ChatMessage, ChatToolCall, Invocation, ProviderAnswer, ProviderName,
-    ReplyDraft, RoleModelAdapter, TextCompletion, TextCompletionRequest, ToolCallId,
+    RoleModelAdapter, TextCompletion, TextCompletionRequest, ToolCallId,
 };
 use p02_role_model::{AnthropicSettings, ServiceSettings, select_adapter};
 use serde_json::{Value, json};
 
 use crate::stub::{Answer, Stub};
-use crate::support::{piece, wire};
+use crate::support::wire;
 
 const KEY: &str = "sk-ant-fixture-key";
 
@@ -254,10 +254,8 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
         stopped("tool_use"),
     ]));
 
-    let heard = Mutex::new(Vec::new());
-    let listener = |draft: ReplyDraft| heard.lock().unwrap().push(draft);
     let answer = adapter(&stub)
-        .invoke(&Invocation::new(&messages, &tools).with_reply_listener(&listener))
+        .invoke(&Invocation::new(&messages, &tools))
         .await;
     let [request] = stub.requests().try_into().unwrap();
 
@@ -305,7 +303,6 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
             "fallbacks": "default",
         })
     );
-    assert_eq!(*heard.lock().unwrap(), [piece("Hel"), piece("lo.")]);
 
     let ProviderAnswer::Answered {
         output,
@@ -337,13 +334,11 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
 }
 
 /// A decline in the middle of her reply, taken over by Anthropic's
-/// fallback: the reply the declining model left half written is let go, in
-/// the answer and as a draft, its note stays, and the fallback's reply is
-/// drafted as the round's first, which the answer holds it as.
+/// fallback: the reply the declining model left half written is let go, its
+/// note stays, and the fallback's reply is the one the answer holds.
 #[tokio::test]
-async fn a_fallback_taking_over_lets_go_the_reply_before_it_and_drafts_its_own_in_its_place() {
+async fn a_fallback_taking_over_lets_go_the_reply_before_it_and_answers_with_its_own() {
     let stub = Stub::start().await;
-    let (messages, tools) = wire(&["send_message"]);
 
     stub.answer(message(&[
         text(0, "A note."),
@@ -361,22 +356,7 @@ async fn a_fallback_taking_over_lets_go_the_reply_before_it_and_drafts_its_own_i
         stopped("tool_use"),
     ]));
 
-    let heard = Mutex::new(Vec::new());
-    let listener = |draft: ReplyDraft| heard.lock().unwrap().push(draft);
-    let answer = adapter(&stub)
-        .invoke(&Invocation::new(&messages, &tools).with_reply_listener(&listener))
-        .await;
-
-    assert_eq!(
-        *heard.lock().unwrap(),
-        [
-            piece("Half a"),
-            ReplyDraft::LetGo,
-            piece("Who"),
-            piece("le."),
-        ]
-    );
-
+    let answer = invoke(&adapter(&stub)).await;
     let ProviderAnswer::Answered { output, .. } = answer else {
         panic!("the round failed: {answer:?}");
     };

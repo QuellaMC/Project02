@@ -18,7 +18,6 @@ use reqwest::Url;
 use serde::Serialize;
 use serde_json::{Value, json};
 
-use crate::draft::ReplyDrafts;
 use crate::prompt::{ToolNameMapping, json_text, provider_name, provider_names, runtime_name};
 use crate::transport::{
     self, Access, BuildAdapterError, Client, Failure, FailureCode, Fault, Silence, said,
@@ -97,11 +96,7 @@ impl NvidiaAdapter {
     }
 
     /// Sends a round and reads its answer to the end.
-    async fn exchange(
-        &self,
-        request: &TurnRequest,
-        drafts: &mut ReplyDrafts<'_>,
-    ) -> Result<ProviderAnswer, Fault> {
+    async fn exchange(&self, request: &TurnRequest) -> Result<ProviderAnswer, Fault> {
         let http = self.http.get()?;
         let mut silence = Silence::start(self.silence);
         let mut response = transport::send(
@@ -123,7 +118,7 @@ impl NvidiaAdapter {
 
         while let Some(chunk) = transport::next_chunk(&mut response, &mut silence).await? {
             let flow = fold
-                .push(&chunk, &mut |fragment| drafts.hear(fragment))
+                .push(&chunk)
                 .map_err(|error| refused(error.code, error.message))?;
 
             if flow == Flow::Done {
@@ -156,15 +151,10 @@ impl NvidiaAdapter {
 impl RoleModelAdapter for NvidiaAdapter {
     async fn invoke(&self, invocation: &Invocation<'_>) -> ProviderAnswer {
         let request = TurnRequest::new(&self.model, invocation.messages(), invocation.tools());
-        let mut drafts = ReplyDrafts::new(*invocation, &request.mappings);
 
-        match self.exchange(&request, &mut drafts).await {
-            Ok(answer) => {
-                drafts.finish();
-                answer
-            }
-            Err(fault) => fault.answer(NVIDIA, &self.access),
-        }
+        self.exchange(&request)
+            .await
+            .unwrap_or_else(|fault| fault.answer(NVIDIA, &self.access))
     }
 
     async fn complete_text(&self, request: &TextCompletionRequest) -> TextCompletion {

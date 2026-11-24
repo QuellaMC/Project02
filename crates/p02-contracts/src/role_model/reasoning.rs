@@ -6,12 +6,11 @@
 /// block closes one the text began inside, so what came before it is
 /// dropped. What is taken out is read as never written: the text on its two
 /// sides is read again as one, so no tag is spelled across it, and what the
-/// filter passes reads back as itself. The filter reads the text as it
-/// arrives, so a draft can be shown while the model still writes; what it
-/// passed before a stray closing tag came stays passed, and only the text
-/// read whole drops it.
+/// filter passes reads back as itself. The filter can read the text in
+/// pieces; what it passed before a stray closing tag came stays passed, and
+/// only the text read whole drops it.
 #[derive(Debug, Default)]
-pub struct ReasoningFilter {
+pub(crate) struct ReasoningFilter {
     buffer: String,
     open_block: Option<&'static str>,
     /// The start of a would-be tag that the open block began inside, read
@@ -50,14 +49,14 @@ enum NameMatch {
 
 impl ReasoningFilter {
     #[must_use]
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self::default()
     }
 
     /// Takes the next piece of text and returns what of it lies outside
     /// reasoning blocks; what could still open or close one is held until
     /// it cannot.
-    pub fn push(&mut self, text: &str) -> String {
+    pub(crate) fn push(&mut self, text: &str) -> String {
         self.buffer.push_str(text);
 
         let mut passed = String::new();
@@ -139,7 +138,7 @@ impl ReasoningFilter {
     /// Releases what was held as text, a `<` that never became a tag; a
     /// block left open keeps the rest.
     #[must_use]
-    pub fn finish(self) -> String {
+    pub(crate) fn finish(self) -> String {
         if self.open_block.is_some() {
             String::new()
         } else {

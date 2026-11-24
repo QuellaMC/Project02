@@ -2,7 +2,6 @@
 #![forbid(unsafe_code)]
 
 mod anthropic;
-mod draft;
 mod nvidia;
 mod prompt;
 mod responses;
@@ -18,9 +17,6 @@ pub use prompt::{
     summarizer_instructions, today_note,
 };
 pub use responses::{ChatgptSettings, OpenaiSettings, PlanAccess, PlanSignIn};
-pub use rounds::{
-    DraftEvent, DraftId, ModelRound, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome,
-    TurnSink,
-};
+pub use rounds::{ModelRound, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome, TurnSink};
 pub use select::{ServiceSettings, TestProvider, UnknownTestProviderError, select_adapter};
 pub use transport::BuildAdapterError;

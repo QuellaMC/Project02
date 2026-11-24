@@ -37,8 +37,7 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
     let id = chat.id();
     let sent_at = Timestamp::new("2026-11-24T14:10:00.000Z").unwrap();
 
-    chat.model
-        .script([Round::says(reply(&["Hello."])).drafting(0, &["Hel", "lo."])]);
+    chat.model.script([Round::says(reply(&["Hello."]))]);
 
     let Chat {
         world,
@@ -82,13 +81,11 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
         [
             "user_message Hello?",
             "round_began",
-            "reply_delta 1.0 Hel",
-            "reply_delta 1.0 lo.",
-            "visible_reply 1.0 Hello.",
+            "visible_reply Hello.",
             "round_ended"
         ]
     );
-    assert_eq!(moments, [(0, 1), (0, 1), (1, 1), (1, 1), (1, 2), (1, 2)]);
+    assert_eq!(moments, [(0, 1), (0, 1), (1, 2), (1, 2)]);
     assert!(matches!(
         &progress[0],
         Progress::UserMessage { message, source, client_message_id, .. }
@@ -106,36 +103,6 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
     assert_eq!(
         chat.kinds(1),
         [RECEIVED, COMMITTED, ROUND, COMMITTED, COMPLETED]
-    );
-}
-
-/// A reply its model drafts and lets go, as when another model takes its
-/// answer over, is withdrawn there and then, and the reply drafted after it
-/// is the one its commit replaces.
-#[tokio::test]
-async fn a_draft_its_model_lets_go_is_withdrawn_and_the_next_takes_its_place() {
-    let mut chat = Chat::new(&[]);
-
-    chat.model.script([Round::says(reply(&["Whole."]))
-        .drafting(0, &["Half a"])
-        .letting_go()
-        .drafting(0, &["Who", "le."])]);
-
-    let delivery = chat.say("Hello?", "hello").await;
-
-    assert!(matches!(delivery, Delivery::Completed(_)), "{delivery:?}");
-    assert_eq!(
-        chat.heard.take(),
-        [
-            "user_message Hello?",
-            "round_began",
-            "reply_delta 1.0 Half a",
-            "reply_withdrawn 1.0",
-            "reply_delta 1.0 Who",
-            "reply_delta 1.0 le.",
-            "visible_reply 1.0 Whole.",
-            "round_ended"
-        ]
     );
 }
 
@@ -263,7 +230,7 @@ async fn a_tool_round_runs_its_calls_in_order_and_shows_the_model_their_results(
             "tool_call_completed 1 notes.burn rejected",
             "tool_call_completed 1 notes.add accepted",
             "round_began",
-            "visible_reply 2.0 Noted.",
+            "visible_reply Noted.",
             "round_ended",
         ]
     );

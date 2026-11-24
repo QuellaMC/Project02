@@ -6,8 +6,6 @@
 //! once its answer is judged and what it said is committed, before the
 //! calls it made run.
 
-mod drafts;
-
 use std::num::NonZeroU32;
 
 use async_trait::async_trait;
@@ -16,15 +14,13 @@ use p02_characters::Persona;
 use p02_contracts::{
     CharacterDecision, ConversationToolCall, ConversationTurn, DecisionContext, DecisionRejection,
     DecisionRejectionReason, DecisionResult, Invocation, ModelToolCall, PluginToolDefinitions,
-    ProviderAnswer, ReplyDraft, RoleModelAdapter, ToolCallId, ToolCallResult, ToolRound,
+    ProviderAnswer, RoleModelAdapter, ToolCallId, ToolCallResult, ToolRound,
 };
 use p02_core::{EventIdentity, VisibleMessage, VisibleText};
 use p02_shared::Identifier;
 use serde_json::{Map, Value};
 
 use crate::prompt::{InputEnvelope, Opening, render, unusable_reply_note};
-use drafts::Drafts;
-pub use drafts::{DraftEvent, DraftId};
 
 /// How many rounds of tool calls one turn may spend, a refused round
 /// counted like any other. The round after the last is the model's to
@@ -61,9 +57,8 @@ pub struct ModelRound {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Reply<'a> {
     pub text: &'a VisibleText,
-    /// The draft the reply replaces, whether or not anything of it was
-    /// spoken, which names the round it was said in.
-    pub draft: DraftId,
+    /// The round it was said in.
+    pub round: NonZeroU32,
     /// The id of the app it goes in.
     pub app: &'a str,
 }
@@ -140,10 +135,6 @@ pub trait TurnSink: Send + Sync {
         round: NonZeroU32,
         calls: Vec<RoutedToolCall>,
     ) -> Result<Vec<ConversationToolCall>, Self::Error>;
-
-    /// Hears a draft, which is never awaited: the model writes on
-    /// meanwhile.
-    fn draft(&self, event: DraftEvent);
 
     /// Hears that a round began, as its request to the model goes out.
     fn round_began(&self);
@@ -238,23 +229,19 @@ impl<'a> Rounds<'a> {
     ///
     /// # Errors
     ///
-    /// The sink's error, as soon as one of its calls fails: what the round
-    /// had drafted and not committed is withdrawn first.
+    /// The sink's error, as soon as one of its calls fails.
     pub async fn run<S: TurnSink>(
         &mut self,
         adapter: &dyn RoleModelAdapter,
         sink: &S,
     ) -> Result<Option<TurnOutcome>, S::Error> {
         let round = self.next;
-        // Every draft a round opens ends with it, whichever way it ends.
-        let drafts = Drafts::new(round, sink);
 
         self.next = round.saturating_add(1);
         sink.round_began();
 
-        let said = self.said(adapter, sink, &drafts).await;
+        let said = self.said(adapter, sink, round).await;
 
-        drafts.close();
         sink.round_ended();
 
         let (calls, text, interim_replies) = match said? {
@@ -284,18 +271,12 @@ impl<'a> Rounds<'a> {
         &mut self,
         adapter: &dyn RoleModelAdapter,
         sink: &S,
-        drafts: &Drafts<'_, S>,
+        round: NonZeroU32,
     ) -> Result<Said, S::Error> {
-        let round = drafts.round();
         let note = self.refusal_note.take();
         let prompt = render(&self.envelope, self.history, self.persona, note.as_deref());
-        let listener = |draft: ReplyDraft| match draft {
-            ReplyDraft::Delta(delta) => drafts.speak(delta),
-            ReplyDraft::LetGo => drafts.let_go(),
-        };
-        let invocation = Invocation::new(prompt.messages(), prompt.tools())
-            .with_history(self.history)
-            .with_reply_listener(&listener);
+        let invocation =
+            Invocation::new(prompt.messages(), prompt.tools()).with_history(self.history);
         let answer = adapter.invoke(&invocation).await;
         let result = DecisionResult::judge(
             &answer,
@@ -339,7 +320,7 @@ impl<'a> Rounds<'a> {
             .collect();
 
         if calls.is_empty() {
-            commit_replies(sink, drafts, &decision, &self.envelope).await?;
+            commit_replies(sink, round, &decision, &self.envelope).await?;
             return Ok(Said::Ended(TurnOutcome::Completed { round, decision }));
         }
 
@@ -355,7 +336,7 @@ impl<'a> Rounds<'a> {
             }));
         }
 
-        let interim_replies = commit_replies(sink, drafts, &decision, &self.envelope).await?;
+        let interim_replies = commit_replies(sink, round, &decision, &self.envelope).await?;
 
         Ok(Said::Calls {
             calls: calls
@@ -407,13 +388,12 @@ fn undeclared(tool: &Identifier) -> Identifier {
         .unwrap_or_else(|_| Identifier::new("undeclared").expect("undeclared is an identifier"))
 }
 
-/// Commits the round's replies in order, each naming its draft and going in
-/// the app she named, or else the one `envelope`'s opening gives a message
-/// that names none, then withdraws what the round drafted and did not say,
-/// before anything else the round decided goes on.
+/// Commits round `round`'s replies in order, each going in the app she
+/// named, or else the one `envelope`'s opening gives a message that names
+/// none, before anything else the round decided goes on.
 async fn commit_replies<S: TurnSink>(
     sink: &S,
-    drafts: &Drafts<'_, S>,
+    round: NonZeroU32,
     decision: &CharacterDecision,
     envelope: &InputEnvelope,
 ) -> Result<Vec<VisibleMessage>, S::Error> {
@@ -423,21 +403,12 @@ async fn commit_replies<S: TurnSink>(
     });
     let mut committed = Vec::new();
 
-    for (reply, (text, named)) in replies.enumerate() {
+    for (text, named) in replies {
         let app =
             named.unwrap_or_else(|| envelope.opening.app(envelope.decision_context.apps_now()));
 
-        committed.push(
-            sink.commit_reply(Reply {
-                text,
-                draft: drafts.id(reply),
-                app,
-            })
-            .await?,
-        );
-        drafts.settle(reply);
+        committed.push(sink.commit_reply(Reply { text, round, app }).await?);
     }
 
-    drafts.close();
     Ok(committed)
 }

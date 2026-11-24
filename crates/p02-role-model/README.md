@@ -67,17 +67,15 @@ model writes them. It asks for no sampling, thinking, effort or
 forced tool choice, sends no thinking back, and gives an answer the room
 the OpenAI API gives. For a model the setting offers, a request asks for
 Anthropic's own fallback for a decline; where it takes a message over,
-the calls before it are let go, and the replies drafted of them with
-them. A message is judged at its stop: a decline, said with its category,
-and a message cut short fail the round.
+the calls before it are let go. A message is judged at its stop: a
+decline, said with its category, and a message cut short fail the round.
 
 An adapter is built only with a key, or for NVIDIA a server of the
 person's own, which may ask for none, or for the plan the home signed
 in; building one does no I/O, its HTTP client made at its first request.
-Each hands back the model's calls and text as written, and hears her
-reply as its arguments stream. The exchange is one for all three: it
-retries a busy provider or a broken connection but never a timeout,
-bounds the provider's silence, reads an error under `error`, beside it or
-as its `detail`, and no failure repeats a key, a token or the account it
-went with, each said as its service's own. The test provider answers in
-fixed sentences, behind a test switch alone.
+Each hands back the model's calls and text as written. The exchange is
+one for all three: it retries a busy provider or a broken connection but
+never a timeout, bounds the provider's silence, reads an error under
+`error`, beside it or as its `detail`, and no failure repeats a key, a
+token or the account it went with, each said as its service's own. The
+test provider answers in fixed sentences, behind a test switch alone.

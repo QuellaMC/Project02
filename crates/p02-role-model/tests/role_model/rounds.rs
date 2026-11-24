@@ -16,8 +16,7 @@ use p02_core::{
     ClientStamp, MessageId, SessionId, SpeakerName, VisibleMessage, VisibleMessageRole, VisibleText,
 };
 use p02_role_model::{
-    DraftEvent, ModelRound, Opening, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome,
-    TurnSink,
+    ModelRound, Opening, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,
 };
 use serde_json::{Value, json};
 
@@ -124,7 +123,7 @@ impl TurnSink for Recording {
     }
 
     async fn commit_reply(&self, reply: Reply<'_>) -> Result<VisibleMessage, Self::Error> {
-        self.note(format!("reply {} {}", reply.draft, reply.text));
+        self.note(format!("reply {} {}", reply.round, reply.text));
 
         let number = u64::try_from(self.log.lock().unwrap().len()).unwrap();
 
@@ -162,13 +161,6 @@ impl TurnSink for Recording {
                 call.finish(ToolCallResult::Accepted { output })
             })
             .collect())
-    }
-
-    fn draft(&self, event: DraftEvent) {
-        self.note(match event {
-            DraftEvent::Delta { draft, text } => format!("delta {draft} {text}"),
-            DraftEvent::Withdrawn { draft } => format!("withdrawn {draft}"),
-        });
     }
 
     fn round_began(&self) {}
@@ -243,10 +235,10 @@ async fn every_round_is_recorded_before_anything_it_decided_happens() {
         sink.log(),
         [
             "round 1",
-            "reply 1.0 Looking.",
+            "reply 1 Looking.",
             "tools 1 memory.search",
             "round 2",
-            "reply 2.0 Found it.",
+            "reply 2 Found it.",
         ]
     );
 }
@@ -359,7 +351,7 @@ async fn this_turn_s_round_is_replayed_under_the_runtime_s_ids_and_its_note_is_n
             "round 1",
             "tools 1 memory.search memory.forget",
             "round 2",
-            "reply 2.0 Done."
+            "reply 2 Done."
         ]
     );
 }

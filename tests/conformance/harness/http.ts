@@ -1,9 +1,8 @@
 /**
  * One HTTP exchange exactly as the test writes it: any method, path, Host
  * and headers, with nothing added that the test did not add; the answer's
- * status and headers, its body as it comes, and a client that stops
- * reading or hangs up mid-stream. What the verbs of `wire.ts` keep from a
- * test.
+ * status and headers, its body as it comes, and a client that hangs up
+ * mid-stream. What the verbs of `wire.ts` keep from a test.
  */
 import {
   request,
@@ -25,9 +24,6 @@ export type Exchange = {
   readonly whole: () => Promise<string>;
   /** Settles once the body holds this text. */
   readonly received: (text: string) => Promise<void>;
-  /** Takes nothing more: what the daemon writes next piles up in the sockets' buffers. */
-  readonly pause: () => void;
-  readonly resume: () => void;
   /** Goes away, as a closed tab does. */
   readonly hangUp: () => void;
   /** Settles once the connection is gone, whichever side ended it. */
@@ -147,12 +143,6 @@ export function exchange(
                 check();
               }),
             );
-          },
-          pause: () => {
-            incoming.pause();
-          },
-          resume: () => {
-            incoming.resume();
           },
           hangUp: () => {
             outgoing.destroy();

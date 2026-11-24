@@ -64,8 +64,7 @@ pub(crate) fn running_turn(
 /// it came back accepted. The turn changes as the line that began it is
 /// committed, and as each round begins and ends: whether she is writing. A
 /// round's messages come before its end, so a surface that shows her
-/// writing ends it as the message rather than taking it back. Her drafts
-/// reach nobody.
+/// writing ends it as the message rather than taking it back.
 pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
     let phoned = matches!(
         &progress,
@@ -92,7 +91,7 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
             }),
             true,
         ),
-        Progress::VisibleReply { message, app, .. } => (
+        Progress::VisibleReply { message, app } => (
             Some(TurnProgress::VisibleReply {
                 message_id: message.id,
                 speaker_id: message.speaker_id,
@@ -111,7 +110,6 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
             turn.writing = false;
             (None, true)
         }
-        Progress::ReplyDelta { .. } | Progress::ReplyWithdrawn { .. } => (None, false),
         Progress::ToolCallsRequested { round, tool_names } => (
             Some(TurnProgress::ToolCallsRequested { round, tool_names }),
             false,

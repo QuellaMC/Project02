@@ -28,12 +28,12 @@ turn ended.
 - **In the order it happens.** The event, the person's line when one
   began the turn, each model round before anything it decided, each reply
   and tool call, then the turn's ending, before the plugins' work after
-  it. A message is announced once on disk; only a draft comes sooner, and
-  says so. Each round is announced as its request goes out and as it ends,
-  once what it said is committed and before the calls it made run. The
-  person's line keeps the time it was sent, however long it waited, and is
-  announced with when she read it, the turn's own moment; each reply of
-  hers is sent as it is committed, its commit keeping the app it went in.
+  it. A message is announced once on disk. Each round is announced as its
+  request goes out and as it ends, once what it said is committed and
+  before the calls it made run. The person's line keeps the time it was
+  sent, however long it waited, and is announced with when she read it,
+  the turn's own moment; each reply of hers is sent as it is committed,
+  its commit keeping the app it went in.
 - **Failure.** A failed store write, or settings that no longer build
   her, fail the turn: its rejection is recorded if it can be, and her
   actor restarts her. The thread opened again closes a turn a crash left

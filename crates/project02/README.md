@@ -22,8 +22,8 @@ the same daemon in another program's process, as the desktop shell does.
 - **The test switches** are read once at start and are never settings:
   `PROJECT02_TEST_PROVIDER=deterministic` answers for every character;
   `PROJECT02_TEST_DURATIONS` shortens serve's waits, `key=milliseconds`
-  over `confirmation`, `pairing`, `silence`, the stream's `ping`, `grace`
-  and the `minute` a heartbeat counts in;
+  over `confirmation`, `pairing`, `silence`, the stream's `ping` and the
+  `minute` a heartbeat counts in;
   `PROJECT02_TEST_TELEGRAM_API` names the Bot API the connector reaches;
   `PROJECT02_TEST_APP_CATALOG` names the App Store's catalog in place of
   the build's own, which one constant beside the switches holds;
