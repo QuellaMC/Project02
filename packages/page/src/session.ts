@@ -72,6 +72,8 @@ export type Session = SettingsVerbs & {
   readonly send: () => Promise<void>;
   /** Takes back the line sent under this id that did not reach her: its words go back into its message box. */
   readonly takeBack: (clientMessageId: string) => void;
+  /** Hears whether the chat's end, where her newest message stands, is in view. */
+  readonly endInView: (inView: boolean) => void;
   readonly loadEarlier: () => Promise<void>;
   /** Answers a confirmation: whether the daemon took the answer, which the stream then settles. */
   readonly answer: (id: string, decision: Answer) => Promise<boolean>;
@@ -268,7 +270,7 @@ export function createSession(address: string): Session {
     },
   });
 
-  tellReads(client, getState, subscribe);
+  const endInView = tellReads(client, getState, subscribe);
 
   const sending = (): Sending => ({client, apply});
   const accounting = (): Accounting => ({...sending(), readPage, getState});
@@ -328,6 +330,7 @@ export function createSession(address: string): Session {
     takeBack: clientMessageId => {
       apply(current => lineTakenBack(current, clientMessageId));
     },
+    endInView,
     async loadEarlier() {
       const {thread} = getState();
 
@@ -464,33 +467,61 @@ function notifying(
 
 /**
  * Tells the daemon of each message of hers the person read, by the rule in
- * `reads.ts`, with the window's focus as it is then: whenever what the
- * tab shows changes, and whenever the window comes to the front. What the
+ * `reads.ts`, with the window's focus as it is then and whether the chat's
+ * end is in view, which the answer of this hears: whenever what the tab
+ * shows changes, the window comes to the front, or the chat's end comes
+ * into view. One read is on its way at a time, and counts as told once the
+ * daemon answered it, taken or refused for good; one it could not keep, or
+ * that met no answer, is told again at the next of those moments. What the
  * daemon answers is not said: nothing the person did went wrong.
  */
 function tellReads(
   client: GatewayClient,
   getState: () => WebState,
   subscribe: (listener: () => void) => () => void,
-): void {
+): (inView: boolean) => void {
   let told: ReadonlyMap<string, string> = new Map();
+  let endInView = true;
+  let telling = false;
   const tell = (): void => {
-    const next = readOf(told, getState(), document.hasFocus());
+    if (telling) {
+      return;
+    }
+
+    const next = readOf(told, getState(), {
+      focused: document.hasFocus(),
+      endInView,
+    });
 
     if (next === undefined) {
       return;
     }
 
-    const {read} = next;
-
-    told = next.told;
+    telling = true;
     void client
-      .readHers(read.conversationId, read.messageId)
-      .catch(() => undefined);
+      .readHers(next.read.conversationId, next.read.messageId)
+      .then(
+        outcome => outcome.status !== 'failed',
+        () => false,
+      )
+      .then(answered => {
+        telling = false;
+
+        if (answered) {
+          told = next.told;
+          // A message of hers that came meanwhile is the next to tell.
+          tell();
+        }
+      });
   };
 
   subscribe(tell);
   window.addEventListener('focus', tell);
+
+  return inView => {
+    endInView = inView;
+    tell();
+  };
 }
 
 /**
@@ -798,6 +829,7 @@ function refusedSession(message: string): Session {
     open: nothing,
     send: nothing,
     takeBack: () => undefined,
+    endInView: () => undefined,
     loadEarlier: nothing,
     answer: () => Promise.resolve(false),
     settlePairing: () => Promise.resolve(false),

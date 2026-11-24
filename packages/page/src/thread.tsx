@@ -107,6 +107,7 @@ export function ThreadPane({
   // its lines as a whole, where anything else changes only its end.
   const following = useFollowing(
     `${thread.stale === undefined ? 'read' : 'reading'} ${thread.earlier ?? ''}`,
+    session.endInView,
   );
 
   return (

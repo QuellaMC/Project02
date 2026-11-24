@@ -92,12 +92,14 @@ once, and a no is final and silent. Her phone's window never notifies,
 and a browser tab, which has no such call, shows none.
 A message of hers is read once the chat of its conversation shows it in
 the main window, the desktop app's or a tab, while that window has the
-focus and the stream is live: as it arrives there, when her chat opens,
-or when the window comes to the front with it open, though not while the
+focus, the chat's end is in view and the stream is live: as it arrives
+there, when her chat opens, when the window comes to the front with it
+open, or when the person scrolls back down to it, though not while the
 settings stand in front of the chat. The daemon is then told the newest
-message of hers the chat shows, once, by the rule of `reads.ts`, pure and
-tested in Node, and nothing it answers is said. Her phone's window never
-tells: it is her phone.
+message of hers the chat shows, by the rule of `reads.ts`, pure and
+tested in Node: one read at a time, told once the daemon answered it and
+again later when it could not keep it or did not answer, and nothing it
+answers is said. Her phone's window never tells: it is her phone.
 Her chat's head has a Her Phone button unless the daemon says she has no
 phone. It opens her phone in the one window every character's phone
 shares, and closes it, and is pressed while that window shows hers: the

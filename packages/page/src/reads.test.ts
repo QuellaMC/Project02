@@ -95,17 +95,20 @@ function committed(
   };
 }
 
-/** What is read in `state`, `told` having been told and the window `focused` or not. */
+/** The window in front with the chat's end in view. */
+const seen = {focused: true, endInView: true};
+
+/** What is read in `state`, `told` having been told and the window `focused` or not, the chat's end in view. */
 function readIn(
   state: WebState,
   focused = true,
   told: ReadonlyMap<string, string> = new Map(),
 ) {
-  return readOf(told, state, focused)?.read;
+  return readOf(told, state, {focused, endInView: true})?.read;
 }
 
 describe('when the person read a message of hers', () => {
-  it("reads the newest message of hers the chat on screen shows while the window has the focus: when the window comes to the front with her chat open, as a message arrives there, and when her chat opens; nothing while another window is in front, her phone's among them, while the settings stand in front of the chat, while the stream is down, with no chat open, or in a chat with no message of hers", () => {
+  it("reads the newest message of hers the chat on screen shows while the window has the focus and the chat's end is in view: when the window comes to the front with her chat open, as a message arrives there, and when her chat opens; nothing while another window is in front, her phone's among them, while the person has scrolled away from the chat's end, while the settings stand in front of the chat, while the stream is down, with no chat open, or in a chat with no message of hers", () => {
     const mira = chat(live, 'conv-1', 'mira', [
       said('m1', 'user'),
       said('m2', 'character'),
@@ -116,6 +119,9 @@ describe('when the person read a message of hers', () => {
     const settings = settingsOpened(mira, {kind: 'you'});
 
     expect(readIn(mira, false)).toBeUndefined();
+    expect(
+      readOf(new Map(), mira, {focused: true, endInView: false}),
+    ).toBeUndefined();
     expect(readIn(mira)).toEqual({conversationId: 'conv-1', messageId: 'm2'});
     expect(
       readIn(applyEvent(mira, committed('m4', 'conv-1')), true, toldM2),
@@ -142,10 +148,10 @@ describe('when the person read a message of hers', () => {
 
   it('tells each message of hers once, in its own conversation: neither the window coming to the front again, a line of the person after it, a reconnect that sets the chat aside, nor her chat opened again after another tells it again', () => {
     const mira = chat(live, 'conv-1', 'mira', [said('m1', 'character')]);
-    const first = readOf(new Map(), mira, true);
+    const first = readOf(new Map(), mira, seen);
     const told = first?.told ?? new Map<string, string>();
     const nova = chat(mira, 'conv-2', 'nova', [said('n1', 'character')]);
-    const second = readOf(told, nova, true);
+    const second = readOf(told, nova, seen);
 
     expect(first?.read).toEqual({conversationId: 'conv-1', messageId: 'm1'});
     expect(readIn(mira, true, told)).toBeUndefined();

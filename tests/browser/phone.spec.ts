@@ -722,7 +722,7 @@ test("page.phone-messages: in her phone's window, Messages, first on her home sc
   ]);
 });
 
-test("page.phone-read: in her phone's window, under her message in Messages, Delivered while the chat that shows it is not in front, and Read with the time the daemon kept once the chat comes to the front", async ({
+test("page.phone-read: in her phone's window, under her message in Messages, Delivered while the chat that shows it is not in front, and Read with the time the daemon kept once it is; a message of hers that comes while the person has scrolled away from the chat's end stays Delivered until they scroll back to it", async ({
   page,
 }) => {
   const model = await startModelServer();
@@ -763,4 +763,59 @@ test("page.phone-read: in her phone's window, under her message in Messages, Del
 
   await expect(status.locator('time')).toHaveAttribute('datetime', read.at);
   await expect(status.locator('time')).toHaveText(/\d/u);
+
+  // A chat short enough to scroll, and each read the chat tells.
+  const told: string[] = [];
+  const hers = chat.locator('.bubble-theirs .bubble-text');
+
+  chat.on('request', request => {
+    if (request.method() === 'POST' && request.url().endsWith('/read')) {
+      told.push(request.url());
+    }
+  });
+  await chat.setViewportSize({width: 900, height: 420});
+
+  for (const word of ['one', 'two', 'three', 'four']) {
+    model.answer(reply(`Reply ${word}.`));
+    await say(`Line ${word}.`, word);
+  }
+
+  await expect(hers).toHaveCount(5);
+  await expect(status.locator('b')).toHaveText('Read');
+  await expect.poll(() => told.length).toBe(4);
+
+  // The chat eases to its end as a message arrives: the person scrolls
+  // once it rests there.
+  await expect
+    .poll(() =>
+      chat.evaluate(`(() => {
+        const scroller = document.querySelector('.messages');
+
+        return scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight;
+      })()`),
+    )
+    .toBeLessThanOrEqual(1);
+
+  // The person scrolls up: what comes at the chat's end is out of view.
+  await chat.evaluate(`
+    (async () => {
+      const scroller = document.querySelector('.messages');
+
+      scroller.dispatchEvent(new WheelEvent('wheel'));
+      scroller.scrollTop = 0;
+      await new Promise(done => requestAnimationFrame(() => requestAnimationFrame(done)));
+    })()
+  `);
+  model.answer(reply('Below the view.'));
+  await say('One more.', 'more');
+  await expect(hers).toHaveCount(6);
+  expect(told).toHaveLength(4);
+  await expect(status).toHaveText('Delivered');
+
+  await chat.evaluate(`
+    const scroller = document.querySelector('.messages');
+
+    scroller.scrollTop = scroller.scrollHeight;
+  `);
+  await expect(status.locator('b')).toHaveText('Read');
 });
