@@ -44,11 +44,13 @@ use crate::conversation::{Character, Delivery, Disk, Mind, Submission, on_disk};
 /// in its withdrawal.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Progress {
-    /// The person's line, committed, with the stamps its client put on it.
+    /// The person's line, committed, with the stamps its client put on it
+    /// and when she read it: the moment her turn took it, its record's.
     UserMessage {
         message: VisibleMessage,
         source: ClientStamp,
         client_message_id: ClientStamp,
+        read_at: Timestamp,
     },
     /// A reply, committed in place of its draft, with the id of the app it
     /// went in.
@@ -203,6 +205,7 @@ pub(crate) async fn run(
                 message: message.clone(),
                 source: source.clone(),
                 client_message_id,
+                read_at: identity.created_at().clone(),
             });
             (
                 Opening::Line {

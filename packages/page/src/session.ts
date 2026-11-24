@@ -36,8 +36,12 @@ import {
   historyPageRead,
   initialState,
   installSnapshot,
+  keptLine,
+  lineAnswered,
   lineEnded,
   lineSent,
+  lineTakenBack,
+  linesOnTheirWay,
   linesTaken,
   noticeSpent,
   noticed,
@@ -63,6 +67,8 @@ export type Session = SettingsVerbs & {
   readonly open: (characterId: string) => Promise<void>;
   /** Sends the composer's line. */
   readonly send: () => Promise<void>;
+  /** Takes back the line sent under this id that did not reach her: its words go back into its message box. */
+  readonly takeBack: (clientMessageId: string) => void;
   readonly loadEarlier: () => Promise<void>;
   /** Answers a confirmation: whether the daemon took the answer, which the stream then settles. */
   readonly answer: (id: string, decision: Answer) => Promise<boolean>;
@@ -260,11 +266,7 @@ export function createSession(address: string): Session {
   });
 
   const sending = (): Sending => ({client, apply});
-  const accounting = (): Accounting => ({
-    ...sending(),
-    readPage,
-    pending: () => getState().pending,
-  });
+  const accounting = (): Accounting => ({...sending(), readPage, getState});
 
   return {
     ...settings.verbs,
@@ -304,8 +306,8 @@ export function createSession(address: string): Session {
       }
 
       // Nothing answered this one, which is reason to account for every
-      // line still held: a passing failure that left one behind clears
-      // without the stream ever dropping.
+      // line still on its way: a passing failure that left one behind
+      // clears without the stream ever dropping.
       await accountForPending(accounting());
 
       // Nothing answered, so the log is asked; a line it does not carry
@@ -314,9 +316,12 @@ export function createSession(address: string): Session {
       // either waits for the next connection, which sends it again.
       await readPage(line.conversationId, {});
 
-      if (getState().pending.has(clientMessageId)) {
+      if (linesOnTheirWay(getState()).has(clientMessageId)) {
         await deliverOnce(sending(), line, clientMessageId);
       }
+    },
+    takeBack: clientMessageId => {
+      apply(current => lineTakenBack(current, clientMessageId));
     },
     async loadEarlier() {
       const {thread} = getState();
@@ -517,21 +522,25 @@ type Accounting = Sending & {
     conversationId: string,
     request: HistoryPage,
   ) => Promise<void>;
-  readonly pending: () => ReadonlyMap<string, PendingLine>;
+  readonly getState: () => WebState;
 };
 
 /**
- * Every line this tab is still holding, accounted for: the log first,
- * which settles one it carries whoever wrote it. What remains goes again
- * under its own id, whether this tab or a gone one wrote it: the daemon
- * answers one still in her inbox as queued already, and refuses one she
- * took anywhere in the conversation, in this run or an earlier one — so a
- * line goes twice only if the person sends it twice. Each line's
- * conversation is opened first: a daemon that has restarted holds no
- * route to it, and would refuse the line as one it does not know.
+ * Every line this tab holds that is still on its way, accounted for: the
+ * log first, which settles one it carries whoever wrote it. What remains
+ * goes again under its own id, whether this tab or a gone one wrote it:
+ * the daemon answers one still in her inbox as queued already, and
+ * refuses one she took anywhere in the conversation, in this run or an
+ * earlier one — so a line goes twice only if the person sends it twice.
+ * Each line's conversation is opened first: a daemon that has restarted
+ * holds no route to it, and would refuse the line as one it does not
+ * know. A line that did not reach her waits for the person.
  */
 async function accountForPending(accounting: Accounting): Promise<void> {
-  for (const [clientMessageId, line] of accounting.pending()) {
+  const onTheirWay = (): ReadonlyMap<string, PendingLine> =>
+    linesOnTheirWay(accounting.getState());
+
+  for (const [clientMessageId, line] of onTheirWay()) {
     const opened = await accounting.client
       .openDirectConversation(line.characterId)
       .catch(() => undefined);
@@ -542,7 +551,7 @@ async function accountForPending(accounting: Accounting): Promise<void> {
 
     await accounting.readPage(opened.conversationId, {});
 
-    if (accounting.pending().has(clientMessageId)) {
+    if (onTheirWay().has(clientMessageId)) {
       await deliverOnce(accounting, line, clientMessageId);
     }
   }
@@ -612,8 +621,8 @@ type Sending = {
 /**
  * One attempt at a line, and what the daemon answered: `true` when
  * nothing answered at all, which is the only thing the tab can act on
- * further. A line in her inbox waits for the stream to say how its turn
- * ended; a refusal is the daemon's word on the line.
+ * further. A line in her inbox is delivered, and waits for the stream to
+ * say how its turn ended; a refusal is the daemon's word on the line.
  */
 async function deliverOnce(
   sending: Sending,
@@ -628,19 +637,9 @@ async function deliverOnce(
       clientMessageId,
     });
 
-    if (outcome.status === 'refused' || outcome.status === 'failed') {
-      sending.apply(current =>
-        lineEnded(current, line.characterId, clientMessageId, {
-          status: outcome.status,
-          // A duplicate is the one refusal whose line is in the log: a
-          // turn took it under this same id.
-          committed:
-            outcome.status === 'refused' &&
-            outcome.reason === 'duplicate_submission',
-          message: outcome.message,
-        }),
-      );
-    }
+    sending.apply(current =>
+      lineAnswered(current, line.characterId, clientMessageId, outcome),
+    );
 
     return false;
   } catch (error: unknown) {
@@ -696,12 +695,11 @@ function writtenAndUnsent(): Kept {
 
     return {
       composers: new Map(
-        entriesOf(composers, value => typeof value === 'string'),
-      ) as ReadonlyMap<string, string>,
-      pending: new Map(entriesOf(pending, isPendingLine)) as ReadonlyMap<
-        string,
-        PendingLine
-      >,
+        entriesOf(composers, value =>
+          typeof value === 'string' ? value : undefined,
+        ),
+      ),
+      pending: new Map(entriesOf(pending, keptLine)),
       ...(typeof homeRoot === 'string' ? {homeRoot} : {}),
     };
   } catch {
@@ -709,28 +707,28 @@ function writtenAndUnsent(): Kept {
   }
 }
 
-/** What a browser gave back is data, not this page's shapes: it is read as such. */
-function entriesOf(
+/**
+ * What a browser gave back is data, not this page's shapes: each entry is
+ * read as such, by `readOf`, and one it cannot read is left out.
+ */
+function entriesOf<T>(
   kept: unknown,
-  holds: (value: unknown) => boolean,
-): readonly [string, unknown][] {
-  return (Array.isArray(kept) ? kept : []).filter(
-    (entry): entry is [string, unknown] =>
-      Array.isArray(entry) &&
-      entry.length === 2 &&
-      typeof entry[0] === 'string' &&
-      holds(entry[1]),
-  );
-}
+  readOf: (value: unknown) => T | undefined,
+): (readonly [string, T])[] {
+  return (Array.isArray(kept) ? kept : []).flatMap((entry: unknown) => {
+    if (
+      !Array.isArray(entry) ||
+      entry.length !== 2 ||
+      typeof entry[0] !== 'string'
+    ) {
+      return [];
+    }
 
-function isPendingLine(value: unknown): boolean {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    ['conversationId', 'characterId', 'text'].every(
-      field => typeof (value as Record<string, unknown>)[field] === 'string',
-    )
-  );
+    const key = entry[0];
+    const read = readOf(entry[1]);
+
+    return read === undefined ? [] : [[key, read] as const];
+  });
 }
 
 /** Whether the browser kept it; one that will not is said once, and shows what is written all the same. */
@@ -763,6 +761,7 @@ function refusedSession(message: string): Session {
     compose: () => undefined,
     open: nothing,
     send: nothing,
+    takeBack: () => undefined,
     loadEarlier: nothing,
     answer: () => Promise.resolve(false),
     settlePairing: () => Promise.resolve(false),

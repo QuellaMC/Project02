@@ -90,7 +90,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 17,
+  "protocolVersion": 18,
   "token": "…",
   "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -575,8 +575,9 @@
               (default 100); <code>before</code> is the opaque cursor from a
               previous page. Every message carries <code>sentAt</code>, when
               it was sent, and the <code>app</code> it is in, and each of the
-              person's its stamps; a message of hers an earlier build kept is
-              in the app of the person's line before it.
+              person's its stamps and <code>readAt</code>, when she read it:
+              the moment her turn took it. A message of hers an earlier build
+              kept is in the app of the person's line before it.
             </td>
           </tr>
           <tr>
@@ -818,7 +819,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":17,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":18,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -899,9 +900,10 @@ data: {…}</code></pre>
             <td><code>turn_progress</code></td>
             <td>
               A turn's progress: both committed roles —
-              <code>user_message</code> (with <code>sentAt</code>, its
-              <code>app</code>, <code>source</code> and
-              <code>clientMessageId</code>) and <code>visible_reply</code>
+              <code>user_message</code> (with <code>sentAt</code>,
+              <code>readAt</code> as history has it, its <code>app</code>,
+              <code>source</code> and <code>clientMessageId</code>) and
+              <code>visible_reply</code>
               (with <code>sentAt</code> and the <code>app</code> it went in),
               which names the <code>draftId</code> it replaces — and its
               rounds'
@@ -935,13 +937,13 @@ data: {…}</code></pre>
               <code>source</code> and <code>clientMessageId</code> so every
               surface knows whose turn ended — even one that committed nothing.
               <code>committed</code> says whether the turn put that line in the
-              log: a surface holding the line hands back one that was not, and
-              leaves one that was to the thread. Nothing else answers it, since
-              the log is read in pages and a busy turn can put a hundred
-              messages between a line and now. A turn of her own carries
-              neither stamp and says <code>committed: true</code>: nothing of
-              the person's waits on it, and nobody asked for anything, so a
-              surface says nothing of how it ended.
+              log: a surface holding the line says one that was not never
+              reached her, and leaves one that was to the thread. Nothing else
+              answers it, since the log is read in pages and a busy turn can
+              put a hundred messages between a line and now. A turn of her own
+              carries neither stamp and says <code>committed: true</code>:
+              nothing of the person's waits on it, and nobody asked for
+              anything, so a surface says nothing of how it ended.
             </td>
           </tr>
           <tr>

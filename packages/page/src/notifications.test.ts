@@ -4,7 +4,7 @@ import type {GatewayEvent} from '@project02/wire/contract';
 import {notificationFor} from './notifications.ts';
 
 const conversationId = 'conv-1';
-/** When every message of these tests was sent: the rule does not read it. */
+/** When every message of these tests was sent, and the person's read: the rule reads neither. */
 const sentAt = '2026-11-24T10:00:00.000Z';
 
 /** A message of Mira's committed in `app`, as the stream says it. */
@@ -58,6 +58,7 @@ describe('when the desktop app shows a notification', () => {
             speakerName: 'Sam',
             text: 'Hi.',
             sentAt,
+            readAt: sentAt,
             app: 'messages',
             source: 'web',
             clientMessageId: 'line-1',

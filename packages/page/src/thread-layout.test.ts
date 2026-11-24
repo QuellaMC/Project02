@@ -1,11 +1,12 @@
 import {describe, expect, it} from 'vitest';
 
-import type {Message} from './store.ts';
+import type {LineState, Message} from './store.ts';
 import {
   labelOf,
   laidOut,
   onHerPhone,
   type Clock,
+  type Holder,
   type Pending,
   type Shown,
 } from './thread-layout.ts';
@@ -43,11 +44,16 @@ function hers(sentAt: string, app = 'messages'): Message {
   };
 }
 
-/** A line of the person's not yet committed. */
-function line(clientMessageId: string): Pending {
+/** A line of the person's not yet committed, as far as it got. */
+function line(clientMessageId: string, state: LineState = 'sending'): Pending {
   return [
     clientMessageId,
-    {conversationId: 'conv-1', characterId: 'mira', text: 'Still there?'},
+    {
+      conversationId: 'conv-1',
+      characterId: 'mira',
+      text: 'Still there?',
+      state,
+    },
   ];
 }
 
@@ -239,7 +245,98 @@ describe('thread layout', () => {
         when: 'Today 6:50 PM',
         own: true,
         colour: 'var(--link)',
+        status: {word: 'Sending…'},
       },
+    ]);
+  });
+
+  it("stands one line under the person's newest message, the last line still on its way when there is one, saying how far it got; under a message of theirs, Read and the time on the day she read it, else the day, whatever app it was in; under every line that did not reach her, that it did not; under none of hers, and none on her phone", () => {
+    const statuses = (shown: Shown, holder?: Holder) => {
+      const laid = laidOut(shown, newYork, holder);
+
+      return [...laid.messages, ...laid.pending].map(({status}) => status);
+    };
+    const readAt = (message: Message, at: string): Message => ({
+      ...message,
+      readAt: at,
+    });
+    const said = [
+      readAt(mine(nyc('2026-11-01T09:00')), nyc('2026-11-01T09:00')),
+      hers(nyc('2026-11-01T09:01')),
+    ];
+
+    for (const [state, word] of [
+      ['sending', 'Sending…'],
+      ['delivered', 'Delivered'],
+    ] as const) {
+      expect(
+        statuses({
+          messages: said,
+          between: true,
+          pending: [line('line-1', 'delivered'), line('line-2', state)],
+        }),
+      ).toEqual([undefined, undefined, undefined, {word}]);
+    }
+
+    // A line that did not reach her says so, and the newest still on its
+    // way keeps its own line above it.
+    expect(
+      statuses({
+        messages: said,
+        between: true,
+        pending: [
+          line('line-1', 'not_delivered'),
+          line('line-2', 'delivered'),
+          line('line-3', 'not_delivered'),
+        ],
+      }),
+    ).toEqual([
+      undefined,
+      undefined,
+      {word: 'Not Delivered'},
+      {word: 'Delivered'},
+      {word: 'Not Delivered'},
+    ]);
+    // With none on its way, the newest she read keeps its line.
+    expect(
+      statuses({
+        messages: said,
+        between: false,
+        pending: [line('line-1', 'not_delivered')],
+      }),
+    ).toEqual([
+      {word: 'Read', read: {when: 'Sun, Nov 1', at: nyc('2026-11-01T09:00')}},
+      undefined,
+      {word: 'Not Delivered'},
+    ]);
+
+    for (const [read, when] of [
+      [nyc('2026-11-24T18:42'), '6:42 PM'],
+      [nyc('2026-11-23T21:12'), 'Yesterday'],
+      [nyc('2026-11-22T21:12'), 'Sunday'],
+      [nyc('2026-11-16T21:12'), 'Mon, Nov 16'],
+    ] as const) {
+      const messages = [
+        ...said,
+        readAt(mine(read, 'telegram'), read),
+        hers(nyc('2026-11-24T18:45')),
+      ];
+
+      expect(statuses(thread(...messages))).toEqual([
+        undefined,
+        undefined,
+        {word: 'Read', read: {when, at: read}},
+        undefined,
+      ]);
+      expect(
+        statuses(thread(...messages), onHerPhone('messages')).filter(
+          status => status !== undefined,
+        ),
+      ).toEqual([]);
+    }
+
+    expect(statuses(thread(hers(nyc('2026-11-24T18:45'))))).toEqual([
+      undefined,
     ]);
   });
 

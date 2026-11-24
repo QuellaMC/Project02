@@ -82,7 +82,8 @@ with an outcome of p02-wire, never an error.
   her phone says so on the stream, and her actor, while she runs, reads
   its rings again.
 - **The stream** hears each turn as it goes: its messages once they are
-  on disk, each with when it was sent and the app it is in, as the
+  on disk, each with when it was sent and the app it is in, and the
+  person's line with when she read it, the moment her turn took it, as the
   scrollback reads them, where a message of hers an earlier build kept is
   in the app of the person's line before it, the turn as it runs now, her
   drafts whole, whenever that changes, and then its completion, which

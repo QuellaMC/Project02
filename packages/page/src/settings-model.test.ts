@@ -407,7 +407,7 @@ function health(
   accounts: GatewayHealth['accounts'] = [],
 ): GatewayHealth {
   return {
-    protocolVersion: 17,
+    protocolVersion: 18,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},

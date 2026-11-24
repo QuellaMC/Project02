@@ -87,7 +87,7 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
     assert_eq!(moments, [(0, 1), (1, 1), (1, 1), (1, 2)]);
     assert!(matches!(
         &progress[0],
-        Progress::UserMessage { message, source, client_message_id }
+        Progress::UserMessage { message, source, client_message_id, .. }
             if source == &stamp("web")
                 && client_message_id == &stamp("hello")
                 && message.sent_at == sent_at

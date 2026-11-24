@@ -29,6 +29,7 @@ import type {
   RunningTurn,
   RuntimeConfigSectionNamespace,
   StoreOutcome,
+  SubmitOutcome,
   TurnStatus,
   VisibleMessageRole,
 } from '@project02/wire/contract';
@@ -55,7 +56,8 @@ type Connected = {readonly connection: Connection};
 
 /**
  * A committed message as the page shows it, with when it was sent and the
- * id of the app it is in; a person's own is told by its role.
+ * id of the app it is in; a person's own is told by its role, and says
+ * when she read it.
  */
 export type Message = {
   readonly messageId: string;
@@ -63,19 +65,28 @@ export type Message = {
   readonly speakerName: string;
   readonly text: string;
   readonly sentAt: string;
+  readonly readAt?: string;
   readonly app: string;
   readonly clientMessageId?: string;
 };
 
 /**
+ * How far a line the log has not shown got: the page sent it and has no
+ * answer yet, the daemon has it on her phone, or it did not reach her.
+ */
+export type LineState = 'sending' | 'delivered' | 'not_delivered';
+
+/**
  * A line this tab sent that the log has not yet shown, whichever thread
  * it went to: the submission itself, so it can be sent again under its
- * own id without a thread being open, and outlive the tab's memory.
+ * own id without a thread being open, and outlive the tab's memory; and
+ * how far it got.
  */
 export type PendingLine = {
   readonly conversationId: string;
   readonly characterId: string;
   readonly text: string;
+  readonly state: LineState;
 };
 
 /** The one open DM as its log shows it. */
@@ -274,7 +285,7 @@ export type WebState = Asking & {
   /**
    * Conversation id → what a person has typed there and not sent. Kept
    * per conversation, so looking at another character loses nothing and a
-   * line the daemon did not take comes back where it was written.
+   * line that did not reach her goes back where it was written.
    */
   readonly composers: ReadonlyMap<string, string>;
   /**
@@ -531,7 +542,7 @@ export function composerChanged(state: WebState, text: string): WebState {
  * waiting for: a page that carries a line proves the daemon took it, and
  * the line stops waiting. A page says nothing by lacking one — it holds
  * a hundred messages, and a busy turn can put more than that between a
- * line and now — so no line is ever returned on a page's silence.
+ * line and now — so a page's silence never says a line did not reach her.
  *
  * A page for the thread on screen lands on it as `threadRead` reads one.
  */
@@ -662,7 +673,7 @@ function newestPage(
   };
 }
 
-/** The composer's line becomes pending under its id, for the open thread. */
+/** The composer's line becomes pending under its id, for the open thread, sending. */
 export function lineSent(state: WebState, clientMessageId: string): WebState {
   const {thread} = state;
   const text = composerText(state).trim();
@@ -677,6 +688,7 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
     conversationId: thread.conversationId,
     characterId: thread.characterId,
     text,
+    state: 'sending',
   });
 
   return {
@@ -686,17 +698,46 @@ export function lineSent(state: WebState, clientMessageId: string): WebState {
 }
 
 /**
+ * The daemon's answer to a send of a line. In her inbox, now or already,
+ * a line on its way is delivered; one whose end came first stays as it
+ * ended. A refusal or a failure is the line's end, as `lineEnded` takes
+ * it: a duplicate is the one refusal whose line is in the log, as a turn
+ * took it under this same id.
+ */
+export function lineAnswered(
+  state: WebState,
+  characterId: string,
+  clientMessageId: string,
+  outcome: SubmitOutcome,
+): WebState {
+  if (outcome.status === 'queued' || outcome.status === 'already_queued') {
+    const line = state.pending.get(clientMessageId);
+
+    return line?.state === 'sending'
+      ? lineGot(state, clientMessageId, line, 'delivered')
+      : state;
+  }
+
+  return lineEnded(state, characterId, clientMessageId, {
+    status: outcome.status,
+    committed:
+      outcome.status === 'refused' && outcome.reason === 'duplicate_submission',
+    message: outcome.message,
+  });
+}
+
+/**
  * A line's end, however it reaches the tab — the daemon's refusal of a
  * send, or the stream's word on its turn — said at once, naming its
  * character, this tab's line or another surface's. The end says whether
- * the line is in the log: one that is not is the person's to write again
- * and goes back to the thread it was written in, open or not; one that is
- * is the thread's, settled here, and the page or the frame shows it where
- * it landed — which may be far back, for a line the daemon took long
- * before. The page works none of this out — an answer can beat the frame
- * that would show the line, a stream is ordered only within one
- * connection, and a page of the log is a hundred messages, not the whole
- * of it — the daemon says. `completed` says only that.
+ * the line is in the log: one that is not did not reach her, and stays in
+ * the thread it was written in, open or not, until the person takes it
+ * back; one that is is the thread's, settled here, and the page or the
+ * frame shows it where it landed — which may be far back, for a line the
+ * daemon took long before. The page works none of this out — an answer
+ * can beat the frame that would show the line, a stream is ordered only
+ * within one connection, and a page of the log is a hundred messages, not
+ * the whole of it — the daemon says. `completed` says only that.
  */
 export function lineEnded(
   state: WebState,
@@ -710,7 +751,7 @@ export function lineEnded(
   if (line !== undefined) {
     next = ending.committed
       ? settled(state, clientMessageId)
-      : handedBack(state, clientMessageId, line);
+      : lineGot(state, clientMessageId, line, 'not_delivered');
   }
 
   return ending.status === 'completed'
@@ -721,6 +762,73 @@ export function lineEnded(
           ending.message ?? `The turn was ${ending.status}.`
         }`,
       );
+}
+
+/**
+ * The person takes back a line that did not reach her: it leaves the
+ * thread, and its words go into its own conversation's message box, after
+ * what is there, to send again, change or drop.
+ */
+export function lineTakenBack(
+  state: WebState,
+  clientMessageId: string,
+): WebState {
+  const line = state.pending.get(clientMessageId);
+
+  if (line === undefined) {
+    return state;
+  }
+
+  const typed = state.composers.get(line.conversationId) ?? '';
+
+  return composing(
+    settled(state, clientMessageId),
+    line.conversationId,
+    typed.length === 0 ? line.text : `${typed} ${line.text}`,
+  );
+}
+
+/**
+ * The lines the page sends again by itself, each under its own id, on a
+ * new stream, once she is ready, or when a send met no answer: every line
+ * still on its way. One that did not reach her waits for the person.
+ */
+export function linesOnTheirWay(
+  state: WebState,
+): ReadonlyMap<string, PendingLine> {
+  return new Map(
+    [...state.pending].filter(([, line]) => line.state !== 'not_delivered'),
+  );
+}
+
+/**
+ * A line a tab kept, as the browser gave it back: data, read as such, and
+ * none unless it is a line. One kept without a state, by an earlier build,
+ * is on its way.
+ */
+export function keptLine(kept: unknown): PendingLine | undefined {
+  if (typeof kept !== 'object' || kept === null) {
+    return undefined;
+  }
+
+  const {conversationId, characterId, text, state} = kept as Record<
+    string,
+    unknown
+  >;
+
+  return typeof conversationId === 'string' &&
+    typeof characterId === 'string' &&
+    typeof text === 'string'
+    ? {
+        conversationId,
+        characterId,
+        text,
+        state:
+          state === 'delivered' || state === 'not_delivered'
+            ? state
+            : 'sending',
+      }
+    : undefined;
 }
 
 /** A home is a world of its own: what was written for another one is not this one's. */
@@ -1146,7 +1254,7 @@ function withoutTurnEnded(
   return withoutPhoning({...state, turns}, ended.conversationId);
 }
 
-/** The daemon took the line, whichever thread it went to; what its ending said stands. */
+/** The line is in the log, whichever thread it went to, or the person took it back: it is pending no more. */
 function settled(state: WebState, clientMessageId: string): WebState {
   const pending = new Map(state.pending);
 
@@ -1155,26 +1263,22 @@ function settled(state: WebState, clientMessageId: string): WebState {
   return {...state, pending};
 }
 
-/**
- * The line was never taken: it goes back to its own thread's composer,
- * after what is there. Lines come back in the order they were sent, one
- * at a time from the stream or together from a page.
- */
-function handedBack(
+/** `line`, which is `clientMessageId`'s, got as far as `got`. */
+function lineGot(
   state: WebState,
   clientMessageId: string,
   line: PendingLine,
+  got: LineState,
 ): WebState {
-  const pending = new Map(state.pending);
-  const typed = state.composers.get(line.conversationId) ?? '';
-
-  pending.delete(clientMessageId);
-
-  return composing(
-    {...state, pending},
-    line.conversationId,
-    typed.length === 0 ? line.text : `${typed} ${line.text}`,
-  );
+  return line.state === got
+    ? state
+    : {
+        ...state,
+        pending: new Map(state.pending).set(clientMessageId, {
+          ...line,
+          state: got,
+        }),
+      };
 }
 
 /** One conversation's unsent text; empty means nothing is being written there. */
@@ -1336,6 +1440,7 @@ function messageOf(source: {
   readonly speakerName: string;
   readonly text: string;
   readonly sentAt: string;
+  readonly readAt?: string;
   readonly app: string;
   readonly clientMessageId?: string;
 }): Message {
@@ -1345,6 +1450,7 @@ function messageOf(source: {
     speakerName: source.speakerName,
     text: source.text,
     sentAt: source.sentAt,
+    ...(source.readAt === undefined ? {} : {readAt: source.readAt}),
     app: source.app,
     ...(source.clientMessageId === undefined
       ? {}

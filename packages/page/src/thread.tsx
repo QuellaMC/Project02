@@ -5,10 +5,16 @@ import {Icon} from './settings-controls.tsx';
 import {
   characterName,
   composerText,
+  type LineState,
   type Thread,
   type WebState,
 } from './store.ts';
-import {laidOut, type Divider, type Placement} from './thread-layout.ts';
+import {
+  laidOut,
+  type Divider,
+  type Placement,
+  type Status,
+} from './thread-layout.ts';
 import {useFollowing} from './thread-scroll.ts';
 
 /** States a character rests in; one switched off and resting is off. */
@@ -176,7 +182,10 @@ export function ThreadPane({
                 own
                 text={line.text}
                 placement={placed}
-                pending
+                line={line.state}
+                onTakeBack={() => {
+                  session.takeBack(clientMessageId);
+                }}
               />
             );
           })}
@@ -259,51 +268,110 @@ function HerPhoneButton({
 }
 
 /**
- * A bubble, with what stands above it where the thread's layout puts
- * anything there; a draft of hers has no place of its own yet. Whose it
- * is, `speaker`, is said to a reader of the screen and not drawn: the
- * side and the colour say it to the eye. Her phone draws its threads with
- * it too.
+ * A bubble, with what stands above it and under it where the thread's
+ * layout puts anything there; a draft of hers has no place of its own yet.
+ * Whose it is, `speaker`, is said to a reader of the screen and not drawn:
+ * the side and the colour say it to the eye. A line of the person's not
+ * yet committed is faint while it is sending, and one that did not reach
+ * her is a button that takes it back into the message box, which takes
+ * the focus. Her phone draws its threads with it too.
  */
 export function Bubble({
   own = false,
   draft = false,
-  pending = false,
+  line,
   speaker,
   placement,
   text,
+  onTakeBack,
 }: {
   readonly own?: boolean;
   readonly draft?: boolean;
-  readonly pending?: boolean;
+  /** How far a line not yet committed got. */
+  readonly line?: LineState;
   readonly speaker?: string;
   readonly placement?: Placement;
   readonly text: string;
+  /** Takes back a line that did not reach her. */
+  readonly onTakeBack?: () => void;
 }) {
   const kind = own ? 'own' : 'theirs';
+  const drawn = {
+    className: `bubble bubble-${kind}${placement?.joined === true ? ' bubble-joined' : ''}${draft ? ' bubble-draft' : ''}${line === 'sending' ? ' bubble-sending' : ''}`,
+    style:
+      placement?.colour === undefined
+        ? undefined
+        : {background: placement.colour},
+    title: placement?.when,
+    'data-draft': draft ? 'true' : undefined,
+    'data-pending': line === undefined ? undefined : 'true',
+  };
+  const words = (
+    <>
+      {speaker === undefined ? null : (
+        <span className="visually-hidden">{`${speaker}: `}</span>
+      )}
+      <span className="bubble-text">{text}</span>
+    </>
+  );
 
   return (
     <>
       {placement?.divider === undefined ? null : (
         <TimeDivider divider={placement.divider} />
       )}
-      <div
-        className={`bubble bubble-${kind}${placement?.joined === true ? ' bubble-joined' : ''}${draft ? ' bubble-draft' : ''}${pending ? ' bubble-pending' : ''}`}
-        style={
-          placement?.colour === undefined
-            ? undefined
-            : {background: placement.colour}
-        }
-        title={placement?.when}
-        data-draft={draft ? 'true' : undefined}
-        data-pending={pending ? 'true' : undefined}
-      >
-        {speaker === undefined ? null : (
-          <span className="visually-hidden">{`${speaker}: `}</span>
-        )}
-        <span className="bubble-text">{text}</span>
-      </div>
+      {line === 'not_delivered' ? (
+        <button
+          type="button"
+          {...drawn}
+          aria-label={`Put back in the message box: ${text}`}
+          onClick={event => {
+            event.currentTarget
+              .closest('main')
+              ?.querySelector<HTMLElement>('.composer input')
+              ?.focus();
+            onTakeBack?.();
+          }}
+        >
+          {words}
+        </button>
+      ) : (
+        <div {...drawn}>{words}</div>
+      )}
+      {placement?.status === undefined ? null : (
+        <StatusLine
+          status={placement.status}
+          notDelivered={line === 'not_delivered'}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * How far the holder's newest message got, under it, at the end of the
+ * line: the word, then when one read was read; a line that did not reach
+ * her in red. Text, so a reader of the screen hears it too.
+ */
+function StatusLine({
+  status,
+  notDelivered,
+}: {
+  readonly status: Status;
+  readonly notDelivered: boolean;
+}) {
+  return (
+    <p
+      className={`bubble-status${notDelivered ? ' bubble-status-not-delivered' : ''}`}
+    >
+      <b>{status.word}</b>
+      {status.read === undefined ? null : (
+        <>
+          {' '}
+          <time dateTime={status.read.at}>{status.read.when}</time>
+        </>
+      )}
+    </p>
   );
 }
 

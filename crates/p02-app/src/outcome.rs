@@ -77,6 +77,7 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
             message,
             source,
             client_message_id,
+            read_at,
         } => (
             Some(TurnProgress::UserMessage {
                 message_id: message.id,
@@ -84,6 +85,7 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
                 speaker_name: message.speaker_name,
                 text: message.text,
                 sent_at: message.sent_at,
+                read_at,
                 app: app_of(Some(&source)).to_owned(),
                 source,
                 client_message_id,

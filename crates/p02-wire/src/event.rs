@@ -141,6 +141,8 @@ pub enum TurnProgress {
         speaker_name: SpeakerName,
         text: VisibleText,
         sent_at: Timestamp,
+        /// When she read it: the moment her turn took it.
+        read_at: Timestamp,
         /// The id of the app the line came in, as `messages` or `telegram`.
         app: String,
         source: ClientStamp,

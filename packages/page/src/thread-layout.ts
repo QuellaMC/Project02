@@ -1,16 +1,17 @@
 /**
  * The one conversation as a messaging app draws it: a time stands where
  * time has passed, with the app's name above it where the app changes; the
- * holder's own bubbles are in their app's colour; and one sender's
- * messages in a row sit close together. The chat draws it in Messages as
- * the person holds it, theirs at the end of the line, and a line of theirs
- * not yet committed as theirs sent now in Messages; her phone draws what
- * went through one app as she holds it, the mirror of the chat. Nothing
- * here touches the DOM or reads a clock: the viewer's clock comes in, so
- * the rules are tested in Node.
+ * holder's own bubbles are in their app's colour; one sender's messages in
+ * a row sit close together; and a line under the holder's newest message
+ * says how far it got. The chat draws it in Messages as the person holds
+ * it, theirs at the end of the line, and a line of theirs not yet
+ * committed as theirs sent now in Messages; her phone draws what went
+ * through one app as she holds it, the mirror of the chat. Nothing here
+ * touches the DOM or reads a clock: the viewer's clock comes in, so the
+ * rules are tested in Node.
  */
 import type {VisibleMessageRole} from '@project02/wire/contract';
-import type {Message, PendingLine} from './store.ts';
+import type {LineState, Message, PendingLine} from './store.ts';
 
 /** The viewer's clock: the moment now, and the language and zone their system writes a time in. */
 export type Clock = {
@@ -45,6 +46,18 @@ export type Divider = {
   readonly at: string;
 };
 
+/** What stands under the holder's newest message: how far it got, and for one read, when. */
+export type Status = {
+  /** `Sending…`, `Delivered`, `Not Delivered` or `Read`. */
+  readonly word: string;
+  /**
+   * When it was read: the time alone on the day it was read, and the day
+   * on another, as a divider writes them; and that moment as the daemon
+   * writes one.
+   */
+  readonly read?: {readonly when: string; readonly at: string};
+};
+
 /**
  * Whose screen a thread is drawn on, and in which app: the app it is
  * drawn in, which the first message follows, so that an app's name stands
@@ -68,6 +81,8 @@ export type Placement = {
   readonly own: boolean;
   /** The holder's own bubble's colour, its app's; the other's keep their own. */
   readonly colour?: string;
+  /** What stands under it, the holder's newest message, where anything does. */
+  readonly status?: Status;
 };
 
 /** A message, or a line not yet committed, as its thread is drawn. */
@@ -80,6 +95,13 @@ type App = {readonly name: string; readonly colour: string};
 
 /** A day where the viewer is: its year, and the day counted from 1970. */
 type CalendarDay = {readonly year: number; readonly day: number};
+
+/** A moment as the viewer's clock writes it: the day it falls on, counted from 1970; that day in the page's words; and its time. */
+type Written = {
+  readonly day: number;
+  readonly words: string;
+  readonly time: string;
+};
 
 /** The app's own chat, which every line of the page's is sent in. */
 export const messagesApp = 'messages';
@@ -98,6 +120,13 @@ const pause = 15 * 60_000;
 
 const dayLength = 24 * 60 * 60_000;
 
+/** What the line under a line not yet committed says, by how far it got. */
+const lineWords: Readonly<Record<LineState, string>> = {
+  sending: 'Sending…',
+  delivered: 'Delivered',
+  not_delivered: 'Not Delivered',
+};
+
 /** The person's chat: Messages, which shows what went through every app, theirs at the end of the line. */
 export const chat: Holder = {app: messagesApp, own: 'user'};
 
@@ -112,9 +141,28 @@ export function labelOf(app: string): string | undefined {
 }
 
 /**
+ * How the page writes the hour and minute of a moment, wherever it writes
+ * one: as the viewer's system writes it, where they are, `6:50 PM` or
+ * `18:50`, unless `place` names another language and zone.
+ */
+export function hourAndMinute(
+  place?: Pick<Clock, 'locale' | 'timeZone'>,
+): Intl.DateTimeFormat {
+  return new Intl.DateTimeFormat(place?.locale, {
+    timeZone: place?.timeZone,
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
+/**
  * The thread as `holder` draws it, the person's chat unless another is
  * named: each message, then each line not yet committed, with where it
- * stands and how its bubble looks.
+ * stands and how its bubble looks. A line that did not reach her says so
+ * under it, whichever it is. Under the holder's newest message besides —
+ * the last line still on its way, when there is one — stands how far it
+ * got: for a line on its way, as far as the daemon has said; for a
+ * message, `Read` and when, once it was read.
  */
 export function laidOut(
   shown: Shown,
@@ -124,7 +172,8 @@ export function laidOut(
   readonly messages: readonly Laid<Message>[];
   readonly pending: readonly Laid<Pending>[];
 } {
-  const lay = layer(clock, holder);
+  const write = writer(clock);
+  const lay = layer(write, holder);
   const messages = shown.messages.map(message => lay.next(message, message));
 
   if (shown.between) {
@@ -136,10 +185,45 @@ export function laidOut(
     sentAt: new Date(clock.now).toISOString(),
     app: messagesApp,
   };
+  const stateOf = (placed: Laid<Pending>): LineState => placed.message[1].state;
+  const said = (placed: Laid<Pending>): Laid<Pending> => ({
+    ...placed,
+    status: {word: lineWords[stateOf(placed)]},
+  });
+  const pending = shown.pending
+    .map(line => lay.next(line, sentNow))
+    .map(placed =>
+      stateOf(placed) === 'not_delivered' ? said(placed) : placed,
+    );
+  const onItsWay = pending.findLastIndex(
+    placed => stateOf(placed) !== 'not_delivered',
+  );
+  const sent = pending[onItsWay];
+
+  if (sent !== undefined) {
+    return {messages, pending: pending.with(onItsWay, said(sent))};
+  }
+
+  const today = write(clock.now).day;
+  const newest = messages.findLastIndex(placed => placed.own);
+  const read = messages[newest];
+  const readAt = read?.message.readAt;
+
+  if (read === undefined || readAt === undefined) {
+    return {messages, pending};
+  }
+
+  const {day, words, time} = write(Date.parse(readAt));
 
   return {
-    messages,
-    pending: shown.pending.map(line => lay.next(line, sentNow)),
+    messages: messages.with(newest, {
+      ...read,
+      status: {
+        word: 'Read',
+        read: {when: day === today ? time : words, at: readAt},
+      },
+    }),
+    pending,
   };
 }
 
@@ -149,23 +233,23 @@ function appOf(id: string): App {
 }
 
 /**
- * Lays messages out one after another, as `holder` draws the thread. A
- * divider stands before a message that is the first, or was sent
- * on another day, more than 15 minutes after, or in another app than the
- * message before it, whoever wrote that; the first counts as following the
- * app the thread is drawn in, so an app's name stands only where the
- * conversation moved to it. A message sits close under the one directly
- * above it when the same sender wrote both and no divider stands between.
+ * Lays messages out one after another, as `holder` draws the thread, each
+ * moment written by `write`. A divider stands before a message that is the
+ * first, or was sent on another day, more than 15 minutes after, or in
+ * another app than the message before it, whoever wrote that; the first
+ * counts as following the app the thread is drawn in, so an app's name
+ * stands only where the conversation moved to it. A message sits close
+ * under the one directly above it when the same sender wrote both and no
+ * divider stands between.
  */
 function layer(
-  clock: Clock,
+  write: (at: number) => Written,
   holder: Holder,
 ): {
   readonly next: <T>(message: T, sent: Sent) => Laid<T>;
   /** Something that is no message stands here: the next message is under it. */
   readonly apart: () => void;
 } {
-  const write = writer(clock);
   let before:
     | {readonly at: number; readonly day: number; readonly app: string}
     | undefined;
@@ -220,11 +304,7 @@ function layer(
  * date with its year in another — and the time, hour and minute, as their
  * system writes one.
  */
-function writer({now, locale, timeZone}: Clock): (at: number) => {
-  readonly day: number;
-  readonly words: string;
-  readonly time: string;
-} {
+function writer({now, locale, timeZone}: Clock): (at: number) => Written {
   const calendar = new Intl.DateTimeFormat('en-US', {
     timeZone,
     year: 'numeric',
@@ -244,11 +324,7 @@ function writer({now, locale, timeZone}: Clock): (at: number) => {
     day: 'numeric',
     year: 'numeric',
   });
-  const time = new Intl.DateTimeFormat(locale, {
-    timeZone,
-    hour: 'numeric',
-    minute: '2-digit',
-  });
+  const time = hourAndMinute({locale, timeZone});
   const dayOf = (at: number): CalendarDay => {
     const parts = calendar.formatToParts(at);
     const part = (type: Intl.DateTimeFormatPartTypes) =>

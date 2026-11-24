@@ -63,7 +63,15 @@ each bubble says its own on hover; the person's bubbles take their app's
 colour, Telegram's or the page's blue; one sender's messages in a row sit
 close; and the head of the chat names her, while a bubble says whose it is
 only to a reader of the screen. A line of the
-person's not yet committed is drawn as theirs sent now in Messages. Each
+person's not yet committed is drawn as theirs sent now in Messages, and
+under their newest message one line says how far it got: `Sending…`, the
+bubble faint, until the daemon answers; `Delivered` once her inbox has it;
+`Read` once her turn took it, with the time on that day and the day on
+another. Every line that did not reach her says `Not Delivered` under it,
+in red, as a notice says why; it stays in the thread and is never sent
+again by itself: pressed, it goes back into its message box.
+Each line keeps how far it got in what the tab keeps, so a reload shows it
+as it was. Each
 turn in progress is the daemon's own word on it, replaced whole by each
 `turn_running` frame and installed from every `ready`; a stream the daemon
 resumed is live again with nothing installed.

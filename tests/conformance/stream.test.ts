@@ -69,7 +69,7 @@ it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, th
   const events = await openEvents(daemon);
 
   expect(dataOf(await events.next(() => true))).toEqual({
-    protocolVersion: 17,
+    protocolVersion: 18,
     health: await wire.health(),
     confirmations: await wire.pending(),
     pairings: await wire.pendingPairings(),
@@ -223,7 +223,7 @@ it('stream.running-turns: a stream opened mid-reply finds the running turn in re
   ).toMatchObject({turns: []});
 });
 
-it("stream.sync-rule: the person's line rides the stream as user_message, stamped, with when it was sent and the app it came in, once it is on disk, and the reply follows", async () => {
+it("stream.sync-rule: the person's line rides the stream as user_message, stamped, with when it was sent, when she read it and the app it came in, once it is on disk, where the history holds it read at that very moment, and the reply follows", async () => {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({project02: model.settings}),
@@ -253,7 +253,9 @@ it("stream.sync-rule: the person's line rides the stream as user_message, stampe
     await events.next(
       frameOf('turn_progress', {progress: {kind: 'user_message'}}),
     ),
-  ) as {readonly progress: {readonly messageId: string}};
+  ) as {
+    readonly progress: {readonly messageId: string; readonly readAt: string};
+  };
 
   expect(line).toEqual({
     kind: 'turn_progress',
@@ -266,14 +268,22 @@ it("stream.sync-rule: the person's line rides the stream as user_message, stampe
       speakerName: 'You',
       text: 'Hello there.',
       sentAt,
+      readAt: expect.any(String) as string,
       app: 'telegram',
       source: 'telegram:mira_bot',
       clientMessageId: 'sync',
     },
   });
-  // The model still holds the turn, and the history already holds the line.
+  // The model still holds the turn, and the history already holds the
+  // line, read when the stream said.
   await expect(wire.history(conversationId)).resolves.toMatchObject({
-    messages: [{messageId: line.progress.messageId, text: 'Hello there.'}],
+    messages: [
+      {
+        messageId: line.progress.messageId,
+        text: 'Hello there.',
+        readAt: line.progress.readAt,
+      },
+    ],
   });
   // And on disk: killed now, with the model still holding the turn, the
   // daemon leaves the line for the next run to read back.

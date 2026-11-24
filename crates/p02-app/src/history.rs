@@ -283,7 +283,8 @@ impl Segments {
 }
 
 /// The messages `records`, one segment's, committed: each with when it was
-/// sent and the app it is in, and the person's lines with the stamps they
+/// sent and the app it is in, and the person's lines with when she read
+/// them, the moment of the record that holds each, and the stamps they
 /// carry. A message of hers an earlier build kept names no app: it is in
 /// the app of the person's line nearest before it in the segment, which it
 /// answered, and in Messages when there is none.
@@ -293,17 +294,17 @@ fn messages_of(records: &[LogRecord]) -> Vec<HistoryMessage> {
     records
         .iter()
         .filter_map(|record| match record.body() {
-            RecordBody::MessageCommitted(commit) => Some(commit),
+            RecordBody::MessageCommitted(commit) => Some((record.identity(), commit)),
             _ => None,
         })
-        .map(|commit| {
+        .map(|(identity, commit)| {
             let message = commit.message().clone();
-            let app = match message.role {
+            let (app, read_at) = match message.role {
                 VisibleMessageRole::User => {
                     nearest = app_of(commit.source());
-                    nearest
+                    (nearest, Some(identity.created_at().clone()))
                 }
-                VisibleMessageRole::Character => commit.app().unwrap_or(nearest),
+                VisibleMessageRole::Character => (commit.app().unwrap_or(nearest), None),
             };
 
             HistoryMessage {
@@ -313,6 +314,7 @@ fn messages_of(records: &[LogRecord]) -> Vec<HistoryMessage> {
                 speaker_name: message.speaker_name,
                 text: message.text,
                 sent_at: message.sent_at,
+                read_at,
                 app: app.to_owned(),
                 source: commit.source().cloned(),
                 client_message_id: commit.client_message_id().cloned(),
@@ -328,9 +330,17 @@ mod tests {
     use super::*;
 
     /// Message `number` of a segment as its commit's log line holds it,
-    /// said by `role`, with `fields` beside it.
+    /// said by `role`, with `fields` beside it: the person's line sent half
+    /// a minute before the turn that took it began, at its record's moment,
+    /// and hers four seconds after.
     fn commit(number: u64, role: &str, fields: &Value) -> LogRecord {
         let id = format!("conv_a.1:message-{number}");
+        let theirs = role == "user";
+        let sent = if theirs {
+            "2026-11-24T08:59:30.000Z"
+        } else {
+            "2026-11-24T09:00:04.000Z"
+        };
         let mut line = json!({
             "eventId": "evt_1",
             "traceId": "trace_1",
@@ -340,10 +350,10 @@ mod tests {
             "visibleMessage": {
                 "id": id,
                 "role": role,
-                "speakerId": if role == "user" { "local-user" } else { "mira" },
-                "speakerName": if role == "user" { "Sam" } else { "Mira" },
+                "speakerId": if theirs { "local-user" } else { "mira" },
+                "speakerName": if theirs { "Sam" } else { "Mira" },
                 "text": "Hello.",
-                "sentAt": "2026-11-24T09:00:00.000Z",
+                "sentAt": sent,
             },
         });
 
@@ -380,6 +390,37 @@ mod tests {
             apps,
             [
                 "messages", "telegram", "telegram", "messages", "messages", "telegram"
+            ]
+        );
+    }
+
+    /// The person's line was read when her turn took it, the moment of the
+    /// record that holds it, and not when it was sent; hers says no such
+    /// moment.
+    #[test]
+    fn the_person_s_line_is_read_at_its_record_s_moment_not_when_it_was_sent() {
+        let records = [
+            commit(1, "user", &json!({"source": "web", "clientMessageId": "a"})),
+            commit(2, "character", &json!({"app": "messages", "round": 1})),
+        ];
+        let times: Vec<(String, Option<String>)> = messages_of(&records)
+            .into_iter()
+            .map(|message| {
+                (
+                    message.sent_at.to_string(),
+                    message.read_at.map(|at| at.to_string()),
+                )
+            })
+            .collect();
+
+        assert_eq!(
+            times,
+            [
+                (
+                    "2026-11-24T08:59:30.000Z".to_owned(),
+                    Some("2026-11-24T09:00:00.000Z".to_owned())
+                ),
+                ("2026-11-24T09:00:04.000Z".to_owned(), None),
             ]
         );
     }

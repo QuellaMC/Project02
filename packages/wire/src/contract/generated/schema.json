@@ -2047,7 +2047,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 17
+          "const": 18
         },
         "homeRoot": {
           "type": "string"
@@ -2125,7 +2125,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 17
+          "const": 18
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -2188,6 +2188,10 @@
         "sentAt": {
           "$ref": "#/$defs/Timestamp"
         },
+        "readAt": {
+          "description": "When she read the person's line: the moment her turn took it. Hers\nhas none.",
+          "$ref": "#/$defs/Timestamp"
+        },
         "app": {
           "type": "string",
           "description": "The id of the app the person's line came in, or hers went in, as\n`messages` or `telegram`."
@@ -2208,7 +2212,7 @@
         "sentAt",
         "app"
       ],
-      "description": "A committed message as the scrollback shows it: when it was sent, the\napp it is in, by its id, and for the person's line the stamps its client\nput on it."
+      "description": "A committed message as the scrollback shows it: when it was sent, the\napp it is in, by its id, and for the person's line when she read it and\nthe stamps its client put on it."
     },
     "HistoryOutcome": {
       "oneOf": [
@@ -4493,6 +4497,10 @@
             "sentAt": {
               "$ref": "#/$defs/Timestamp"
             },
+            "readAt": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "When she read it: the moment her turn took it."
+            },
             "app": {
               "type": "string",
               "description": "The id of the app the line came in, as `messages` or `telegram`."
@@ -4515,6 +4523,7 @@
             "speakerName",
             "text",
             "sentAt",
+            "readAt",
             "app",
             "source",
             "clientMessageId"

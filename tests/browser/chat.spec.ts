@@ -693,6 +693,53 @@ test('page.ask-while-reading: in a chat scrolled up to read, the line at the top
   );
 });
 
+test("page.line-status: under the person's newest message one line says how far it got, Delivered while it waits for her, then Read with the time her turn took it in, and stays under it when her answer arrives", async ({
+  page,
+}) => {
+  const {model, daemon, wire} = await miraHome();
+  const held = model.hold();
+  const status = page.locator('.bubble-status');
+  const under = (text: string) =>
+    page.locator(
+      `.bubble-own:has-text(${JSON.stringify(text)}) + .bubble-status`,
+    );
+
+  await page.goto(daemon.url);
+  await send(page, 'Morning.');
+  await held.arrived();
+  await expect(under('Morning.').locator('b')).toHaveText('Read');
+  // Her turn holds at the model, so the next line waits in her inbox.
+  await send(page, 'Tea?');
+  await expect(under('Tea?')).toHaveText('Delivered');
+  await expect(status).toHaveCount(1);
+  model.answer(reply('Tea, always.'));
+  held.release(reply('Morning, Sam.'));
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Morning, Sam.',
+    'Tea, always.',
+  ]);
+
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const {messages} = (await wire.history(conversationId)) as {
+    readonly messages: readonly {
+      readonly text: string;
+      readonly readAt?: string;
+    }[];
+  };
+
+  await expect(status).toHaveCount(1);
+  await expect(under('Tea?').locator('b')).toHaveText('Read');
+  // The time is when her turn took the line in, as the daemon keeps it.
+  await expect(under('Tea?').locator('time')).toHaveAttribute(
+    'datetime',
+    messages.find(message => message.text === 'Tea?')?.readAt ?? '',
+  );
+  await expect(under('Tea?').locator('time')).toHaveText(/\d/u);
+  await expect(
+    page.locator('.bubble-status + .bubble-theirs .bubble-text'),
+  ).toHaveText('Tea, always.');
+});
+
 test('page.rejected-line-kept: a line whose turn the daemon rejected stays on the thread with a notice saying why, and the composer is empty', async ({
   page,
 }) => {
@@ -716,12 +763,12 @@ test('page.rejected-line-kept: a line whose turn the daemon rejected stays on th
   await expect(composerFor(page)).toHaveValue('');
 });
 
-test('page.refused-line-handback: a line the daemon refuses before any turn, longer than it takes, goes back to the composer with its reason as a notice', async ({
+test('page.refused-line-not-delivered: a line the daemon refuses before any turn, longer than it takes, stays in the thread as Not Delivered with its reason as a notice, and pressing it puts it back in the message box', async ({
   page,
 }) => {
   const {daemon} = await miraHome();
   // As long as a paste can be: the daemon refuses it before any turn
-  // runs, so the line is the person's again.
+  // runs, so the line never reached her.
   const tooLong = 'x'.repeat(17 * 1024);
 
   await page.goto(daemon.url);
@@ -729,7 +776,13 @@ test('page.refused-line-handback: a line the daemon refuses before any turn, lon
   await expect(page.locator('main > .notice')).toContainText(
     'Mira: The message: a line is at most',
   );
+  await expect(page.locator('.bubble-status')).toHaveText('Not Delivered');
+  await expect(composerFor(page)).toHaveValue('');
+  await page
+    .getByRole('button', {name: /^Put back in the message box: x/u})
+    .click();
   await expect(composerFor(page)).toHaveValue(tooLong);
+  await expect(composerFor(page)).toBeFocused();
   await expect(page.locator('[data-pending]')).toHaveCount(0);
 });
 
