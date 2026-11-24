@@ -6,7 +6,7 @@
 use std::num::NonZeroU64;
 use std::ops::Range;
 
-use p02_core::{Conversation, ConversationId, SessionId};
+use p02_core::{Conversation, ConversationId, SessionId, VisibleMessageRole, app_of};
 use p02_store::{CharacterData, Home, RecordBody, SessionEntry, SettingsDocument, StorageError};
 use p02_wire::{HistoryMessage, HistoryOutcome, HistoryRefusal};
 
@@ -221,8 +221,9 @@ impl Segments {
         Ok(self.messages(segment)?[range].to_vec())
     }
 
-    /// Segment `segment`'s committed messages, with the stamps the person's
-    /// lines carry and when each was committed.
+    /// Segment `segment`'s committed messages, each with when it was sent,
+    /// and the person's lines with the app each came in and the stamps it
+    /// carries.
     fn messages(&mut self, segment: usize) -> Result<&[HistoryMessage], StorageError> {
         if self.read[segment].is_none() {
             let replay = self
@@ -242,7 +243,9 @@ impl Segments {
                             speaker_id: message.speaker_id,
                             speaker_name: message.speaker_name,
                             text: message.text,
-                            committed_at: record.identity().created_at().clone(),
+                            sent_at: message.sent_at,
+                            app: (message.role == VisibleMessageRole::User)
+                                .then(|| app_of(commit.source()).to_owned()),
                             source: commit.source().cloned(),
                             client_message_id: commit.client_message_id().cloned(),
                         })

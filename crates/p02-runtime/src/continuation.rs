@@ -5,12 +5,12 @@
 
 use std::num::{NonZeroU32, NonZeroU64, NonZeroUsize};
 
-use p02_contracts::{
-    ConversationTurn, RoleModelAdapter, TextCompletion, TextCompletionRequest, ToolCallResult,
-};
-use p02_core::{EventIdentity, SpeakerName, Timestamp, VisibleMessage};
+use jiff::tz::TimeZone;
+use p02_contracts::{ConversationTurn, TextCompletion, TextCompletionRequest, ToolCallResult};
+use p02_core::{AppNames, EventIdentity, SpeakerName, Timestamp, VisibleMessage};
 use p02_role_model::{
-    Person, Recollection, newest_turns_within, select_history_window, summarizer_instructions,
+    Person, Recollection, line_heading_of, newest_turns_within, select_history_window,
+    summarizer_instructions,
 };
 use p02_shared::{Identifier, error_chain};
 use p02_store::{ConversationHistory, Summarizer, SummaryProvider};
@@ -55,14 +55,16 @@ struct Summary {
 /// Once the turn of `event` completed after `history`, continues the
 /// session in a new segment when the model's window, as `mind` stands now,
 /// would no longer hold the whole of it, the summary naming her
-/// `character`. What failed, in a sentence: a continuation not committed
-/// leaves the thread where it was, for the next completed turn to plan
-/// again.
+/// `character` and telling each of the person's lines as she reads it,
+/// in `zone`, where the person is. What failed, in a sentence: a
+/// continuation not committed leaves the thread where it was, for the next
+/// completed turn to plan again.
 pub(crate) async fn rotate(
     disk: &mut Option<Disk>,
     event: &EventIdentity,
     history: ConversationHistory,
     character: &SpeakerName,
+    zone: &TimeZone,
     mind: &dyn Mind,
 ) -> Option<String> {
     let ConversationHistory { mut turns, summary } = history;
@@ -79,12 +81,11 @@ pub(crate) async fn rotate(
 
     let selection = select(&turns, mind.context_window())?;
     let summary = summarize(
-        mind.adapter(),
+        mind,
         selection.summarized,
         summary.as_deref(),
-        mind.person(),
         character,
-        mind.context_window(),
+        zone,
     )
     .await;
     let next = Next {
@@ -123,18 +124,19 @@ fn select(turns: &[ConversationTurn], window: NonZeroU64) -> Option<Selection<'_
 }
 
 /// Condenses `turns`, after the `earlier` summary a continued session
-/// opened with, through the provider's plain completion. When the provider
-/// has no model for it, fails, or answers nothing, the mechanical summary
-/// says what it can, and the summarizer says why. Both speak of the person
-/// by `person`, the name they go by now.
+/// opened with, through the plain completion of the provider `mind` has.
+/// When the provider has no model for it, fails, or answers nothing, the
+/// mechanical summary says what it can, and the summarizer says why. Both
+/// speak of the person by the name `mind` says they go by now, and the
+/// provider reads each of their lines as she does, in `zone`.
 async fn summarize(
-    adapter: &dyn RoleModelAdapter,
+    mind: &dyn Mind,
     turns: &[ConversationTurn],
     earlier: Option<&str>,
-    person: &SpeakerName,
     character: &SpeakerName,
-    window: NonZeroU64,
+    zone: &TimeZone,
 ) -> Summary {
+    let (person, window) = (mind.person(), mind.context_window());
     let budget = summary_budget(window);
     let recollection = if earlier.is_some() {
         Recollection::Rewrite
@@ -148,7 +150,7 @@ async fn summarize(
             budget,
             recollection,
         ),
-        input: summarizer_input(turns, earlier, character, window),
+        input: summarizer_input(turns, earlier, character, mind.apps(), zone, window),
         max_output_chars: budget,
     };
     let fallback = |reason: &str| Summary {
@@ -158,7 +160,7 @@ async fn summarize(
         },
     };
 
-    match adapter.complete_text(&request).await {
+    match mind.adapter().complete_text(&request).await {
         TextCompletion::Completed {
             text,
             provider,
@@ -197,16 +199,20 @@ fn transcript_cap(window: NonZeroU64) -> usize {
 }
 
 /// What the summarizer reads: the earlier summary, when there is one, then
-/// the turns as a transcript, her moments said to be `character`'s.
+/// the turns as a transcript, her moments said to be `character`'s and
+/// each of the person's lines under its heading, as `apps` names its app,
+/// in `zone`.
 fn summarizer_input(
     turns: &[ConversationTurn],
     earlier: Option<&str>,
     character: &SpeakerName,
+    apps: &AppNames,
+    zone: &TimeZone,
     window: NonZeroU64,
 ) -> String {
     let conversation = format!(
         "<conversation>\n{}\n</conversation>",
-        transcript(turns, character, transcript_cap(window))
+        transcript(turns, character, apps, zone, transcript_cap(window))
     );
 
     match earlier {
@@ -219,13 +225,21 @@ fn summarizer_input(
 
 /// `turns` as plain lines, oldest first: the day whenever it changes, a
 /// moment of `character`'s own said to be one where the person's line
-/// would be, so what she says there answers nobody, each message as its
-/// speaker's name and its text on one line, each tool call and its result,
-/// a line too long shortened from its middle, and the oldest lines left out
-/// while the whole is longer than `cap` characters, a note of how many
-/// counted in, though never the newest.
-fn transcript(turns: &[ConversationTurn], character: &SpeakerName, cap: usize) -> String {
-    let lines = transcript_lines(turns, character);
+/// would be, so what she says there answers nobody, each of the person's
+/// lines under the heading she reads it under, its app as `apps` names it
+/// and its time in `zone`, each message as its speaker's name and its text
+/// on one line, each tool call and its result, a line too long shortened
+/// from its middle, and the oldest lines left out while the whole is longer
+/// than `cap` characters, a note of how many counted in, though never the
+/// newest.
+fn transcript(
+    turns: &[ConversationTurn],
+    character: &SpeakerName,
+    apps: &AppNames,
+    zone: &TimeZone,
+    cap: usize,
+) -> String {
+    let lines = transcript_lines(turns, character, apps, zone);
     let lengths: Vec<usize> = lines.iter().map(|line| line.chars().count()).collect();
     let mut kept = lengths.iter().sum::<usize>() + lines.len().saturating_sub(1);
     let mut dropped = 0;
@@ -251,7 +265,12 @@ fn omitted(lines: usize) -> String {
     format!("[… {lines} earlier lines omitted …]")
 }
 
-fn transcript_lines(turns: &[ConversationTurn], character: &SpeakerName) -> Vec<String> {
+fn transcript_lines(
+    turns: &[ConversationTurn],
+    character: &SpeakerName,
+    apps: &AppNames,
+    zone: &TimeZone,
+) -> Vec<String> {
     let mut lines = Vec::new();
     let mut day = None;
 
@@ -263,10 +282,13 @@ fn transcript_lines(turns: &[ConversationTurn], character: &SpeakerName) -> Vec<
             day = Some(today);
         }
 
-        lines.push(match &turn.user_message {
-            Some(line) => said(line),
-            None => format!("[a moment of {character}'s own — nobody wrote]"),
-        });
+        match &turn.user_message {
+            Some(line) => {
+                lines.push(line_heading_of(line, turn.source.as_ref(), apps, zone));
+                lines.push(said(line));
+            }
+            None => lines.push(format!("[a moment of {character}'s own — nobody wrote]")),
+        }
 
         for round in &turn.tool_rounds {
             lines.extend(round.interim_replies.iter().map(said));
@@ -516,6 +538,7 @@ mod tests {
                 speaker_id: Identifier::new(speaker_id).unwrap(),
                 speaker_name: SpeakerName::new(speaker_name).unwrap(),
                 text: random.said(),
+                sent_at: Timestamp::new("2026-10-10T09:00:00.000Z").unwrap(),
             }
         };
 
@@ -547,6 +570,7 @@ mod tests {
                 ConversationTurn {
                     identity,
                     user_message,
+                    source: None,
                     rang: Vec::new(),
                     tool_rounds,
                     final_replies,
@@ -685,8 +709,9 @@ mod tests {
             let turns = history(&mut random);
             let cap = transcript_cap(window(&mut random));
             let mira = SpeakerName::new("Mira").unwrap();
-            let lines = transcript_lines(&turns, &mira);
-            let shown = transcript(&turns, &mira, cap);
+            let (apps, zone) = (AppNames::new([]), TimeZone::UTC);
+            let lines = transcript_lines(&turns, &mira, &apps, &zone);
+            let shown = transcript(&turns, &mira, &apps, &zone, cap);
             let newest = lines.last().unwrap();
 
             assert!(

@@ -9,8 +9,8 @@ Her actor asks `Conversation::exists` whether the thread was ever made,
 which makes nothing, opens it with `Conversation::open`, hands it each
 line with `deliver`, starts a moment of hers with `moment`, giving it what
 rang on her phone when its ringing began it, and closes it when she stops
-or restarts. A `Submission` is the line and its client's
-two stamps, a `Mind` answers the turn as her settings stand before each
+or restarts. A `Submission` is the line, its client's two stamps and when
+it was sent, a `Mind` answers the turn as her settings stand before each
 request to the model, and a `Delivery` says how the turn ended.
 
 - **One turn at a time.** A line a turn took already is answered with the
@@ -26,7 +26,8 @@ request to the model, and a `Delivery` says how the turn ended.
   began the turn, each model round before anything it decided, each reply
   and tool call, then the turn's ending, before the plugins' work after
   it. A message is announced once on disk; only a draft comes sooner, and
-  says so.
+  says so. The person's line keeps the time it was sent, however long it
+  waited, and each reply of hers is sent as it is committed.
 - **Failure.** A failed store write, or settings that no longer build
   her, fail the turn: its rejection is recorded if it can be, and her
   actor restarts her. The thread opened again closes a turn a crash left

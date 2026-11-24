@@ -4,6 +4,7 @@
 use std::sync::{Arc, Mutex};
 
 use p02_contracts::{ChatMessage, ModelOutput, ToolCallOutcome};
+use p02_core::Timestamp;
 use p02_runtime::{CompletedTurn, Delivery, Progress, Submission};
 use p02_store::{EventReceived, RecordBody, RecordKind};
 use serde_json::{Value, json};
@@ -26,12 +27,13 @@ fn texts(turn: &CompletedTurn) -> Vec<&str> {
 }
 
 /// A first line through a fresh thread lands its records in the gate's
-/// order, and is announced before the model is asked, each message only
-/// once its record is on disk.
+/// order, sent when its client sent it, and is announced before the model
+/// is asked, each message only once its record is on disk.
 #[tokio::test]
 async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
     let mut chat = Chat::new(&[]);
     let id = chat.id();
+    let sent_at = Timestamp::new("2026-11-24T14:10:00.000Z").unwrap();
 
     chat.model
         .script([Round::says(reply(&["Hello."])).drafting(0, &["Hel", "lo."])]);
@@ -52,6 +54,7 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
                 line: " Hello? ",
                 source: stamp("web"),
                 client_message_id: stamp("hello"),
+                sent_at: sent_at.clone(),
             },
             &mut Fixed { model, host },
             &|progress: Progress| {
@@ -84,8 +87,10 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
     assert_eq!(moments, [(0, 1), (1, 1), (1, 1), (1, 2)]);
     assert!(matches!(
         &progress[0],
-        Progress::UserMessage { source, client_message_id, .. }
-            if source == &stamp("web") && client_message_id == &stamp("hello")
+        Progress::UserMessage { message, source, client_message_id }
+            if source == &stamp("web")
+                && client_message_id == &stamp("hello")
+                && message.sent_at == sent_at
     ));
 
     let Delivery::Completed(turn) = delivery else {

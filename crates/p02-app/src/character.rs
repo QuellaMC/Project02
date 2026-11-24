@@ -16,7 +16,7 @@ use p02_config::{
     CharacterSettings, HostSettings, MaterializeError, ReadSettingsError, Resolution, materialize,
 };
 use p02_contracts::{CharacterStorage, FileStoreBackend, Rang, RoleModelAdapter};
-use p02_core::{SpeakerName, Timestamp};
+use p02_core::{AppNames, SpeakerName, Timestamp};
 use p02_phone::SetRing;
 use p02_plugins::{PHONE_PLUGIN, PluginHost};
 use p02_role_model::{
@@ -1122,6 +1122,10 @@ impl Mind for Current<'_> {
         &self.built.person
     }
 
+    fn apps(&self) -> &AppNames {
+        &self.her.world.apps
+    }
+
     fn adapter(&self) -> &dyn RoleModelAdapter {
         self.adapter.as_ref()
     }
@@ -1225,6 +1229,7 @@ async fn take_turn(
                     line: &line.text,
                     source: line.source.clone(),
                     client_message_id: line.client_message_id.clone(),
+                    sent_at: line.sent_at.clone(),
                 },
                 &mut mind,
                 &listener,

@@ -18,7 +18,9 @@ use p02_config::{
 use p02_contracts::{
     FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin, SetupCheck,
 };
-use p02_core::{ClientStamp, Conversation, ConversationId, VisibleMessageRole};
+use p02_core::{
+    AppNames, ClientStamp, Conversation, ConversationId, Timestamp, VisibleMessageRole,
+};
 use p02_plugins::{AppCatalog, AppInternet};
 use p02_shared::{BaseUrl, Identifier, error_sentence};
 use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
@@ -186,16 +188,19 @@ pub struct OpenDaemonError {
 }
 
 /// What every actor of the daemon reads: the home, the settings' sections,
-/// the plugins, the waits, the model that stands in for every character's,
-/// where the OpenAI API, a ChatGPT plan's service and the Claude API are
-/// when the binary names a stand-in for them, the App Store's catalog her
-/// phone reads, the internet her apps reach, the home's sign-in to a
-/// ChatGPT plan, and the events.
+/// the plugins, the names of the apps the person writes in, the waits, the
+/// model that stands in for every character's, where the OpenAI API, a
+/// ChatGPT plan's service and the Claude API are when the binary names a
+/// stand-in for them, the App Store's catalog her phone reads, the internet
+/// her apps reach, the home's sign-in to a ChatGPT plan, and the events.
 #[derive(Debug)]
 pub(crate) struct World {
     pub(crate) home: Home,
     pub(crate) sections: Sections,
     pub(crate) plugins: Vec<Plugin>,
+    /// Messages, and each connector's app by the name its declaration
+    /// gives it.
+    pub(crate) apps: AppNames,
     pub(crate) durations: Durations,
     pub(crate) test_provider: Option<Arc<dyn RoleModelAdapter>>,
     pub(crate) openai_api: Option<BaseUrl>,
@@ -392,6 +397,11 @@ impl Daemon {
                             .map(|plugin| (plugin.manifest.clone(), plugin.check)),
                     ),
                     plugins,
+                    apps: AppNames::new(
+                        connectors()
+                            .iter()
+                            .map(|connector| (connector.id().as_str(), connector.display_name())),
+                    ),
                     durations,
                     test_provider,
                     openai_api,
@@ -518,10 +528,10 @@ impl Daemon {
     }
 
     /// Queues `message` in the inbox of the character its conversation
-    /// belongs to, and answers once it is there: she takes it in its turn,
-    /// and the stream tells how that ended. A line sent again is answered
-    /// as her inbox has it, queued already or taken as the message it
-    /// became, whether or not she takes lines now. Its routing and its
+    /// belongs to, sent now, and answers once it is there: she takes it in
+    /// its turn, and the stream tells how that ended. A line sent again is
+    /// answered as her inbox has it, queued already or taken as the message
+    /// it became, whether or not she takes lines now. Its routing and its
     /// place in her inbox are one step, which lines take in the order they
     /// came, so they reach her in that order; a new line for a character
     /// that is starting, or who waits for a model, waits for her, and one
@@ -539,6 +549,7 @@ impl Daemon {
             source: message.source,
             client_message_id: message.client_message_id,
             text: message.text,
+            sent_at: Timestamp::now(),
         };
         let home = self.inner.world.home.clone();
         let id = line.client_message_id.clone();

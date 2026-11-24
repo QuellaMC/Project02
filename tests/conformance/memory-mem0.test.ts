@@ -10,6 +10,7 @@ import {configJson, createHome, sessionLog} from './harness/home.ts';
 import {startMem0Server, type Mem0Server} from './harness/mem0-server.ts';
 import {
   calling,
+  headed,
   messagesOf,
   reply,
   startModelServer,
@@ -280,7 +281,7 @@ it("memory.mem0-recall: before a turn, what mem0 recalls rides the person's line
   const [recalled, failing] = model.requests.map(lineOf);
 
   expect(recalled).toContain('Sam likes tea.');
-  expect(failing).toBe('And now?');
+  expect(failing).toMatch(headed('And now?'));
 });
 
 it('memory.mem0-add-tool: mem0.add stores the text the model gives it at the backend, and mem0.search hands the model the memories the backend finds', async () => {

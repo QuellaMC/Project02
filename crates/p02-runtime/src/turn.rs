@@ -117,9 +117,9 @@ const BLANK_REFUSAL: &str = "Provide a non-empty message.";
 type Listener<'a> = dyn Fn(Progress) + Send + Sync + 'a;
 
 /// What a turn begins from: the person's line, as it came and as it was
-/// taken, with the stamps its client put on it; or a moment of her own,
-/// which nobody began, with what rang on her phone when its ringing began
-/// it.
+/// taken, with the stamps its client put on it and when it was sent; or a
+/// moment of her own, which nobody began, with what rang on her phone when
+/// its ringing began it.
 #[derive(Debug)]
 pub(crate) enum Occasion {
     Line {
@@ -127,6 +127,7 @@ pub(crate) enum Occasion {
         line: UserLine,
         source: ClientStamp,
         client_message_id: ClientStamp,
+        sent_at: Timestamp,
     },
     Moment(Vec<Rang>),
 }
@@ -162,6 +163,7 @@ pub(crate) async fn take(
         line,
         source: submission.source,
         client_message_id: submission.client_message_id,
+        sent_at: submission.sent_at,
     };
 
     run(disk, occasion, character, mind, listener).await
@@ -188,6 +190,7 @@ pub(crate) async fn run(
         Ok(begun) => begun,
         Err(error) => return failed(disk, &identity, Vec::new(), Vec::new(), error).await,
     };
+    let zone = begun.now.time_zone().clone();
     let (opening, committed) = match begun.opened {
         Opened::Line {
             message,
@@ -196,10 +199,16 @@ pub(crate) async fn run(
         } => {
             listener(Progress::UserMessage {
                 message: message.clone(),
-                source,
+                source: source.clone(),
                 client_message_id,
             });
-            (Opening::Line(message.text.clone()), vec![message])
+            (
+                Opening::Line {
+                    message: message.clone(),
+                    source,
+                },
+                vec![message],
+            )
         }
         Opened::Moment(rang) => {
             let since_last_line = since_last_line(&begun.history.turns, identity.created_at());
@@ -246,7 +255,7 @@ pub(crate) async fn run(
 
     if let Delivery::Completed(completed) = &mut delivery {
         let name = &character.profile.display_name;
-        let failure = continuation::rotate(disk, &identity, begun.history, name, mind).await;
+        let failure = continuation::rotate(disk, &identity, begun.history, name, &zone, mind).await;
 
         completed.post_commit_failures.extend(failure);
     }
@@ -331,9 +340,10 @@ async fn begin(
                 line,
                 source,
                 client_message_id,
+                sent_at,
                 ..
             } => {
-                let message = replay.session().user_message(line, person);
+                let message = replay.session().user_message(line, person, sent_at);
 
                 disk.append(
                     &identity,
@@ -362,16 +372,15 @@ async fn begin(
     .await
 }
 
-/// How long before `now` the person last wrote: the newest turn of
-/// `history` a line began, by its event's time; none when no line is in
-/// it.
+/// How long before `now` the person last wrote: since the newest line of
+/// `history` was sent; none when no line is in it.
 fn since_last_line(history: &[ConversationTurn], now: &Timestamp) -> Option<Duration> {
     history
         .iter()
         .rev()
-        .find(|turn| turn.user_message.is_some())
-        .map(|turn| {
-            let elapsed = now.unix_millis() - turn.identity.created_at().unix_millis();
+        .find_map(|turn| turn.user_message.as_ref())
+        .map(|line| {
+            let elapsed = now.unix_millis() - line.sent_at.unix_millis();
 
             Duration::from_millis(u64::try_from(elapsed).unwrap_or(0))
         })
@@ -416,7 +425,8 @@ struct OpenTurn<'a> {
     identity: EventIdentity,
     opening: Opening,
     /// When it began, where the person is: the day the model is told it
-    /// is, first of its notes, and the time a moment's note tells.
+    /// is, first of its notes, the time a moment's note tells, and the zone
+    /// each line's heading tells its time in.
     now: Zoned,
     character: &'a Character,
     listener: &'a Listener<'a>,
@@ -568,7 +578,7 @@ impl OpenTurn<'_> {
         let notes = std::iter::once(today_note(self.now.date()))
             .chain(runtime_notes)
             .collect();
-        let mut context = DecisionContext::new(mind.person().clone())
+        let mut context = DecisionContext::new(mind.person().clone(), mind.apps().clone())
             .with_runtime_notes(notes)
             .with_plugin_context(context_items, curated_sections);
 
@@ -759,11 +769,11 @@ impl TurnSink for Round<'_, '_> {
         let evidence = ledger.prepared.clone();
         let name = turn.character.profile.display_name.clone();
         let message = on_disk(&mut ledger.disk, move |disk| {
-            let message = disk
-                .writer
-                .replay()?
-                .session()
-                .character_message(text, name);
+            let message =
+                disk.writer
+                    .replay()?
+                    .session()
+                    .character_message(text, name, Timestamp::now());
 
             disk.append(
                 &identity,

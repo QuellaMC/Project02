@@ -207,7 +207,14 @@ impl Script {
         .unwrap()
     }
 
-    fn message(&mut self, role: VisibleMessageRole, text: &VisibleText) -> VisibleMessage {
+    /// The session's next message, said by `role` as `text` and sent at
+    /// `sent_at`.
+    fn message(
+        &mut self,
+        role: VisibleMessageRole,
+        text: &VisibleText,
+        sent_at: &Timestamp,
+    ) -> VisibleMessage {
         let number = NonZeroU64::new(self.next_message).unwrap();
 
         self.next_message += 1;
@@ -223,6 +230,7 @@ impl Script {
             speaker_id,
             speaker_name,
             text: text.clone(),
+            sent_at: sent_at.clone(),
         }
     }
 
@@ -340,7 +348,9 @@ impl TurnScript<'_> {
     /// The person's line, stamped by the web page.
     pub(crate) fn user(&mut self, client_message_id: &str) -> &mut Self {
         let line = self.line.clone().expect("only a line's turn commits one");
-        let message = self.script.message(VisibleMessageRole::User, &line);
+        let message =
+            self.script
+                .message(VisibleMessageRole::User, &line, self.identity.created_at());
         let commit = MessageCommitted::user(
             message.clone(),
             ClientStamp::new("web").unwrap(),
@@ -394,7 +404,11 @@ impl TurnScript<'_> {
 
         for call in decision.tool_calls() {
             if let p02_contracts::ModelToolCall::VisibleReply { text } = call {
-                let message = self.script.message(VisibleMessageRole::Character, text);
+                let message = self.script.message(
+                    VisibleMessageRole::Character,
+                    text,
+                    self.identity.created_at(),
+                );
                 let evidence = evidence(
                     &self.identity,
                     "character-memory",

@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::LazyLock;
 
@@ -6,6 +7,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+use crate::event::Timestamp;
 use crate::id::MessageId;
 
 /// The speaker id of the person in every conversation of a home.
@@ -237,6 +239,46 @@ impl fmt::Display for ClientStamp {
     }
 }
 
+/// The id of the app's own chat, where the page's lines come in.
+const MESSAGES: &str = "messages";
+
+/// The app a line of the person's came in, told by the stamp of the surface
+/// it came from: the part of the stamp before its first `:`, as `telegram`
+/// of `telegram:<bot>`; or the app's own chat, `messages`, for a stamp
+/// without one, as the page's `web`, and for a line an earlier build kept
+/// without its stamps.
+#[must_use]
+pub fn app_of(source: Option<&ClientStamp>) -> &str {
+    source
+        .and_then(|stamp| stamp.0.split_once(':'))
+        .map_or(MESSAGES, |(app, _)| app)
+}
+
+/// The apps a line of the person's comes in, each by the name she and the
+/// person read it by: the app's own chat, Messages, and each app the daemon
+/// names. An app nothing names goes by its id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AppNames(BTreeMap<String, String>);
+
+impl AppNames {
+    /// Messages, and each of `named`, an app's id with its name.
+    #[must_use]
+    pub fn new<'a>(named: impl IntoIterator<Item = (&'a str, &'a str)>) -> Self {
+        Self(
+            std::iter::once((MESSAGES, "Messages"))
+                .chain(named)
+                .map(|(app, name)| (app.to_owned(), name.to_owned()))
+                .collect(),
+        )
+    }
+
+    /// The name the app `app` goes by.
+    #[must_use]
+    pub fn name<'a>(&'a self, app: &'a str) -> &'a str {
+        self.0.get(app).map_or(app, String::as_str)
+    }
+}
+
 /// Which side of a conversation someone speaks for: a character, or the
 /// person. A visible message carries its speaker's, and the two order as
 /// they are spelled, characters first.
@@ -249,7 +291,8 @@ pub enum VisibleMessageRole {
     User,
 }
 
-/// A message a person or a character said, as it was shown.
+/// A message a person or a character said, as it was shown, and when it
+/// was sent.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct VisibleMessage {
@@ -260,6 +303,9 @@ pub struct VisibleMessage {
     /// rename never rewrites it.
     pub speaker_name: SpeakerName,
     pub text: VisibleText,
+    /// The person's line was sent when the daemon queued it, however long
+    /// it waited for her; a reply of hers, when it was committed.
+    pub sent_at: Timestamp,
 }
 
 /// A character: her id, and the name she goes by.
@@ -315,6 +361,26 @@ mod tests {
         }
     }
 
+    /// A stamp's app is what comes before its first `:`, the app's own
+    /// chat when nothing does, and goes by the name it is given, or by its
+    /// id when it is given none.
+    #[test]
+    fn a_line_s_app_is_told_by_its_stamp_and_named() {
+        let names = AppNames::new([("telegram", "Telegram")]);
+
+        for (source, app, name) in [
+            (Some("web"), "messages", "Messages"),
+            (Some("telegram:mira_bot"), "telegram", "Telegram"),
+            (Some("matrix:mira:home"), "matrix", "matrix"),
+            (None, "messages", "Messages"),
+        ] {
+            let stamp = source.map(|text| ClientStamp::new(text).unwrap());
+
+            assert_eq!(app_of(stamp.as_ref()), app, "{source:?}");
+            assert_eq!(names.name(app), name, "{source:?}");
+        }
+    }
+
     #[test]
     fn a_speaker_name_is_one_trimmed_line_of_at_most_128_characters() {
         let longest = "\u{30bc}".repeat(128);
@@ -342,6 +408,7 @@ mod tests {
             "speakerId": "mira",
             "speakerName": "Mira",
             "text": "Hello.\nAgain.",
+            "sentAt": "2026-06-15T00:00:00.000Z",
         });
         let parsed: VisibleMessage = serde_json::from_value(message.clone()).unwrap();
 

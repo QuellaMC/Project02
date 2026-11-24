@@ -152,6 +152,13 @@ impl Connector {
         &self.id
     }
 
+    /// The name of the connector's app, as the person and the characters
+    /// read it.
+    #[must_use]
+    pub fn display_name(&self) -> &'static str {
+        self.display_name
+    }
+
     /// The field of the home's settings an approved pairing writes its
     /// account into.
     #[must_use]

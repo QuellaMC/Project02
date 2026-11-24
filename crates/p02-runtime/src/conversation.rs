@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use p02_characters::Persona;
 use p02_contracts::{ConversationTurn, Rang, RoleModelAdapter};
 use p02_core::{
-    CharacterProfile, ClientStamp, ConversationId, EventId, EventIdentity, MessageId, Participant,
-    SessionId, SpeakerName,
+    AppNames, CharacterProfile, ClientStamp, ConversationId, EventId, EventIdentity, MessageId,
+    Participant, SessionId, SpeakerName, Timestamp,
 };
 use p02_plugins::PluginHost;
 use p02_shared::{Identifier, error_chain};
@@ -30,7 +30,8 @@ pub struct Character {
     pub persona: Persona,
 }
 
-/// A line as the person's client sent it, with the stamps it put on it.
+/// A line as the person's client sent it, with the stamps it put on it,
+/// and when it was sent.
 #[derive(Clone, Debug)]
 pub struct Submission<'a> {
     pub line: &'a str,
@@ -39,6 +40,7 @@ pub struct Submission<'a> {
     /// The id the client submitted the line under, which a repeat of the
     /// line reuses.
     pub client_message_id: ClientStamp,
+    pub sent_at: Timestamp,
 }
 
 /// The open thread between the person and one character on one home: the
@@ -79,13 +81,16 @@ pub enum Delivery {
     Failed(RunTurnError),
 }
 
-/// What a turn is answered with: the name the person goes by, the
-/// character's model, her plugins, and the size of her model's window in
-/// tokens, as her settings say. Its keeper brings it up to date before her
-/// turn, and the turn before each request to the model after its first.
+/// What a turn is answered with: the name the person goes by, the names of
+/// the apps they write in, the character's model, her plugins, and the
+/// size of her model's window in tokens, as her settings say. Its keeper
+/// brings it up to date before her turn, and the turn before each request
+/// to the model after its first.
 #[async_trait]
 pub trait Mind: Send + Sync {
     fn person(&self) -> &SpeakerName;
+
+    fn apps(&self) -> &AppNames;
 
     fn adapter(&self) -> &dyn RoleModelAdapter;
 

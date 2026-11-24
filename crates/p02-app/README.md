@@ -9,13 +9,15 @@ with an outcome of p02-wire, never an error.
 
 - **Her actor** owns her state, her parts and her thread, and answers what
   it is asked in order. A line is routed by its conversation and queued in
-  her inbox, and the answer says so; she takes the lines one at a time
-  while she is ready, and each leaves her inbox once its turn ended, so a
-  crash loses none and runs none twice. A turn the runtime fails earns her
-  one restart. Settings that give her no AI model leave her needing one:
-  her thread opens and her lines wait until a change gives her one. Her
-  stop lets the turn in flight finish; the lines behind it wait for her
-  next start.
+  her inbox, the moment it counts as sent, and the answer says so; she
+  takes the lines one at a time while she is ready, and each leaves her
+  inbox once its turn ended, so a crash loses none and runs none twice.
+  She is told each line under the app it came in: Messages, or a
+  connector's app by the name its declaration gives it. A turn the
+  runtime fails earns her one restart. Settings that give her no AI model
+  leave her needing one: her thread opens and her lines wait until a
+  change gives her one. Her stop lets the turn in flight finish; the
+  lines behind it wait for her next start.
 - **Her heartbeat.** While she is ready and her heartbeat is not off, a
   moment of her own is due one period after she has been quiet since:
   since her thread opened in this run, her last turn ended, or her boot
@@ -71,10 +73,11 @@ with an outcome of p02-wire, never an error.
   her phone says so on the stream, and her actor, while she runs, reads
   its rings again.
 - **The stream** hears each turn as it goes: its messages once they are
-  on disk, the turn as it runs now, her drafts whole, whenever that
-  changes, and then its completion, which says whether its line is in the
-  log. A turn of her own carries no line's stamps, and is said running as
-  it begins.
+  on disk, each with when it was sent and the person's line with the app
+  it came in, as the scrollback reads them, the turn as it runs now, her
+  drafts whole, whenever that changes, and then its completion, which
+  says whether its line is in the log. A turn of her own carries no line's
+  stamps, and is said running as it begins.
 - **Settings** change one way, a client's change or her own plugin's,
   through p02-config; health, which says the accounts of a key her phone
   knows, each with whether the home's settings hold it, then goes to every

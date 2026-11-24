@@ -16,6 +16,7 @@ import {
   type MessageBlock,
 } from './harness/messages.ts';
 import {
+  headed,
   reply,
   responseStream,
   startModelServer,
@@ -105,7 +106,7 @@ it("services.openai-turn: a home on the OpenAI API answers through its Responses
   expect(input.at(-1)).toEqual({
     type: 'message',
     role: 'user',
-    content: 'Hello?',
+    content: expect.stringMatching(headed('Hello?')) as string,
   });
   expect(
     (first?.body as {readonly tools?: readonly unknown[]} | undefined)
@@ -272,7 +273,9 @@ it("services.claude-turn: a home on the Claude API answers through Anthropic's M
     stream: true,
     system: expect.stringContaining('send a message') as string,
   });
-  expect(turnsOf(first)).toEqual([{role: 'user', content: 'Hello?'}]);
+  expect(turnsOf(first)).toEqual([
+    {role: 'user', content: expect.stringMatching(headed('Hello?')) as string},
+  ]);
   expect((body['tools'] as readonly unknown[] | undefined)?.[0]).toEqual({
     name: 'send_message',
     description: expect.any(String) as string,
@@ -350,7 +353,10 @@ it("services.claude-tool-round: a tool her model calls through the Claude API go
 
   expect(id).toEqual(expect.any(String));
   expect(turns).toEqual([
-    {role: 'user', content: 'What can you do?'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('What can you do?')) as string,
+    },
     {
       role: 'assistant',
       content: [{type: 'tool_use', id, name: 'runtime_plugin_list', input: {}}],

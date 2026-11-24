@@ -21,6 +21,7 @@ import {
 import {
   calling,
   finish,
+  headed,
   messagesOf,
   reply,
   startModelServer,
@@ -205,9 +206,15 @@ it('heartbeat.quiet: a moment answered with plain text or with nothing commits n
   model.answer(reply('Still here.'));
   await say('Still there?', 'still');
   expect(conversationIn(model.requests.at(-1))).toMatchObject([
-    {role: 'user', content: 'Morning.'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Morning.')) as string,
+    },
     {role: 'assistant', content: 'Tea first.'},
-    {role: 'user', content: 'Still there?'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Still there?')) as string,
+    },
   ]);
 
   const log = sessionLog(home, 'mira', `${conversationId}.1`);
@@ -283,14 +290,17 @@ it("heartbeat.writes-first: a moment that calls send_message commits her message
   model.answer(reply('Good.'));
   await say('Yes!', 'yes');
   expect(conversationIn(model.requests.at(-1))).toMatchObject([
-    {role: 'user', content: 'Morning.'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Morning.')) as string,
+    },
     {role: 'assistant', content: 'Tea first.'},
     {
       role: 'user',
       content: expect.stringMatching(pastMoment) as string,
     },
     {role: 'assistant', content: 'Found your keys yet?'},
-    {role: 'user', content: 'Yes!'},
+    {role: 'user', content: expect.stringMatching(headed('Yes!')) as string},
   ]);
 });
 
@@ -336,7 +346,10 @@ it("heartbeat.tools: a moment in which she uses a tool and says nothing ends wit
     ),
   ).toBe(true);
   expect(conversationIn(prompt)).toMatchObject([
-    {role: 'user', content: 'Morning.'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Morning.')) as string,
+    },
     {role: 'assistant', content: 'Tea first.'},
     {
       role: 'user',
@@ -347,7 +360,10 @@ it("heartbeat.tools: a moment in which she uses a tool and says nothing ends wit
       tool_calls: [{function: {name: 'character_state_patch'}}],
     },
     {role: 'tool'},
-    {role: 'user', content: 'How are you?'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('How are you?')) as string,
+    },
   ]);
 });
 

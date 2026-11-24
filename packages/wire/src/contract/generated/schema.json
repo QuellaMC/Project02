@@ -2047,7 +2047,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 16
+          "const": 17
         },
         "homeRoot": {
           "type": "string"
@@ -2125,7 +2125,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 16
+          "const": 17
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -2185,8 +2185,12 @@
         "text": {
           "$ref": "#/$defs/VisibleText"
         },
-        "committedAt": {
+        "sentAt": {
           "$ref": "#/$defs/Timestamp"
+        },
+        "app": {
+          "type": "string",
+          "description": "The id of the app the person's line came in, as `messages` or\n`telegram`; absent for hers."
         },
         "source": {
           "$ref": "#/$defs/ClientStamp"
@@ -2201,9 +2205,9 @@
         "speakerId",
         "speakerName",
         "text",
-        "committedAt"
+        "sentAt"
       ],
-      "description": "A committed message as the scrollback shows it, with the stamps its\nclient put on the person's line and when it was committed."
+      "description": "A committed message as the scrollback shows it: when it was sent, and\nfor the person's line the app it came in, by its id, and the stamps its\nclient put on it."
     },
     "HistoryOutcome": {
       "oneOf": [
@@ -4480,6 +4484,13 @@
             "text": {
               "$ref": "#/$defs/VisibleText"
             },
+            "sentAt": {
+              "$ref": "#/$defs/Timestamp"
+            },
+            "app": {
+              "type": "string",
+              "description": "The id of the app the line came in, as `messages` or `telegram`."
+            },
             "source": {
               "$ref": "#/$defs/ClientStamp"
             },
@@ -4497,6 +4508,8 @@
             "speakerId",
             "speakerName",
             "text",
+            "sentAt",
+            "app",
             "source",
             "clientMessageId"
           ]
@@ -4516,6 +4529,9 @@
             "text": {
               "$ref": "#/$defs/VisibleText"
             },
+            "sentAt": {
+              "$ref": "#/$defs/Timestamp"
+            },
             "draftId": {
               "type": "string",
               "description": "The draft this message replaces."
@@ -4531,6 +4547,7 @@
             "speakerId",
             "speakerName",
             "text",
+            "sentAt",
             "draftId"
           ]
         },

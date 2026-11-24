@@ -32,4 +32,7 @@ other crate opens a database.
   repeated, and a plugin database damaged or of another version is
   rebuilt. What reading past would lose is refused: a catalog its
   directories contradict, a continued segment's missing log, a plugin's
-  damaged document or text file.
+  damaged document or text file. A line an earlier build left in her
+  inbox without its time counts as sent when it is read, as her turn
+  takes it; a message an earlier build logged without one, as sent at its
+  record's moment, or, carried by a continuation, at its own turn's.

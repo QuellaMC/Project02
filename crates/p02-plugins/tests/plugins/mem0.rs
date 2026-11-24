@@ -89,6 +89,7 @@ fn spoken(
         speaker_id: id(speaker_id),
         speaker_name: SpeakerName::new(name).unwrap(),
         text: VisibleText::normalize(text).unwrap(),
+        sent_at: Timestamp::new("2026-10-18T01:00:00.000Z").unwrap(),
     };
     let turn = Turn::new(TurnIdentity {
         session_id: session_id.clone(),

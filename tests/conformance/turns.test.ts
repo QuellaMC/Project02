@@ -7,6 +7,7 @@ import {startDaemon, type Daemon} from './harness/daemon.ts';
 import {frameOf, openEvents, type Frame} from './harness/events.ts';
 import {characterJson, chmod, configJson, createHome} from './harness/home.ts';
 import {
+  headed,
   messagesOf,
   reply,
   startModelServer,
@@ -16,6 +17,7 @@ import {
   conversationOf,
   converse,
   saveConfig,
+  sender,
   wireOf,
   type Wire,
 } from './harness/wire.ts';
@@ -31,6 +33,11 @@ async function stop(daemon: Daemon): Promise<void> {
 
 function dataOf(frame: Frame): unknown {
   return JSON.parse(frame.data ?? '');
+}
+
+/** The person's line `text`, from the page, as the model reads it. */
+function heard(text: string): string {
+  return expect.stringMatching(headed(text)) as string;
 }
 
 /** Lines from the local user on the web, onto the character's conversation. */
@@ -123,7 +130,7 @@ it('turns.multi-line-message: a line of several lines, CRLF and CR made LF and b
   });
   expect(
     model.requests.map(request => messagesOf(request).at(-1)?.content),
-  ).toEqual([taken]);
+  ).toEqual([heard(taken)]);
   await expect(wire.history(conversationId)).resolves.toMatchObject({
     messages: [{text: taken}, {text: poem}],
   });
@@ -268,7 +275,7 @@ it('turns.inbox-survives-kill: a line sent while her turn is held at the model i
 
   await again.start('mira');
   await held.arrived();
-  expect(messagesOf(model.requests[1]).at(-1)?.content).toBe('Two.');
+  expect(messagesOf(model.requests[1]).at(-1)?.content).toMatch(headed('Two.'));
   held.release(reply('Two, at last.'));
   await events.next(
     frameOf('turn_completed', {clientMessageId: 'two', status: 'completed'}),
@@ -310,6 +317,7 @@ it('turns.one-turn-at-a-time: a character runs her turns one at a time, in the o
   expect(model.requests).toHaveLength(2);
   second.release(reply('Second.'));
   await Promise.all([one, two, three]);
+
   // Each round was asked for only once the turn before it had its reply.
   expect(
     model.requests.map(request =>
@@ -318,9 +326,9 @@ it('turns.one-turn-at-a-time: a character runs her turns one at a time, in the o
         .map(message => message.content),
     ),
   ).toEqual([
-    ['One.'],
-    ['One.', 'First.', 'Two.'],
-    ['One.', 'First.', 'Two.', 'Second.', 'Three.'],
+    [heard('One.')],
+    [heard('One.'), 'First.', heard('Two.')],
+    [heard('One.'), 'First.', heard('Two.'), 'Second.', heard('Three.')],
   ]);
 });
 
@@ -371,8 +379,8 @@ it("turns.concurrent-characters: two characters' turns run at once, each on its 
       return [messages[0]?.content, messages.at(-1)?.content];
     }),
   ).toEqual([
-    [expect.stringContaining('You are Mira'), 'Hello, Mira.'],
-    [expect.stringContaining('You are Zeta.'), 'Hello, Zeta.'],
+    [expect.stringContaining('You are Mira'), heard('Hello, Mira.')],
+    [expect.stringContaining('You are Zeta.'), heard('Hello, Zeta.')],
   ]);
 });
 
@@ -465,18 +473,34 @@ it('turns.fatal-turn-restart: a turn whose line or whose reply the store cannot 
   ).toEqual(['failed', 'starting', 'ready', 'failed', 'starting', 'ready']);
 });
 
-it('turns.history-paging: history reads a conversation across its segments as one scrollback, newest page first and chronological within it, back to the start by the earlier cursor, and a short one whole without a limit', async () => {
+it("turns.history-paging: history reads a conversation across its segments as one scrollback, newest page first and chronological within it, back to the start by the earlier cursor, and a short one whole without a limit; every message says when it was sent, and each of the person's the app it came in", async () => {
   const wire = wireOf(
     await startDaemon(
       createHome({'config.json': rotatingEveryTurn}),
       fixedReplies,
     ),
   );
-  const say = await converse(wire, 'mira');
-  const {conversationId} = await conversationOf(wire, 'mira');
 
-  for (const id of ['one', 'two', 'three']) {
-    await say(`Line ${id}.`, id);
+  await wire.start('mira');
+
+  const send = await sender(wire);
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const lines = [
+    {id: 'one', source: 'web', app: 'messages'},
+    {id: 'two', source: 'telegram:mira_bot', app: 'telegram'},
+    {id: 'three', source: 'web', app: 'messages'},
+  ];
+  const sentAt = expect.stringMatching(
+    /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u,
+  ) as string;
+
+  for (const {id, source} of lines) {
+    await send({
+      conversationId,
+      text: `Line ${id}.`,
+      source,
+      clientMessageId: id,
+    });
   }
 
   const whole = (await wire.history(conversationId)) as {
@@ -487,15 +511,17 @@ it('turns.history-paging: history reads a conversation across its segments as on
     status: 'ok',
     conversationId,
     characterId: 'mira',
-    messages: ['one', 'two', 'three'].flatMap(id => [
+    messages: lines.flatMap(({id, source, app}) => [
       {
         role: 'user',
         speakerName: 'You',
         text: `Line ${id}.`,
-        source: 'web',
+        sentAt,
+        app,
+        source,
         clientMessageId: id,
       },
-      {role: 'character', speakerName: 'Mira'},
+      {role: 'character', speakerName: 'Mira', sentAt},
     ]),
   });
   expect(whole).not.toHaveProperty('earlier');
@@ -504,6 +530,7 @@ it('turns.history-paging: history reads a conversation across its segments as on
     message => message.role === 'character',
   )) {
     expect(line).not.toHaveProperty('source');
+    expect(line).not.toHaveProperty('app');
   }
 
   const newest = (await wire.history(conversationId, {limit: 4})) as {
@@ -562,9 +589,9 @@ it("turns.rename-from-now-on: a rename reaches the thread from the next line on,
   expect(told(1)).toContain('Michael');
   expect(told(1)).not.toContain('Mike');
   expect(shown(1)).toEqual([
-    {role: 'user', content: 'I am Mike.'},
+    {role: 'user', content: heard('I am Mike.')},
     {role: 'assistant', content: 'Hello, Mike.'},
-    {role: 'user', content: 'Call me Michael.'},
+    {role: 'user', content: heard('Call me Michael.')},
   ]);
   await stop(earlier);
   writeFileSync(join(home, zeta), characterJson('zeta', 'Zed'));
@@ -579,11 +606,11 @@ it("turns.rename-from-now-on: a rename reaches the thread from the next line on,
   expect(told(2)).toContain('Zed');
   expect(told(2)).not.toContain('Zeta');
   expect(shown(2)).toEqual([
-    {role: 'user', content: 'I am Mike.'},
+    {role: 'user', content: heard('I am Mike.')},
     {role: 'assistant', content: 'Hello, Mike.'},
-    {role: 'user', content: 'Call me Michael.'},
+    {role: 'user', content: heard('Call me Michael.')},
     {role: 'assistant', content: 'Hello, Michael.'},
-    {role: 'user', content: 'Who are you?'},
+    {role: 'user', content: heard('Who are you?')},
   ]);
   await expect(wire.history(conversationId)).resolves.toMatchObject({
     messages: [

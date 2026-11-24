@@ -16,7 +16,7 @@ use p02_contracts::{
     RoleModelAdapter, RuntimePlugin, TextCompletionRequest, ToolCall, ToolCallOutcome,
     ToolInputContract, WrittenCall,
 };
-use p02_core::{ClientStamp, ConversationId, SpeakerName};
+use p02_core::{AppNames, ClientStamp, ConversationId, SpeakerName, Timestamp};
 use p02_phone::Account;
 use p02_plugins::{
     AppCatalog, AppInternet, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
@@ -176,6 +176,9 @@ impl World {
 /// The name the person goes by in the thread's tests.
 static SAM: LazyLock<SpeakerName> = LazyLock::new(|| SpeakerName::new("Sam").unwrap());
 
+/// The apps Sam writes in, by the names the daemon gives them.
+static APPS: LazyLock<AppNames> = LazyLock::new(|| AppNames::new([("telegram", "Telegram")]));
+
 /// What the thread's tests answer a line with: settings never change it,
 /// and its turns never outgrow its window.
 pub(crate) struct Fixed<'c> {
@@ -187,6 +190,10 @@ pub(crate) struct Fixed<'c> {
 impl Mind for Fixed<'_> {
     fn person(&self) -> &SpeakerName {
         &SAM
+    }
+
+    fn apps(&self) -> &AppNames {
+        &APPS
     }
 
     fn adapter(&self) -> &dyn RoleModelAdapter {
@@ -255,6 +262,7 @@ impl Chat {
                     line,
                     source: stamp("web"),
                     client_message_id: stamp(client_message_id),
+                    sent_at: Timestamp::now(),
                 },
                 &mut Fixed {
                     model: &self.model,

@@ -309,6 +309,20 @@ export function messagesOf(
   );
 }
 
+/**
+ * A line of the person's as the model reads it: under the heading of the
+ * app it came in and when it was sent, then its text as written. The time
+ * is matched by its shape, never by the clock.
+ */
+export function headed(text: string, app = 'Messages'): RegExp {
+  const written = text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+
+  return new RegExp(
+    `^In ${app}, on [A-Z][a-z]+day, [A-Z][a-z]+ \\d{1,2}, \\d{4}, at \\d\\d:\\d\\d:\\n${written}$`,
+    'u',
+  );
+}
+
 /** What a request told the model each tool call it made answered, in order. */
 export function toolResults(request: ModelRequest | undefined): unknown[] {
   return messagesOf(request)

@@ -32,9 +32,9 @@ function character(id: string, displayName: string): CharacterSummary {
 /** A live tab of Mira's and Nova's home, nothing waiting. */
 function live(): WebState {
   return installSnapshot(initialState, {
-    protocolVersion: 16,
+    protocolVersion: 17,
     health: {
-      protocolVersion: 16,
+      protocolVersion: 17,
       homeRoot: '/home/person/.project02',
       config: {diagnostics: []},
       packages: {diagnostics: []},
@@ -118,6 +118,7 @@ const reply: GatewayEvent = {
     speakerId: 'mira',
     speakerName: 'Mira',
     text: 'Thank you.',
+    sentAt: '2026-09-11T00:00:00.000Z',
     draftId: 'd1',
   },
 };

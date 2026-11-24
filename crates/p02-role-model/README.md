@@ -9,10 +9,13 @@ what the plugins prepared again; it picks a provider with
 
 Every sentence the model is told lives in the prompt module; text from a
 plugin or an earlier summary is fenced and never reaches a system message.
-A moment of the character's own opens where the person's line would be,
-with the runtime's fenced note of the time, and of what rang when her
-phone's ringing began it, and the system messages read the same
-whichever began the turn.
+Each of the person's lines, the one a turn opens with and each one her
+history replays, is told under one heading: the app it came in, by the
+name the daemon gives it, and when it was sent, where the person is; her
+own messages replay as she wrote them. A moment of the character's own
+opens where the person's line would be, with the runtime's fenced note of
+the time, and of what rang when her phone's ringing began it, and the
+system messages read the same whichever began the turn.
 
 Each round is judged once, by what began its turn, and recorded before
 anything it decided happens. A round that calls no plugin tool ends the

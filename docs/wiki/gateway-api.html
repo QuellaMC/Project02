@@ -90,7 +90,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 14,
+  "protocolVersion": 17,
   "token": "…",
   "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -573,7 +573,9 @@
               chronological within the page, with <code>earlier</code> when
               older messages remain. <code>limit</code> is held to 1..500
               (default 100); <code>before</code> is the opaque cursor from a
-              previous page.
+              previous page. Every message carries <code>sentAt</code>, when
+              it was sent, and each of the person's the <code>app</code> it
+              came in with its stamps.
             </td>
           </tr>
           <tr>
@@ -766,6 +768,16 @@ Content-Type: application/json
       </p>
 
       <p>
+        The <code>source</code> also says the app the line came in, which the
+        character is told above it with the time it was sent: the part before
+        its first <code>:</code>, <code>telegram</code> for
+        <code>telegram:&lt;bot&gt;</code>, or <code>messages</code>, the app's
+        own chat, for a stamp without one, as <code>web</code>. A line counts
+        as sent when the daemon queues it, however long it waits; each of her
+        messages when it is committed.
+      </p>
+
+      <p>
         A character also has turns of her own, while she is ready: her
         heartbeat gives her a moment every so often while the person is
         quiet, as her own settings say, and a ring on her phone that comes
@@ -796,7 +808,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":16,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":17,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -877,9 +889,11 @@ data: {…}</code></pre>
             <td><code>turn_progress</code></td>
             <td>
               A turn's progress: both committed roles —
-              <code>user_message</code> (with <code>source</code> and
-              <code>clientMessageId</code>) and <code>visible_reply</code>,
-              which names the <code>draftId</code> it replaces — and its rounds'
+              <code>user_message</code> (with <code>sentAt</code>, its
+              <code>app</code>, <code>source</code> and
+              <code>clientMessageId</code>) and <code>visible_reply</code>
+              (with <code>sentAt</code>), which names the
+              <code>draftId</code> it replaces — and its rounds'
               tool calls: <code>tool_calls_requested</code> with the
               <code>toolNames</code> a round called, then a
               <code>tool_call_completed</code> for each call as it came back,

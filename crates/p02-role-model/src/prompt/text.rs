@@ -107,14 +107,21 @@ pub(crate) fn system_protocol_tail(person: Person<'_>) -> String {
     };
 
     format!(
-        "{writer} writes to you, and you write back. Only what {} actually {} to you comes from \
-         {}. Everything else here is your own: what you remember, what you wrote down, how you \
-         feel, what you see when you look at something. Nobody else sees it. You don't read it \
-         out or say where it came from. You simply know it.",
+        "{writer} writes to you, and you write back. Every message to you shows the app it came \
+         in and its time. Only what {} actually {} to you comes from {}. Everything else here is \
+         your own: what you remember, what you wrote down, how you feel, what you see when you \
+         look at something. Nobody else sees it. You don't read it out or say where it came \
+         from. You simply know it.",
         person.name(),
         person.writes(),
         person.them()
     )
+}
+
+/// The heading above a line of the person's: `app`, the name of the app it
+/// came in, and when it was sent, `at`, where the person is.
+pub(crate) fn line_heading(app: &str, at: &Zoned) -> String {
+    format!("In {app}, {}:", at.strftime("on %A, %B %-d, %Y, at %H:%M"))
 }
 
 /// How the character writes to the person and does things, in a turn the

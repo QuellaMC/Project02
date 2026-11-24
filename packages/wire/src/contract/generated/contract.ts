@@ -417,7 +417,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 16, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 17, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -447,7 +447,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 16, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 17, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -455,10 +455,16 @@ export type GatewayReady = { protocolVersion: 16, health: GatewayHealth, confirm
 export type GatewayRefusalReason = "unknown_conversation" | "character_unavailable" | "duplicate_submission";
 
 /**
- * A committed message as the scrollback shows it, with the stamps its
- * client put on the person's line and when it was committed.
+ * A committed message as the scrollback shows it: when it was sent, and
+ * for the person's line the app it came in, by its id, and the stamps its
+ * client put on it.
  */
-export type HistoryMessage = { messageId: MessageId, role: VisibleMessageRole, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, committedAt: Timestamp, source?: ClientStamp, clientMessageId?: ClientStamp, };
+export type HistoryMessage = { messageId: MessageId, role: VisibleMessageRole, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, sentAt: Timestamp, 
+/**
+ * The id of the app the person's line came in, as `messages` or
+ * `telegram`; absent for hers.
+ */
+app?: string, source?: ClientStamp, clientMessageId?: ClientStamp, };
 
 /**
  * One page of a conversation's scrollback, chronological within the page;
@@ -1098,7 +1104,11 @@ export type TurnIdentity = { conversationId: ConversationId, source: ClientStamp
 /**
  * What a turn says as it goes, in order.
  */
-export type TurnProgress = { "kind": "user_message", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, source: ClientStamp, clientMessageId: ClientStamp, } | { "kind": "visible_reply", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, 
+export type TurnProgress = { "kind": "user_message", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, sentAt: Timestamp, 
+/**
+ * The id of the app the line came in, as `messages` or `telegram`.
+ */
+app: string, source: ClientStamp, clientMessageId: ClientStamp, } | { "kind": "visible_reply", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, sentAt: Timestamp, 
 /**
  * The draft this message replaces.
  */

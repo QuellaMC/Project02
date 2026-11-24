@@ -7,7 +7,7 @@
 
 use std::path::Path;
 
-use p02_core::{ClientStamp, ConversationId, MessageId};
+use p02_core::{ClientStamp, ConversationId, MessageId, Timestamp};
 use p02_shared::{append_line, empty_file, write_file_atomically};
 use serde::{Deserialize, Serialize};
 
@@ -17,7 +17,7 @@ use crate::jsonl::{SkippedLines, committed_lines, read_lines};
 use crate::lock::{Resource, with_lock};
 
 /// A line for her as its client sent it: the conversation it is for, the
-/// stamps its client put on it, and its text.
+/// stamps its client put on it, its text, and when it was sent.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueuedLine {
@@ -27,6 +27,11 @@ pub struct QueuedLine {
     /// The id the client submitted the line under, which a repeat reuses.
     pub client_message_id: ClientStamp,
     pub text: String,
+    /// When the daemon queued it. A line an earlier build queued counts as
+    /// sent when it is read, which for the line a turn takes is as the turn
+    /// takes it.
+    #[serde(default = "Timestamp::now")]
+    pub sent_at: Timestamp,
 }
 
 impl QueuedLine {

@@ -176,7 +176,9 @@
         The model's history window is a token budget over whole prior turns
         (half of
         <code>project02.contextWindowTokens</code>), replayed newest-first with
-        each turn's tool calls and results. When a completed turn no longer
+        each turn's tool calls and results, and each of the person's lines
+        under the heading she first read it under: the app it came in and when
+        it was sent. When a completed turn no longer
         fits with the rest, the runtime continues the conversation in the next
         segment: the older turns are condensed into the character's own
         recollection by the same model the character speaks through (or

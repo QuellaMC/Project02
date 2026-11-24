@@ -129,8 +129,9 @@ pub enum HistoryRefusal {
     InvalidPage,
 }
 
-/// A committed message as the scrollback shows it, with the stamps its
-/// client put on the person's line and when it was committed.
+/// A committed message as the scrollback shows it: when it was sent, and
+/// for the person's line the app it came in, by its id, and the stamps its
+/// client put on it.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -140,7 +141,11 @@ pub struct HistoryMessage {
     pub speaker_id: Identifier,
     pub speaker_name: SpeakerName,
     pub text: VisibleText,
-    pub committed_at: Timestamp,
+    pub sent_at: Timestamp,
+    /// The id of the app the person's line came in, as `messages` or
+    /// `telegram`; absent for hers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<ClientStamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
