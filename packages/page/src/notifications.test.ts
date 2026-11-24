@@ -4,7 +4,7 @@ import type {GatewayEvent} from '@project02/wire/contract';
 import {notificationFor} from './notifications.ts';
 
 const conversationId = 'conv-1';
-/** When every message of these tests was sent: the rule does not read it. */
+/** When every message of these tests was sent, and the person's read: the rule reads neither. */
 const sentAt = '2026-11-24T10:00:00.000Z';
 
 /** A message of Mira's committed in `app`, as the stream says it. */
@@ -21,7 +21,6 @@ function hers(messageId: string, text: string, app = 'messages'): GatewayEvent {
       text,
       sentAt,
       app,
-      draftId: '1.1',
     },
   };
 }
@@ -42,7 +41,7 @@ describe('when the desktop app shows a notification', () => {
     ).toEqual({title: 'Mira', body: 'Still up?'});
   });
 
-  it("shows none for her message while the window has the focus, nor for one she sent in Telegram, the person's own line, her draft, or how her turn ended", () => {
+  it("shows none for her message while the window has the focus, nor for one she sent in Telegram, the person's own line, her writing, or how her turn ended", () => {
     const quiet: readonly (readonly [GatewayEvent, boolean])[] = [
       [hers('m1', 'Hello.'), true],
       [hers('m2', 'Hello on Telegram.', 'telegram'), false],
@@ -58,6 +57,7 @@ describe('when the desktop app shows a notification', () => {
             speakerName: 'Sam',
             text: 'Hi.',
             sentAt,
+            readAt: sentAt,
             app: 'messages',
             source: 'web',
             clientMessageId: 'line-1',
@@ -72,7 +72,7 @@ describe('when the desktop app shows a notification', () => {
           conversationId,
           source: 'web',
           clientMessageId: 'line-1',
-          drafts: [{draftId: '1.1', text: 'Hello th'}],
+          writing: true,
         },
         false,
       ],

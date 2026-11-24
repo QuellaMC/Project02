@@ -3,7 +3,7 @@ import {expect, it} from 'vitest';
 import {connector, startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents, type Frame} from './harness/events.ts';
 import {characterJson, configJson, createHome} from './harness/home.ts';
-import {reply, startModelServer} from './harness/model-server.ts';
+import {calling, reply, startModelServer} from './harness/model-server.ts';
 import {
   messageFrom,
   startTelegramServer,
@@ -303,6 +303,50 @@ it("connectors.telegram-turn-ended-told: the chat a line came from is told why i
     alice.id,
     `Mira could not answer: ${String(unanswered['message'])}`,
   );
+});
+
+it('connectors.telegram-line-left: a line she leaves for later ends completed, with no message of hers and nothing on its end to tell, and the chat it came from is sent nothing', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': homeSettings(model, [alice]),
+    'character-data': {mira: {'config.json': botSettings(miraBot)}},
+  });
+  const daemon = await startDaemon(home);
+  const wire = wireOf(daemon);
+  const events = await openEvents(daemon);
+  const telegram = await startTelegramServer([miraBot]);
+  const run = connector(['--store', home], telegram.env);
+
+  await run.printed(miraAnswers);
+  model.answer(calling(['answer_later', {}]), reply('Here now.'));
+  telegram.push(miraBot.token, messageFrom(alice, 1, 'Busy?'));
+
+  const ended = await events.next(
+    frameOf('turn_completed', {clientMessageId: '987654.4242.1'}),
+  );
+  const {conversationId} = await conversationOf(wire, 'mira');
+
+  expect(dataOf(ended)).toEqual({
+    kind: 'turn_completed',
+    characterId: 'mira',
+    conversationId,
+    source: 'telegram:mira_bot',
+    clientMessageId: '987654.4242.1',
+    status: 'completed',
+    committed: true,
+  });
+  expect(
+    events.frames
+      .slice(0, events.frames.indexOf(ended))
+      .filter(frameOf('turn_progress', {progress: {kind: 'visible_reply'}})),
+  ).toEqual([]);
+  // A line after it, answered: once its answer is in the chat, whatever
+  // the first turn sent would be in it too.
+  telegram.push(miraBot.token, messageFrom(alice, 2, 'Still there?'));
+  await telegram.shows(miraBot.token, alice.id, 'Here now.');
+  expect(textsIn(telegram.calls(miraBot.token), alice.id)).toEqual([
+    'Here now.',
+  ]);
 });
 
 it('connectors.telegram-held-while-daemon-down: a line written while the daemon is down waits, and is carried once the daemon is back', async () => {

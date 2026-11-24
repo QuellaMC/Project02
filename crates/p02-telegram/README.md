@@ -21,11 +21,11 @@ token.
   again while that stream is open. Health that comes back saying only
   that moved no setting: nothing is read for it, and no bot is held.
 - A character's bot lets Telegram go of a message only once its line is in
-  her inbox, shows her typing in its chat while the turn that line began
-  runs, kept up past Telegram's five seconds, and makes a confirmation its
-  line raised a card with Approve and Deny. Each message she sends in
-  Telegram is posted whole, once it is committed, in every paired chat;
-  nothing else of her conversation is: not what she sends in another app,
-  nor what the person writes elsewhere, and no draft. The management bot
-  answers `/status`, `/pending`, `/approve` and `/deny`, and shows every
-  confirmation and pairing request as a card.
+  her inbox, shows her typing in its chat as the message arrives and while
+  she writes in the turn that line began, kept up past Telegram's five
+  seconds, and makes a confirmation its line raised a card with Approve and
+  Deny. Each message she sends in Telegram is posted whole, once it is
+  committed, in every paired chat; nothing else of her conversation is: not
+  what she sends in another app, nor what the person writes elsewhere. The
+  management bot answers `/status`, `/pending`, `/approve` and `/deny`, and
+  shows every confirmation and pairing request as a card.

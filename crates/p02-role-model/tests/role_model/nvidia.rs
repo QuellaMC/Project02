@@ -149,14 +149,14 @@ async fn a_transport_fault_or_a_busy_provider_is_tried_again_and_a_refusal_is_no
 async fn an_answer_that_is_no_whole_completion_fails_the_round_without_the_key() {
     let stub = Stub::start().await;
     let adapter = adapter(&stub);
-    let drafted = call_piece(
+    let begun = call_piece(
         0,
         Some(("call_reply", "send_message")),
         "{\"text\": \"Half a th",
     );
     let cases = [
         (
-            vec![drafted.clone(), "[]".to_owned()],
+            vec![begun.clone(), "[]".to_owned()],
             "malformed_response",
             "NVIDIA stream chunk must be an object.".to_owned(),
         ),
@@ -166,17 +166,17 @@ async fn an_answer_that_is_no_whole_completion_fails_the_round_without_the_key()
             "NVIDIA provider error: The key [redacted] was refused.".to_owned(),
         ),
         (
-            vec![drafted.clone(), finish("length"), DONE.to_owned()],
+            vec![begun.clone(), finish("length"), DONE.to_owned()],
             "provider_error",
             "NVIDIA response finish_reason \"length\" is not terminal.".to_owned(),
         ),
         (
-            vec![drafted.clone(), DONE.to_owned()],
+            vec![begun.clone(), DONE.to_owned()],
             "malformed_response",
             "NVIDIA response choice.finish_reason is required.".to_owned(),
         ),
         (
-            vec![drafted],
+            vec![begun],
             "malformed_response",
             "NVIDIA response choice.finish_reason is required.".to_owned(),
         ),

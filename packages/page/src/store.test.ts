@@ -6,12 +6,17 @@ import {
   composerText,
   confirmationGone,
   connectionRefused,
+  doingIn,
   forgetWritten,
   historyPageRead,
   initialState,
   installSnapshot,
+  keptLine,
+  lineAnswered,
   lineEnded,
   lineSent,
+  lineTakenBack,
+  linesOnTheirWay,
   linesTaken,
   noticeSpent,
   pageUnread,
@@ -33,7 +38,6 @@ import type {
   HistoryOutcome,
   PairingRequest,
   PendingConfirmation,
-  RunningDraft,
   RunningTurn,
 } from '@project02/wire/contract';
 
@@ -47,10 +51,12 @@ const mira: CharacterSummary = {
 const conversationId = 'conv-1';
 /** When every message of these tests was sent: the store keeps it as the daemon says it. */
 const sentAt = '2026-09-11T00:00:00.000Z';
+/** When she read each line of the person's, a moment after it was sent: kept the same way. */
+const readAt = '2026-09-11T00:00:02.000Z';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 17,
+    protocolVersion: 18,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -66,7 +72,7 @@ function ready(
   turns: readonly RunningTurn[] = [],
 ): GatewayReady {
   return {
-    protocolVersion: 17,
+    protocolVersion: 18,
     health: health(mira),
     confirmations,
     pairings: [],
@@ -109,6 +115,7 @@ function userMessage(
       speakerName: 'You',
       text,
       sentAt,
+      readAt,
       app: 'messages',
       source: 'web',
       clientMessageId,
@@ -117,10 +124,10 @@ function userMessage(
   );
 }
 
-/** Mira's turn of the line `clientMessageId` as the daemon says it runs now. */
+/** Mira's turn of the line `clientMessageId` as the daemon says it runs now, `writing` or not. */
 function running(
   clientMessageId: string,
-  drafts: readonly RunningDraft[] = [],
+  writing = false,
   conversation = conversationId,
 ): GatewayEvent {
   return {
@@ -129,7 +136,7 @@ function running(
     conversationId: conversation,
     source: 'web',
     clientMessageId,
-    drafts,
+    writing,
   };
 }
 
@@ -153,8 +160,21 @@ function completed(
 }
 
 /** A turn of Mira's own, which no line began, as the daemon says it runs now. */
-function ownRunning(drafts: readonly RunningDraft[] = []): GatewayEvent {
-  return {kind: 'turn_running', characterId: 'mira', conversationId, drafts};
+function ownRunning(writing = false): GatewayEvent {
+  return {kind: 'turn_running', characterId: 'mira', conversationId, writing};
+}
+
+/** A message of Mira's, committed in Messages. */
+function hers(messageId: string, text: string): GatewayEvent {
+  return progress({
+    kind: 'visible_reply',
+    messageId,
+    speakerId: 'mira',
+    speakerName: 'Mira',
+    text,
+    sentAt,
+    app: 'messages',
+  });
 }
 
 /** A turn of Mira's own as it ends: it carries no line's stamps. */
@@ -278,20 +298,15 @@ describe('web store', () => {
   it('installs every ready as the truth: roster, confirmations and the turns in progress replace, and what the thread shows stays on screen until its newest page replaces it', () => {
     let state = applyEvent(opened(), userMessage('m-1', 'hello', 'line-1'));
 
-    state = applyEvent(
-      state,
-      running('line-1', [{draftId: '1.0', text: 'I rem'}]),
-    );
-    expect(state.turns.get(conversationId)?.drafts).toEqual([
-      {draftId: '1.0', text: 'I rem'},
-    ]);
+    state = applyEvent(state, running('line-1', true));
+    expect(state.turns.has(conversationId)).toBe(true);
 
     const elsewhere: RunningTurn = {
       characterId: 'nova',
       conversationId: 'conv-2',
       source: 'telegram:bot',
       clientMessageId: 'line-7',
-      drafts: [{draftId: '1.0', text: 'as far as I '}],
+      writing: true,
     };
 
     state = installSnapshot(state, ready([confirmation('c-1')], [elsewhere]));
@@ -366,7 +381,7 @@ describe('web store', () => {
     expect(nova.thread?.stale).toEqual([]);
   });
 
-  it('shows a line once the daemon says so: the pending bubble becomes the message, with when it was sent and its app, and a frame seen twice shows once', () => {
+  it('shows a line once the daemon says so: the pending bubble, sending, becomes the message, with when it was sent, when she read it and its app, and a frame seen twice shows once', () => {
     let state = sent(opened(), 'hello there', 'line-1');
 
     expect(composerText(state)).toBe('');
@@ -377,6 +392,7 @@ describe('web store', () => {
           conversationId,
           characterId: 'mira',
           text: 'hello there',
+          state: 'sending',
         },
       ],
     ]);
@@ -392,57 +408,137 @@ describe('web store', () => {
         speakerName: 'You',
         text: 'hello there',
         sentAt,
+        readAt,
         app: 'messages',
         clientMessageId: 'line-1',
       },
     ]);
   });
 
-  it("holds each turn as the daemon last said it, drafts whole, and ends it at its own line's end, never at another's", () => {
+  it("says a line is delivered once the daemon answers that her inbox has it, now or already, and not delivered when it refuses it or cannot queue it, saying why; a duplicate is the line in the log, and no answer after a line's end moves it", () => {
+    const state = sent(sent(opened(), 'first', 'line-1'), 'second', 'line-2');
+    const queued = lineAnswered(state, 'mira', 'line-1', {status: 'queued'});
+
+    expect(queued.pending.get('line-1')?.state).toBe('delivered');
+    expect(
+      lineAnswered(state, 'mira', 'line-1', {
+        status: 'already_queued',
+      }).pending.get('line-1')?.state,
+    ).toBe('delivered');
+    // Sent again by itself, as on a new stream, it stays delivered.
+    expect(
+      lineAnswered(queued, 'mira', 'line-1', {status: 'already_queued'}),
+    ).toBe(queued);
+
+    const refused = lineAnswered(state, 'mira', 'line-1', {
+      status: 'refused',
+      reason: 'character_unavailable',
+      message: 'Character "mira" is not running.',
+    });
+    const failed = lineAnswered(refused, 'mira', 'line-2', {
+      status: 'failed',
+      code: 'write_failed',
+      message: 'The disk is full.',
+    });
+
+    expect([...failed.pending.values()].map(line => line.state)).toEqual([
+      'not_delivered',
+      'not_delivered',
+    ]);
+    expect(failed.notices).toEqual([
+      'Mira: Character "mira" is not running.',
+      'Mira: The disk is full.',
+    ]);
+    // An answer that comes after the line's end leaves it as it ended.
+    expect(lineAnswered(failed, 'mira', 'line-1', {status: 'queued'})).toBe(
+      failed,
+    );
+
+    const duplicate = lineAnswered(queued, 'mira', 'line-1', {
+      status: 'refused',
+      reason: 'duplicate_submission',
+      message: 'clientMessageId "line-1" is already on this conversation.',
+    });
+
+    expect([...duplicate.pending.keys()]).toEqual(['line-2']);
+    expect(duplicate.notices).toEqual([
+      'Mira: clientMessageId "line-1" is already on this conversation.',
+    ]);
+    // Delivered, it becomes the message by its frame or a page that carries it.
+    expect(
+      applyEvent(queued, userMessage('m-1', 'first', 'line-1')).pending.has(
+        'line-1',
+      ),
+    ).toBe(false);
+    expect(
+      linesTaken(
+        queued,
+        page([committed('m-1', 'first', 'line-1')]),
+      ).pending.has('line-1'),
+    ).toBe(false);
+  });
+
+  it('sends again by itself only the lines still on their way, never one that did not reach her', () => {
+    const state = lineEnded(
+      lineAnswered(
+        sent(
+          sent(sent(opened(), 'first', 'line-1'), 'second', 'line-2'),
+          'third',
+          'line-3',
+        ),
+        'mira',
+        'line-2',
+        {status: 'queued'},
+      ),
+      'mira',
+      'line-3',
+      {status: 'refused', committed: false, message: 'Mira is away.'},
+    );
+
+    expect([...linesOnTheirWay(state).keys()]).toEqual(['line-1', 'line-2']);
+  });
+
+  it('reads a line a tab kept as it was kept, one an earlier build kept without a state as sending, and nothing that is no line', () => {
+    const kept = {conversationId, characterId: 'mira', text: 'hello'};
+
+    expect(keptLine({...kept, state: 'not_delivered'})).toEqual({
+      ...kept,
+      state: 'not_delivered',
+    });
+    expect(keptLine(kept)).toEqual({...kept, state: 'sending'});
+    expect([keptLine({...kept, text: 7}), keptLine('hello')]).toEqual([
+      undefined,
+      undefined,
+    ]);
+  });
+
+  it("holds each turn as the daemon last said it, writing or not, and ends it at its own line's end, never at another's", () => {
     let state = applyEvent(opened(), userMessage('m-1', 'hello', 'line-1'));
 
-    state = applyEvent(
-      state,
-      running('line-1', [
-        {draftId: '1.0', text: 'I remember you'},
-        {draftId: '1.1', text: 'and'},
-      ]),
-    );
+    state = applyEvent(state, running('line-1', true));
 
-    expect(state.turns.get(conversationId)?.drafts).toEqual([
-      {draftId: '1.0', text: 'I remember you'},
-      {draftId: '1.1', text: 'and'},
-    ]);
+    expect(state.turns.get(conversationId)).toEqual({
+      characterId: 'mira',
+      conversationId,
+      source: 'web',
+      clientMessageId: 'line-1',
+      writing: true,
+    });
 
-    // The commit joins the thread, and the turn the daemon says next has
-    // neither the committed draft nor the one withdrawn.
-    state = applyEvent(
-      state,
-      progress({
-        kind: 'visible_reply',
-        messageId: 'm-2',
-        speakerId: 'mira',
-        speakerName: 'Mira',
-        text: 'I remember you',
-        sentAt,
-        app: 'messages',
-        draftId: '1.0',
-      }),
-    );
+    // Her message joins the thread, and the turn the daemon says next has
+    // her writing no more.
+    state = applyEvent(state, hers('m-2', 'I remember you'));
     state = applyEvent(state, running('line-1'));
 
-    expect(state.turns.get(conversationId)?.drafts).toEqual([]);
+    expect(state.turns.get(conversationId)?.writing).toBe(false);
     expect(state.thread?.messages.map(message => message.text)).toEqual([
       'hello',
       'I remember you',
     ]);
 
     // A turn ends at its own completion; another submission's ending on
-    // the same conversation leaves it running, drafts and all.
-    state = applyEvent(
-      state,
-      running('line-1', [{draftId: '2.0', text: 'and then'}]),
-    );
+    // the same conversation leaves it running, writing as it was.
+    state = applyEvent(state, running('line-1', true));
 
     const other = applyEvent(
       state,
@@ -453,7 +549,29 @@ describe('web store', () => {
     expect(applyEvent(other, completed('line-1')).turns.size).toBe(0);
   });
 
-  it('keeps a reply being written in a thread the person left, whole, with its typing indicator, for when they come back', () => {
+  it("shows her typing where her next message will be while she writes in a line's turn, and nothing while she does not, in a turn of her own, or once her turn ended; while she uses her phone, that in its place", () => {
+    let state = applyEvent(opened(), userMessage('m-1', 'hello', 'line-1'));
+
+    state = applyEvent(state, running('line-1'));
+
+    expect(doingIn(state, conversationId)).toBeUndefined();
+
+    state = applyEvent(state, running('line-1', true));
+
+    expect(doingIn(state, conversationId)).toBe('typing');
+    expect(doingIn(state, 'conv-2')).toBeUndefined();
+    expect(
+      doingIn(applyEvent(state, called('phone', 'phone.open')), conversationId),
+    ).toBe('phoning');
+    expect(
+      doingIn(applyEvent(state, completed('line-1')), conversationId),
+    ).toBeUndefined();
+    expect(
+      doingIn(applyEvent(opened(), ownRunning(true)), conversationId),
+    ).toBeUndefined();
+  });
+
+  it('keeps her typing in a thread the person left, for when they come back', () => {
     const nova = {
       status: 'opened' as const,
       conversationId: 'conv-2',
@@ -466,44 +584,16 @@ describe('web store', () => {
     };
     let state = applyEvent(opened(), userMessage('m-1', 'hello', 'line-1'));
 
-    state = applyEvent(
-      state,
-      running('line-1', [{draftId: '1.0', text: 'I remember '}]),
-    );
     state = threadOpened(state, nova);
-    state = applyEvent(
-      state,
-      running('line-1', [{draftId: '1.0', text: 'I remember you'}]),
-    );
+    state = applyEvent(state, running('line-1', true));
     state = threadOpened(state, mira);
 
-    expect(state.turns.get(conversationId)).toEqual({
-      characterId: 'mira',
-      conversationId,
-      source: 'web',
-      clientMessageId: 'line-1',
-      drafts: [{draftId: '1.0', text: 'I remember you'}],
-    });
+    expect(doingIn(state, conversationId)).toBe('typing');
 
-    // The turn without its committed draft reaches the tab wherever the
-    // person is, and the turn's end takes the rest.
-    state = applyEvent(
-      threadOpened(state, nova),
-      progress({
-        kind: 'visible_reply',
-        messageId: 'm-2',
-        speakerId: 'mira',
-        speakerName: 'Mira',
-        text: 'I remember you',
-        sentAt,
-        app: 'messages',
-        draftId: '1.0',
-      }),
-    );
+    // Her message, and her turn's end, reach the tab wherever the person
+    // is.
+    state = applyEvent(threadOpened(state, nova), hers('m-2', 'I remember'));
     state = applyEvent(state, running('line-1'));
-
-    expect(state.turns.get(conversationId)?.drafts).toEqual([]);
-
     state = applyEvent(state, completed('line-1'));
 
     expect(state.turns.has(conversationId)).toBe(false);
@@ -517,23 +607,11 @@ describe('web store', () => {
     expect(state.turns.get(conversationId)).toEqual({
       characterId: 'mira',
       conversationId,
-      drafts: [],
+      writing: false,
     });
 
-    state = applyEvent(state, ownRunning([{draftId: '1.0', text: 'Found'}]));
-    state = applyEvent(
-      state,
-      progress({
-        kind: 'visible_reply',
-        messageId: 'm-1',
-        speakerId: 'mira',
-        speakerName: 'Mira',
-        text: 'Found your keys yet?',
-        sentAt,
-        app: 'messages',
-        draftId: '1.0',
-      }),
-    );
+    state = applyEvent(state, ownRunning(true));
+    state = applyEvent(state, hers('m-1', 'Found your keys yet?'));
     state = applyEvent(state, ownRunning());
 
     expect(state.thread?.messages.map(message => message.text)).toEqual([
@@ -569,16 +647,7 @@ describe('web store', () => {
       characterId: 'nova',
     };
     const reply = (messageId: string) =>
-      progress({
-        kind: 'visible_reply',
-        messageId,
-        speakerId: 'mira',
-        speakerName: 'Mira',
-        text: 'Found your keys yet?',
-        sentAt,
-        app: 'messages',
-        draftId: '1.0',
-      });
+      hers(messageId, 'Found your keys yet?');
 
     expect(applyEvent(opened(), reply('m-1')).unseen.size).toBe(0);
     // No thread is open until a person picks one of several characters.
@@ -607,7 +676,7 @@ describe('web store', () => {
     ).toBe(0);
   });
 
-  it("says she is using her phone from a call of one of its tools until her next reply begins or her turn ends, in a line's turn as in one of her own, and never for another character's turn", () => {
+  it("says she is using her phone from a call of one of its tools until her next message or her turn's end, while she writes too, in a line's turn as in one of her own, and never for another character's turn", () => {
     const phoned = called('phone', 'phone.open');
     let state = applyEvent(
       applyEvent(opened(), userMessage('m-1', 'Wake me at seven.', 'line-1')),
@@ -621,27 +690,14 @@ describe('web store', () => {
     state = applyEvent(state, phoned);
 
     expect([...state.phoning]).toEqual([conversationId]);
-    // Her next reply begins with its draft, or comes whole; another line's
-    // end leaves her turn, and her phone in it, as they were.
-    expect(
-      applyEvent(state, running('line-1', [{draftId: '2.0', text: 'Set'}]))
-        .phoning.size,
-    ).toBe(0);
-    expect(
-      applyEvent(
-        state,
-        progress({
-          kind: 'visible_reply',
-          messageId: 'm-2',
-          speakerId: 'mira',
-          speakerName: 'Mira',
-          text: 'Set for seven.',
-          sentAt,
-          app: 'messages',
-          draftId: '2.0',
-        }),
-      ).phoning.size,
-    ).toBe(0);
+    // Her writing goes on under it until her message comes; another
+    // line's end leaves her turn, and her phone in it, as they were.
+    expect([...applyEvent(state, running('line-1', true)).phoning]).toEqual([
+      conversationId,
+    ]);
+    expect(applyEvent(state, hers('m-2', 'Set for seven.')).phoning.size).toBe(
+      0,
+    );
     expect(applyEvent(state, completed('line-1')).phoning.size).toBe(0);
     expect(
       applyEvent(state, completed('line-2', 'refused', 'wrong sender', false))
@@ -660,7 +716,7 @@ describe('web store', () => {
         kind: 'turn_running',
         characterId: 'nova',
         conversationId: 'conv-2',
-        drafts: [],
+        writing: false,
       }),
       called('phone', 'phone.open', 'nova', 'conv-2'),
     );
@@ -825,7 +881,7 @@ describe('web store', () => {
     expect(fresh.thread?.earlier).toBe('v1:0:7');
   });
 
-  it('hands a line back at once when the daemon says it never put it in the log — after what is typed, in the order sent, and never for a completed turn', () => {
+  it("keeps a line the daemon says it never put in the log in its thread, not delivered, and says why; taken back, it goes to its box after what is typed; one in the log is the thread's, and a completed turn says nothing", () => {
     const state = composerChanged(
       sent(sent(opened(), 'first', 'line-1'), 'second', 'line-2'),
       'next thought',
@@ -836,33 +892,31 @@ describe('web store', () => {
       message: 'The gateway holds no open conversation.',
     });
 
-    expect(composerText(refused)).toBe('next thought first');
-    expect(refused.pending.size).toBe(1);
+    expect(refused.pending.get('line-1')?.state).toBe('not_delivered');
+    expect(composerText(refused)).toBe('next thought');
     expect(refused.notices.at(-1)).toBe(
       'Mira: The gateway holds no open conversation.',
     );
 
-    // The queued line is refused too, later: it lands after the first, as
-    // it was sent.
-    const both = lineEnded(refused, 'mira', 'line-2', {
-      status: 'refused',
-      committed: false,
-      message: 'The gateway holds no open conversation.',
-    });
-
-    expect(composerText(both)).toBe('next thought first second');
-    expect(both.pending.size).toBe(0);
-
-    // A turn that failed before writing the line says so, and the line is
-    // the person's again — a full disk on the first append, and nothing
-    // in the log will ever mention it.
-    const unwritten = applyEvent(
-      state,
-      completed('line-1', 'failed', 'The store is full.', false),
+    // A turn that failed before writing the line says so, and the line
+    // did not reach her — a full disk on the first append, and nothing in
+    // the log will ever mention it.
+    const both = applyEvent(
+      refused,
+      completed('line-2', 'failed', 'The store is full.', false),
     );
 
-    expect(composerText(unwritten)).toBe('next thought first');
-    expect(unwritten.pending.has('line-1')).toBe(false);
+    expect(both.pending.get('line-2')?.state).toBe('not_delivered');
+    expect(both.notices.at(-1)).toBe('Mira: The store is full.');
+
+    // Taken back, each leaves the thread for its box, after what is there.
+    const first = lineTakenBack(both, 'line-1');
+
+    expect(composerText(first)).toBe('next thought first');
+    expect([...first.pending.keys()]).toEqual(['line-2']);
+    expect(composerText(lineTakenBack(first, 'line-2'))).toBe(
+      'next thought first second',
+    );
 
     // A turn the daemon judged after writing the line says so, and the
     // line belongs to the thread: settled, and not offered back.
@@ -917,7 +971,7 @@ describe('web store', () => {
     );
   });
 
-  it("keeps a line sent to one character while another is open, hands it back in its own thread, and says a turn's end at once, naming its character", () => {
+  it("keeps a line sent to one character while another is open in her own thread, there when it did not reach her, and says a turn's end at once, naming its character", () => {
     const nova = {
       status: 'opened' as const,
       conversationId: 'conv-2',
@@ -934,11 +988,12 @@ describe('web store', () => {
       conversationId,
       characterId: 'mira',
       text: 'hello mira',
+      state: 'sending',
     });
 
-    // Mira's turn ends while Nova is open: the line goes back to Mira's
-    // composer, never into Nova's, and the reason is said at once with
-    // Mira's name on it.
+    // Mira's line is refused while Nova is open: it stays Mira's, never
+    // goes into Nova's box, and the reason is said at once with Mira's
+    // name on it.
     const ended = lineEnded(state, 'mira', 'line-1', {
       status: 'refused',
       committed: false,
@@ -946,16 +1001,21 @@ describe('web store', () => {
     });
 
     expect(composerText(ended)).toBe('');
-    expect(ended.pending.size).toBe(0);
+    expect(ended.pending.get('line-1')).toEqual({
+      conversationId,
+      characterId: 'mira',
+      text: 'hello mira',
+      state: 'not_delivered',
+    });
     expect(ended.notices.at(-1)).toBe('Mira: Mira is away.');
 
-    // Back in Mira's thread, the line is where it was written. What the
-    // page had to say is spent by the person asking to open, not by the
-    // answer that comes back, so a turn that failed meanwhile survives
-    // the open it raced.
+    // Back in Mira's thread, the line is where it was written, and taken
+    // back it goes into her box. What the page had to say is spent by the
+    // person asking to open, not by the answer that comes back, so a turn
+    // that failed meanwhile survives the open it raced.
     state = threadOpened(ended, mira);
 
-    expect(composerText(state)).toBe('hello mira');
+    expect(composerText(lineTakenBack(state, 'line-1'))).toBe('hello mira');
     expect(state.notices).toEqual(['Mira: Mira is away.']);
     expect(state.turns.has(conversationId)).toBe(false);
 
@@ -1021,6 +1081,7 @@ describe('web store', () => {
         conversationId,
         characterId: 'mira',
         text: 'hello',
+        state: 'sending',
       });
       expect(composerText(read)).toBe('');
     }
@@ -1070,10 +1131,7 @@ describe('web store', () => {
       kind: 'pairing_requested',
       ...pairing('123456', 'Alice'),
     });
-    live = applyEvent(
-      live,
-      running('line-1', [{draftId: '1.0', text: 'half a thought'}]),
-    );
+    live = applyEvent(live, running('line-1', true));
     live = composerChanged(live, 'and this is unsent');
 
     const state = connectionRefused(live, 'A bearer token is required.');
@@ -1087,7 +1145,7 @@ describe('web store', () => {
     // was sent with, which ordinary text would not carry.
     expect([...state.pending.keys()]).toEqual(['line-1', 'line-2']);
     expect(composerText(state)).toBe('and this is unsent');
-    // An answer would never reach the daemon, and a draft never finish.
+    // An answer would never reach the daemon, nor a turn's end the page.
     expect(state.confirmations).toEqual([]);
     expect(state.pairings).toEqual([]);
     expect(state.turns.size).toBe(0);
@@ -1354,15 +1412,10 @@ describe('web store', () => {
       state,
       userMessage('m-9', 'hi there', 'line-9', 'conv-2'),
     );
-    const elsewhere = applyEvent(
-      away,
-      running('line-9', [{draftId: '1.0', text: 'not here'}], 'conv-2'),
-    );
+    const elsewhere = applyEvent(away, running('line-9', true, 'conv-2'));
 
     expect(elsewhere.thread).toBe(state.thread);
-    expect(elsewhere.turns.get('conv-2')?.drafts).toEqual([
-      {draftId: '1.0', text: 'not here'},
-    ]);
+    expect(elsewhere.turns.get('conv-2')?.writing).toBe(true);
   });
 
   it('takes the roster as the daemon says it after a change landed', () => {

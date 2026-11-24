@@ -473,7 +473,7 @@ it('turns.fatal-turn-restart: a turn whose line or whose reply the store cannot 
   ).toEqual(['failed', 'starting', 'ready', 'failed', 'starting', 'ready']);
 });
 
-it('turns.history-paging: history reads a conversation across its segments as one scrollback, newest page first and chronological within it, back to the start by the earlier cursor, and a short one whole without a limit; every message says when it was sent and the app it is in, an answer of hers the app its line came in', async () => {
+it("turns.history-paging: history reads a conversation across its segments as one scrollback, newest page first and chronological within it, back to the start by the earlier cursor, and a short one whole without a limit; every message says when it was sent and the app it is in, an answer of hers the app its line came in, and each of the person's, and none of hers, when she read it", async () => {
   const wire = wireOf(
     await startDaemon(
       createHome({'config.json': rotatingEveryTurn}),
@@ -490,7 +490,7 @@ it('turns.history-paging: history reads a conversation across its segments as on
     {id: 'two', source: 'telegram:mira_bot', app: 'telegram'},
     {id: 'three', source: 'web', app: 'messages'},
   ];
-  const sentAt = expect.stringMatching(
+  const moment = expect.stringMatching(
     /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u,
   ) as string;
 
@@ -516,12 +516,13 @@ it('turns.history-paging: history reads a conversation across its segments as on
         role: 'user',
         speakerName: 'You',
         text: `Line ${id}.`,
-        sentAt,
+        sentAt: moment,
+        readAt: moment,
         app,
         source,
         clientMessageId: id,
       },
-      {role: 'character', speakerName: 'Mira', sentAt, app},
+      {role: 'character', speakerName: 'Mira', sentAt: moment, app},
     ]),
   });
   expect(whole).not.toHaveProperty('earlier');
@@ -530,6 +531,7 @@ it('turns.history-paging: history reads a conversation across its segments as on
     message => message.role === 'character',
   )) {
     expect(line).not.toHaveProperty('source');
+    expect(line).not.toHaveProperty('readAt');
   }
 
   const newest = (await wire.history(conversationId, {limit: 4})) as {

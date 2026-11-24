@@ -1,5 +1,6 @@
 //! A conversation as a client reaches it: a character's thread with the
-//! person opened, a line sent into it, and a page of its scrollback.
+//! person opened, a line sent into it, a page of its scrollback, and a
+//! message of hers the person read.
 
 use p02_core::{
     ClientStamp, ConversationId, MessageId, SpeakerName, Timestamp, VisibleMessageRole, VisibleText,
@@ -130,8 +131,8 @@ pub enum HistoryRefusal {
 }
 
 /// A committed message as the scrollback shows it: when it was sent, the
-/// app it is in, by its id, and for the person's line the stamps its client
-/// put on it.
+/// app it is in, by its id, and for the person's line when she read it and
+/// the stamps its client put on it.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -142,6 +143,10 @@ pub struct HistoryMessage {
     pub speaker_name: SpeakerName,
     pub text: VisibleText,
     pub sent_at: Timestamp,
+    /// When she read the person's line: the moment her turn took it. Hers
+    /// has none.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub read_at: Option<Timestamp>,
     /// The id of the app the person's line came in, or hers went in, as
     /// `messages` or `telegram`.
     pub app: String,
@@ -149,4 +154,42 @@ pub struct HistoryMessage {
     pub source: Option<ClientStamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_message_id: Option<ClientStamp>,
+}
+
+/// The message of hers in a conversation that the person read: the newest
+/// the chat showed them.
+#[derive(Debug, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ReadBody {
+    pub message_id: Short,
+}
+
+/// What came of the person reading a message of hers: kept with her phone,
+/// whose Messages says so; or why it is not.
+#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[serde(
+    tag = "status",
+    rename_all = "snake_case",
+    rename_all_fields = "camelCase"
+)]
+pub enum ReadOutcome {
+    Ok,
+    Refused {
+        reason: ReadRefusal,
+        message: String,
+    },
+    /// The conversation, or her phone, could not be read or written.
+    Failed {
+        message: String,
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum ReadRefusal {
+    UnknownConversation,
+    /// The conversation holds no message of hers by that id.
+    UnknownMessage,
+    /// She has no phone to keep it: her settings switch it off.
+    NoPhone,
 }

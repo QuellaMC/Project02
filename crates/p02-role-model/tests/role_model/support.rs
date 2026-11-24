@@ -4,7 +4,7 @@
 use p02_characters::{Persona, discover};
 use p02_contracts::{
     ChatCompletionTool, ChatMessage, ChatToolFunction, ConversationTurn, DecisionContext,
-    PluginToolDefinition, ProvidedTool, ReplyDelta, ReplyDraft, ToolInputContract,
+    PluginToolDefinition, ProvidedTool, ToolInputContract,
 };
 use p02_core::{AppNames, EventId, EventIdentity, SpeakerName, Timestamp, TraceId};
 use p02_shared::Identifier;
@@ -109,14 +109,6 @@ pub(crate) fn turn(index: u64, line: &str, reply: &str) -> ConversationTurn {
         }],
     }))
     .unwrap()
-}
-
-/// A piece of the round's first reply, as whoever listens hears it.
-pub(crate) fn piece(text: &str) -> ReplyDraft {
-    ReplyDraft::Delta(ReplyDelta {
-        reply: 0,
-        text: text.to_owned(),
-    })
 }
 
 /// A chunk carrying content.

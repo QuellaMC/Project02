@@ -312,7 +312,7 @@ function createFrameParser(emit: (frame: Frame) => void): {
 }
 
 /**
- * The most of a frame's field a failure shows: a frame of a long draft
+ * The most of a frame's field a failure shows: a frame of a long message
  * holds megabytes, and a report of them takes a runner hours to print.
  */
 const shownChars = 2000;

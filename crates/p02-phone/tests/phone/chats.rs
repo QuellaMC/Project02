@@ -1,8 +1,9 @@
 //! The apps she and the person write to each other in, as her phone shows
-//! them to her, in New York: what went through each.
+//! them to her, in New York: what went through each, and under her newest
+//! message whether the person read it.
 
 use p02_core::{AppNames, MessageId, SpeakerName, Timestamp, VisibleMessageRole, VisibleText};
-use p02_phone::Phone;
+use p02_phone::{Phone, Read};
 use p02_shared::Identifier;
 use p02_wire::HistoryMessage;
 use serde_json::{Value, json};
@@ -37,19 +38,20 @@ fn said(number: u64, text: &str, minutes: i64) -> HistoryMessage {
         speaker_name: SpeakerName::new(if hers { "Mira" } else { "Sam" }).unwrap(),
         text: VisibleText::normalize(text).unwrap(),
         sent_at: sent(minutes),
+        read_at: None,
         app: "telegram".to_owned(),
         source: None,
         client_message_id: None,
     }
 }
 
-/// The screen `app`'s conversation shows her.
-fn shown(talk: &Talk, app: &str) -> Value {
+/// The screen `app`'s conversation shows her, her phone's store `files`.
+fn shown(files: &Files, talk: &Talk, app: &str) -> Value {
     let phone = Phone::bundled().unwrap();
 
     serde_json::to_value(
         phone
-            .look(&Files::default(), talk, app, "conversation", &now())
+            .look(files, talk, app, "conversation", &now())
             .unwrap(),
     )
     .unwrap()
@@ -107,9 +109,61 @@ fn an_app_messages_come_in_shows_her_its_newest_twenty_with_the_day_and_time_whe
         items.push(bubble(number));
     }
 
-    assert_eq!(shown(&talk, "telegram"), json!({"items": items}));
+    // Telegram tells nobody whether a message was read.
+    items.push(note("Delivered"));
+
     assert_eq!(
-        shown(&talk, "messages"),
+        shown(&Files::default(), &talk, "telegram"),
+        json!({"items": items})
+    );
+    assert_eq!(
+        shown(&Files::default(), &talk, "messages"),
         json!({"items": [{"kind": "text", "text": "No Messages"}]})
+    );
+}
+
+/// What she sees under her newest message in Messages once the person read
+/// it or a later message, in any app, on a day that is not today: the day,
+/// as her screen writes it; and under one newer than any they read, that
+/// it was delivered.
+#[test]
+fn messages_says_her_newest_was_read_on_the_day_the_person_read_it_or_a_later_one() {
+    let in_messages = |number: u64, text: &str| HistoryMessage {
+        app: "messages".to_owned(),
+        ..said(number, text, 0)
+    };
+    let talk = Talk {
+        apps: AppNames::new([("telegram", "Telegram")]),
+        messages: vec![
+            in_messages(1, "Morning."),
+            in_messages(2, "Morning to you."),
+            in_messages(3, "Tea?"),
+            said(5, "From Telegram.", 1),
+        ],
+    };
+    let screen = |under: &str| {
+        json!({"items": [
+            {"kind": "note", "text": "Thursday, March 5, 23:30"},
+            {"kind": "bubble", "from": "her", "text": "Morning."},
+            {"kind": "bubble", "from": "them", "text": "Morning to you."},
+            {"kind": "bubble", "from": "her", "text": "Tea?"},
+            {"kind": "note", "text": under},
+        ]})
+    };
+    // Friday noon in New York, the day before the moment the tests call now.
+    let friday = Timestamp::new("2026-03-06T17:00:00.000Z").unwrap();
+    let read = |number: u64| Read {
+        message: MessageId::parse(&format!("conv_a.1:message-{}", number + 1)).unwrap(),
+        at: friday.clone(),
+    };
+    let mut files = Files::default();
+
+    read(1).keep(&mut files).unwrap();
+    assert_eq!(shown(&files, &talk, "messages"), screen("Delivered"));
+
+    read(5).keep(&mut files).unwrap();
+    assert_eq!(
+        shown(&files, &talk, "messages"),
+        screen("Read Friday, March 6")
     );
 }

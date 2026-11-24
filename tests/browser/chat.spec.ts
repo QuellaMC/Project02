@@ -210,14 +210,13 @@ async function asksForTone(wire: Wire, tone: string): Promise<Answer> {
   ]);
 }
 
-test("page.chat-drafts-and-second-tab: the printed address opens the page and the one character opens herself; a sent line is the person's bubble, the reply is drafted ahead of its commit and replaced whole by it, and a second tab shows the same thread", async ({
+test("page.chat-typing-and-second-tab: the printed address opens the page and the one character opens herself; a sent line is the person's bubble, her typing shows as three dots in a bubble of hers while her answer is held back and gives way to her whole message, and a second tab shows the same thread", async ({
   context,
   page,
 }) => {
   const {model, daemon} = await miraHome();
-  const driven = model.stream();
-  // The arguments cut after "The".
-  const [head, tail] = visibleReply('The sea is wide.', 12);
+  const held = model.hold();
+  const typing = page.locator('.typing');
 
   await page.goto(daemon.url);
   await expect(page.getByRole('button', {name: /^Mira\b/u})).toContainText(
@@ -228,15 +227,15 @@ test("page.chat-drafts-and-second-tab: the printed address opens the page and th
   await expect(page.locator('.bubble-own .bubble-text')).toHaveText(
     'Tell me about the sea.',
   );
-  await driven.arrived();
-  driven.write([head]);
-  await expect(page.locator('[data-draft] .bubble-text')).toHaveText('The');
-  driven.write([tail, finish('tool_calls')]);
-  driven.end();
+  await held.arrived();
+  await expect(typing).toHaveText('Mira is typing');
+  await expect(typing.locator('.typing-dot')).toHaveCount(3);
+  await expect(page.locator('.bubble-theirs')).toHaveCount(0);
+  held.release(reply('The sea is wide.'));
   await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
     'The sea is wide.',
   ]);
-  await expect(page.locator('[data-draft]')).toHaveCount(0);
+  await expect(typing).toHaveCount(0);
   await expect(page.locator('[data-pending]')).toHaveCount(0);
 
   const second = await context.newPage();
@@ -309,7 +308,7 @@ test("page.chat-apps: a line from the page and her answer, then a line from Tele
   ]);
 });
 
-test("page.own-turn: a moment of hers in which she says nothing shows nothing, one whose model fails raises no notice, and her message in a moment of her own appears in the open thread with no 'is writing' line before her first draft", async ({
+test('page.own-turn: a moment of hers in which she says nothing shows nothing, one whose model fails raises no notice, and her message in a moment of her own appears in the open thread with no dots while she writes it', async ({
   context,
   page,
 }) => {
@@ -330,8 +329,6 @@ test("page.own-turn: a moment of hers in which she says nothing shows nothing, o
         !(frame.data ?? '').includes('"clientMessageId"'),
     );
   const texts = page.locator('.bubble-text');
-  // The arguments cut after "The".
-  const [head, tail] = visibleReply('The sea is calm today.', 12);
 
   model.answer(reply('Tea first.'), reply('I hope the tea was good.'));
   await page.goto(daemon.url);
@@ -341,11 +338,11 @@ test("page.own-turn: a moment of hers in which she says nothing shows nothing, o
   await ownEnd('completed');
   await ownEnd('rejected');
 
-  const driven = model.stream();
+  const held = model.hold();
 
-  await driven.arrived();
+  await held.arrived();
 
-  // A tab opened while her moment runs, before she drafts, installs it.
+  // A tab opened while she writes in her moment installs it, writing.
   const second = await context.newPage();
 
   await second.goto(daemon.url);
@@ -354,21 +351,19 @@ test("page.own-turn: a moment of hers in which she says nothing shows nothing, o
     'Tea first.',
   ]);
   await expect(second.locator('.typing')).toHaveCount(0);
-  driven.write([head]);
+  held.release({
+    chunks: [...visibleReply('The sea is calm today.'), finish('tool_calls')],
+  });
 
   for (const tab of [page, second]) {
-    await expect(tab.locator('[data-draft] .bubble-text')).toHaveText('The');
+    await expect(tab.locator('.bubble-text')).toHaveText([
+      'Morning.',
+      'Tea first.',
+      'The sea is calm today.',
+    ]);
+    await expect(tab.locator('.typing')).toHaveCount(0);
   }
 
-  driven.write([tail, finish('tool_calls')]);
-  driven.end();
-  await expect(texts).toHaveText([
-    'Morning.',
-    'Tea first.',
-    'The sea is calm today.',
-  ]);
-  await expect(page.locator('[data-draft]')).toHaveCount(0);
-  await expect(page.locator('.typing')).toHaveCount(0);
   await expect(page.locator('main > .notice')).toHaveCount(0);
 });
 
@@ -693,6 +688,82 @@ test('page.ask-while-reading: in a chat scrolled up to read, the line at the top
   );
 });
 
+test("page.line-status: under the person's newest message one line says how far it got, Delivered while it waits for her, then Read with the time her turn took it in, and stays under it when her answer arrives", async ({
+  page,
+}) => {
+  const {model, daemon, wire} = await miraHome();
+  const held = model.hold();
+  const status = page.locator('.bubble-status');
+  const under = (text: string) =>
+    page.locator(
+      `.bubble-own:has-text(${JSON.stringify(text)}) + .bubble-status`,
+    );
+
+  await page.goto(daemon.url);
+  await send(page, 'Morning.');
+  await held.arrived();
+  await expect(under('Morning.').locator('b')).toHaveText('Read');
+  // Her turn holds at the model, so the next line waits in her inbox.
+  await send(page, 'Tea?');
+  await expect(under('Tea?')).toHaveText('Delivered');
+  await expect(status).toHaveCount(1);
+  model.answer(reply('Tea, always.'));
+  held.release(reply('Morning, Sam.'));
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Morning, Sam.',
+    'Tea, always.',
+  ]);
+
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const {messages} = (await wire.history(conversationId)) as {
+    readonly messages: readonly {
+      readonly text: string;
+      readonly readAt?: string;
+    }[];
+  };
+
+  await expect(status).toHaveCount(1);
+  await expect(under('Tea?').locator('b')).toHaveText('Read');
+  // The time is when her turn took the line in, as the daemon keeps it.
+  await expect(under('Tea?').locator('time')).toHaveAttribute(
+    'datetime',
+    messages.find(message => message.text === 'Tea?')?.readAt ?? '',
+  );
+  await expect(under('Tea?').locator('time')).toHaveText(/\d/u);
+  await expect(
+    page.locator('.bubble-status + .bubble-theirs .bubble-text'),
+  ).toHaveText('Tea, always.');
+});
+
+test('page.line-left: a line she leaves for later says Read under it, and nothing else: no message of hers comes for it and the page raises no notice', async ({
+  page,
+}) => {
+  const {model, daemon, wire} = await miraHome();
+  const fromTelegram = await sender(wire);
+
+  model.answer(calling(['answer_later', {}]), reply('Hello from here.'));
+  await page.goto(daemon.url);
+  await send(page, 'Busy?');
+  await expect(page.locator('.bubble-status b')).toHaveText('Read');
+
+  // A line from her other app after it, and her answer: once the page
+  // shows them, it has heard how her turn on the first one ended.
+  const {conversationId} = await conversationOf(wire, 'mira');
+
+  await fromTelegram({
+    conversationId,
+    text: 'Hello?',
+    source: 'telegram:mira_bot',
+    clientMessageId: 'telegram-1',
+  });
+  await expect(page.locator('.bubble-text')).toHaveText([
+    'Busy?',
+    'Hello?',
+    'Hello from here.',
+  ]);
+  await expect(page.locator('main > .notice')).toHaveCount(0);
+});
+
 test('page.rejected-line-kept: a line whose turn the daemon rejected stays on the thread with a notice saying why, and the composer is empty', async ({
   page,
 }) => {
@@ -716,12 +787,12 @@ test('page.rejected-line-kept: a line whose turn the daemon rejected stays on th
   await expect(composerFor(page)).toHaveValue('');
 });
 
-test('page.refused-line-handback: a line the daemon refuses before any turn, longer than it takes, goes back to the composer with its reason as a notice', async ({
+test('page.refused-line-not-delivered: a line the daemon refuses before any turn, longer than it takes, stays in the thread as Not Delivered with its reason as a notice, and pressing it puts it back in the message box', async ({
   page,
 }) => {
   const {daemon} = await miraHome();
   // As long as a paste can be: the daemon refuses it before any turn
-  // runs, so the line is the person's again.
+  // runs, so the line never reached her.
   const tooLong = 'x'.repeat(17 * 1024);
 
   await page.goto(daemon.url);
@@ -729,7 +800,13 @@ test('page.refused-line-handback: a line the daemon refuses before any turn, lon
   await expect(page.locator('main > .notice')).toContainText(
     'Mira: The message: a line is at most',
   );
+  await expect(page.locator('.bubble-status')).toHaveText('Not Delivered');
+  await expect(composerFor(page)).toHaveValue('');
+  await page
+    .getByRole('button', {name: /^Put back in the message box: x/u})
+    .click();
   await expect(composerFor(page)).toHaveValue(tooLong);
+  await expect(composerFor(page)).toBeFocused();
   await expect(page.locator('[data-pending]')).toHaveCount(0);
 });
 

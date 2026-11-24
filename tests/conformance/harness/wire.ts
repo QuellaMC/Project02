@@ -161,6 +161,13 @@ export function wireOf(daemon: Address) {
         `/api/conversations/${segment(conversationId)}/messages${query(page)}`,
         'HistoryOutcome',
       ),
+    readHers: (conversationId: string, messageId: string) =>
+      call(
+        'POST',
+        `/api/conversations/${segment(conversationId)}/read`,
+        'ReadOutcome',
+        {messageId},
+      ),
     pending: () =>
       call('GET', '/api/confirmations', {listOf: 'PendingConfirmation'}),
     answer: (confirmationId: string, decision: Decision) =>

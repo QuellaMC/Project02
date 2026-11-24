@@ -24,7 +24,6 @@ use serde::Serialize;
 use serde_json::{Map, Value};
 use uuid::Uuid;
 
-use crate::draft::{Fragment, ReplyDrafts};
 use crate::prompt::{
     CallIds, ToolNameMapping, json_text, provider_name, provider_names, runtime_name,
 };
@@ -196,22 +195,14 @@ impl ResponsesAdapter {
     /// Sends a round and reads its answer to the end: the model's, or the
     /// round's failure said as its service's, without what proved who sent
     /// it.
-    async fn exchange(
-        &self,
-        request: &RoundRequest,
-        drafts: &mut ReplyDrafts<'_>,
-    ) -> ProviderAnswer {
+    async fn exchange(&self, request: &RoundRequest) -> ProviderAnswer {
         let mut silence = Silence::start(self.silence);
         let Sent { access, answered } = self.send(&request.request, &mut silence).await;
         let answer = match answered {
             Ok(response) => {
                 let status = response.status().as_u16();
 
-                streamed(response, &mut silence, &mut |fragment| {
-                    drafts.hear(fragment);
-                })
-                .await
-                .and_then(|ended| {
+                streamed(response, &mut silence).await.and_then(|ended| {
                     answer(ended, &request.mappings).map_err(|(code, message)| Fault {
                         code,
                         message,
@@ -270,7 +261,7 @@ impl ResponsesAdapter {
                     done: Vec::new(),
                 }
             }
-            Dialect::Plan(_) => streamed(response, silence, &mut |_| {})
+            Dialect::Plan(_) => streamed(response, silence)
                 .await
                 .map_err(|fault| fault.message)?,
         };
@@ -288,14 +279,8 @@ impl RoleModelAdapter for ResponsesAdapter {
             invocation.tools(),
             &self.service.dialect,
         );
-        let mut drafts = ReplyDrafts::new(*invocation, &request.mappings);
-        let answer = self.exchange(&request, &mut drafts).await;
 
-        if let ProviderAnswer::Answered { .. } = answer {
-            drafts.finish();
-        }
-
-        answer
+        self.exchange(&request).await
     }
 
     async fn complete_text(&self, request: &TextCompletionRequest) -> TextCompletion {
@@ -310,17 +295,12 @@ impl RoleModelAdapter for ResponsesAdapter {
     }
 }
 
-/// A streamed answer read to the event that ends it, each piece of a
-/// function call's arguments told to `heard`: how it ended, or why it did
-/// not, under the status that answered.
-async fn streamed(
-    response: Response,
-    silence: &mut Silence,
-    heard: &mut impl FnMut(Fragment<'_>),
-) -> Result<Ended, Fault> {
+/// A streamed answer read to the event that ends it: how it ended, or why
+/// it did not, under the status that answered.
+async fn streamed(response: Response, silence: &mut Silence) -> Result<Ended, Fault> {
     let mut fold = EventFold::default();
 
-    transport::streamed(response, silence, |chunk| fold.push(chunk, heard)).await
+    transport::streamed(response, silence, |chunk| fold.push(chunk)).await
 }
 
 /// A request as it goes on the wire: its body exactly, and the session it

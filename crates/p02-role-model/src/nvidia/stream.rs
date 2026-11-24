@@ -1,9 +1,8 @@
 //! A streamed chat completion, OpenAI's shape as the NVIDIA endpoint
 //! speaks it, read back into one message: content pieces joined, each tool
 //! call's pieces joined by index under the name its first pieces carried,
-//! the last finish reason and token counts seen. Each named call's pieces
-//! are told as they arrive, so a draft can be shown while the model writes;
-//! the reassembled message is what is judged.
+//! the last finish reason and token counts seen. The reassembled message is
+//! what is judged.
 
 use std::collections::BTreeMap;
 
@@ -11,7 +10,6 @@ use p02_contracts::TokenUsage;
 use p02_shared::SseFrameSplitter;
 use serde_json::{Map, Value};
 
-use crate::draft::Fragment;
 use crate::transport::{FailureCode, StreamError, malformed, provider_error};
 
 /// A tool call as its pieces left it.
@@ -47,19 +45,14 @@ pub(super) struct StreamFold {
 }
 
 impl StreamFold {
-    /// Takes the next bytes, cut anywhere, and tells `heard` each named
-    /// call's pieces. `data: [DONE]` ends the stream; what follows it is
-    /// not read.
-    pub(super) fn push(
-        &mut self,
-        bytes: &[u8],
-        heard: &mut impl FnMut(Fragment<'_>),
-    ) -> Result<Flow, StreamError> {
+    /// Takes the next bytes, cut anywhere. `data: [DONE]` ends the stream;
+    /// what follows it is not read.
+    pub(super) fn push(&mut self, bytes: &[u8]) -> Result<Flow, StreamError> {
         for frame in self.frames.push(bytes) {
             match frame.data.as_deref() {
                 None => {}
                 Some("[DONE]") => return Ok(Flow::Done),
-                Some(data) => self.take(data, heard)?,
+                Some(data) => self.take(data)?,
             }
         }
 
@@ -75,11 +68,7 @@ impl StreamFold {
         }
     }
 
-    fn take(
-        &mut self,
-        data: &str,
-        heard: &mut impl FnMut(Fragment<'_>),
-    ) -> Result<(), StreamError> {
+    fn take(&mut self, data: &str) -> Result<(), StreamError> {
         let chunk = serde_json::from_str::<Value>(data)
             .map_err(|_| malformed("stream chunk must be JSON."))?;
         let Value::Object(chunk) = chunk else {
@@ -114,16 +103,12 @@ impl StreamFold {
 
         match choice.get("delta") {
             None | Some(Value::Null) => Ok(()),
-            Some(Value::Object(delta)) => self.take_delta(delta, heard),
+            Some(Value::Object(delta)) => self.take_delta(delta),
             Some(_) => Err(malformed("stream chunk delta must be an object.")),
         }
     }
 
-    fn take_delta(
-        &mut self,
-        delta: &Map<String, Value>,
-        heard: &mut impl FnMut(Fragment<'_>),
-    ) -> Result<(), StreamError> {
+    fn take_delta(&mut self, delta: &Map<String, Value>) -> Result<(), StreamError> {
         if let Some(Value::String(content)) = delta.get("content") {
             self.content
                 .get_or_insert_with(String::new)
@@ -132,18 +117,12 @@ impl StreamFold {
 
         match delta.get("tool_calls") {
             None | Some(Value::Null) => Ok(()),
-            Some(Value::Array(pieces)) => pieces
-                .iter()
-                .try_for_each(|piece| self.take_call(piece, heard)),
+            Some(Value::Array(pieces)) => pieces.iter().try_for_each(|piece| self.take_call(piece)),
             Some(_) => Err(malformed("stream chunk tool_calls must be an array.")),
         }
     }
 
-    fn take_call(
-        &mut self,
-        piece: &Value,
-        heard: &mut impl FnMut(Fragment<'_>),
-    ) -> Result<(), StreamError> {
+    fn take_call(&mut self, piece: &Value) -> Result<(), StreamError> {
         let Some(index) = piece.get("index").and_then(Value::as_u64) else {
             return Err(malformed(
                 "stream chunk tool_calls[] must carry a numeric index.",
@@ -156,34 +135,18 @@ impl StreamFold {
         else {
             return Ok(());
         };
-        let named = call.name.is_none()
-            && function
-                .get("name")
-                .and_then(Value::as_str)
-                .is_some_and(|name| !name.is_empty());
 
-        if named {
-            call.name = function
+        if call.name.is_none()
+            && let Some(name) = function
                 .get("name")
                 .and_then(Value::as_str)
-                .map(str::to_owned);
+                .filter(|name| !name.is_empty())
+        {
+            call.name = Some(name.to_owned());
         }
 
-        let text = function
-            .get("arguments")
-            .and_then(Value::as_str)
-            .unwrap_or("");
-
-        call.arguments.push_str(text);
-
-        if let Some(name) = &call.name
-            && (named || !text.is_empty())
-        {
-            heard(Fragment {
-                index,
-                name,
-                text: if named { &call.arguments } else { text },
-            });
+        if let Some(text) = function.get("arguments").and_then(Value::as_str) {
+            call.arguments.push_str(text);
         }
 
         Ok(())
@@ -224,28 +187,16 @@ mod tests {
         "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"never read\"}}]}\n\n",
     );
 
-    type Heard = Vec<(u64, String, String)>;
-
-    fn read(pieces: &[&[u8]]) -> (Result<Completion, StreamError>, Heard) {
+    fn read(pieces: &[&[u8]]) -> Result<Completion, StreamError> {
         let mut fold = StreamFold::default();
-        let mut heard = Vec::new();
-        let mut record = |fragment: Fragment<'_>| {
-            heard.push((
-                fragment.index,
-                fragment.name.to_owned(),
-                fragment.text.to_owned(),
-            ));
-        };
 
         for piece in pieces {
-            match fold.push(piece, &mut record) {
-                Ok(Flow::More) => {}
-                Ok(Flow::Done) => return (Ok(fold.finish()), heard),
-                Err(error) => return (Err(error), heard),
+            if fold.push(piece)? == Flow::Done {
+                break;
             }
         }
 
-        (Ok(fold.finish()), heard)
+        Ok(fold.finish())
     }
 
     fn call(name: &str, arguments: &str) -> StreamedCall {
@@ -262,27 +213,18 @@ mod tests {
 
         assert_eq!(
             whole,
-            (
-                Ok(Completion {
-                    content: Some("ダーリン、一緒に".to_owned()),
-                    finish_reason: Some("tool_calls".to_owned()),
-                    calls: vec![
-                        call("send_message", "{\"text\":\"ゼロツー💖\"}"),
-                        call("memory_search", "{\"q\":\"sky\"}"),
-                    ],
-                    usage: Some(TokenUsage {
-                        prompt_tokens: 42,
-                        completion_tokens: 17,
-                    }),
+            Ok(Completion {
+                content: Some("ダーリン、一緒に".to_owned()),
+                finish_reason: Some("tool_calls".to_owned()),
+                calls: vec![
+                    call("send_message", "{\"text\":\"ゼロツー💖\"}"),
+                    call("memory_search", "{\"q\":\"sky\"}"),
+                ],
+                usage: Some(TokenUsage {
+                    prompt_tokens: 42,
+                    completion_tokens: 17,
                 }),
-                vec![
-                    (0, "send_message".to_owned(), String::new()),
-                    (0, "send_message".to_owned(), "{\"text\":\"ゼロ".to_owned()),
-                    (1, "memory_search".to_owned(), "{\"q\":".to_owned()),
-                    (0, "send_message".to_owned(), "ツー💖\"}".to_owned()),
-                    (1, "memory_search".to_owned(), "\"sky\"}".to_owned()),
-                ]
-            )
+            })
         );
 
         for cut in 0..=bytes.len() {
@@ -302,14 +244,17 @@ mod tests {
 
     #[test]
     fn a_stream_says_no_more_than_arrived() {
-        let (completion, heard) =
-            read(&[b"data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n"]);
-
-        assert_eq!((completion, heard), (Ok(Completion::default()), Vec::new()));
-
-        let (completion, _) = read(&[b"data: {\"choices\":[{\"delta\":{\"content\":\"\"}}]}\n\n"]);
-
-        assert_eq!(completion.unwrap().content.as_deref(), Some(""));
+        assert_eq!(
+            read(&[b"data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\"}}]}\n\n"]),
+            Ok(Completion::default())
+        );
+        assert_eq!(
+            read(&[b"data: {\"choices\":[{\"delta\":{\"content\":\"\"}}]}\n\n"])
+                .unwrap()
+                .content
+                .as_deref(),
+            Some("")
+        );
     }
 
     #[test]
@@ -369,7 +314,7 @@ mod tests {
             let frame = format!("data: {data}\n\n");
 
             assert_eq!(
-                read(&[frame.as_bytes()]).0,
+                read(&[frame.as_bytes()]),
                 Err(StreamError {
                     code,
                     message: message.to_owned(),

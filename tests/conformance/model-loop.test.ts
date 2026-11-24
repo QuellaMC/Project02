@@ -4,6 +4,7 @@ import {startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents} from './harness/events.ts';
 import {configJson, createHome, sessionRecords} from './harness/home.ts';
 import {
+  calling,
   content,
   finish,
   messagesOf,
@@ -105,7 +106,43 @@ it('model.decision-parse-failure-fed-back: a round of empty content, a blank rep
   ).toEqual([]);
 });
 
-it("model.note-never-shown: the model's note beside its calls never reaches the person: it is no message, no draft and no line of history", async () => {
+it('model.answer-later-ends-the-turn: a round that leaves the line for later beside a message and a tool sends the message, runs the tool and ends the turn completed, asking her model nothing more, and its record keeps the call under its own name', async () => {
+  const model = await startModelServer();
+  const home = createHome({
+    'config.json': configJson({project02: model.settings}),
+  });
+  const say = await converse(wireOf(await startDaemon(home)), 'mira');
+
+  model.answer(
+    calling(
+      ['send_message', {text: 'Busy now. Later.'}],
+      ['character_state_patch', {mood: 'tired'}],
+      ['answer_later', {}],
+    ),
+  );
+  expect(await say('Got a minute?', 'minute')).toMatchObject({
+    status: 'completed',
+    messages: [{text: 'Got a minute?'}, {text: 'Busy now. Later.'}],
+  });
+  expect(model.requests).toHaveLength(1);
+  expect(sessionRecords(home, 'mira', 'tool_call_finished')).toMatchObject([
+    {toolName: 'character_state.patch', toolResult: {status: 'accepted'}},
+  ]);
+  expect(decisionsOf(home)).toEqual([
+    {
+      status: 'accepted',
+      decision: {
+        toolCalls: [
+          {name: 'visible_reply', input: {text: 'Busy now. Later.'}},
+          {name: 'character_state.patch', input: {mood: 'tired'}},
+          {name: 'answer_later', input: {}},
+        ],
+      },
+    },
+  ]);
+});
+
+it("model.note-never-shown: the model's note beside its calls never reaches the person: it is no message, nothing on the stream and no line of history", async () => {
   const model = await startModelServer();
   const home = listingHome(model);
   const daemon = await startDaemon(home);

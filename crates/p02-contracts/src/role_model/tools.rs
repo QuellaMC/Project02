@@ -14,6 +14,11 @@ use crate::tool::ProvidedTool;
 /// character's voice.
 pub const SEND_MESSAGE: &str = "send_message";
 
+/// The built-in tool a character leaves the person's message unanswered
+/// with, for now. It is always offered, after [`SEND_MESSAGE`] and ahead of
+/// every plugin tool, and a record keeps a call of it under this name.
+pub const ANSWER_LATER: &str = "answer_later";
+
 /// The tool that lists the plugins installed, offered by the runtime's own
 /// plugin. While it is offered, the model is told it can ask for the
 /// inventory rather than take the tools it sees for all there is.
@@ -25,6 +30,8 @@ const RECORDED_REPLY: &str = "visible_reply";
 
 const SEND_MESSAGE_DESCRIPTION: &str = "Send a message to the one you write with.";
 const SEND_MESSAGE_TEXT_DESCRIPTION: &str = "The message, exactly as you write it.";
+const ANSWER_LATER_DESCRIPTION: &str = "Leave the message unanswered for now. The one who wrote it \
+     sees that you read it, and nothing else.";
 
 /// A tool as the model is offered it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -64,6 +71,21 @@ impl ModelToolDefinition {
             ]),
         }
     }
+
+    /// The definition of [`ANSWER_LATER`], which takes nothing.
+    #[must_use]
+    pub fn answer_later() -> Self {
+        Self {
+            name: ANSWER_LATER.to_owned(),
+            description: ANSWER_LATER_DESCRIPTION.to_owned(),
+            input_contract: Map::from_iter([
+                ("type".to_owned(), json!("object")),
+                ("properties".to_owned(), json!({})),
+                ("required".to_owned(), json!([])),
+                ("additionalProperties".to_owned(), json!(false)),
+            ]),
+        }
+    }
 }
 
 /// What a message's `app` is, each of `apps` by its name and its id.
@@ -94,7 +116,8 @@ impl From<&ProvidedTool> for ModelToolDefinition {
 }
 
 /// One call a model round made: the character speaking, in the app she
-/// named when she named one, or a plugin tool.
+/// named when she named one; leaving the message for later; or a plugin
+/// tool.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(into = "WireCall", try_from = "WireCall")]
 pub enum ModelToolCall {
@@ -102,6 +125,7 @@ pub enum ModelToolCall {
         text: VisibleText,
         app: Option<String>,
     },
+    AnswerLater,
     Plugin {
         name: Identifier,
         input: Map<String, Value>,
@@ -159,7 +183,7 @@ impl ModelToolCall {
     /// input redacted.
     pub(crate) fn redacted(&self) -> Self {
         match self {
-            Self::VisibleReply { .. } => self.clone(),
+            Self::VisibleReply { .. } | Self::AnswerLater => self.clone(),
             Self::Plugin { name, input } => {
                 let mut input = input.clone();
 
@@ -182,6 +206,10 @@ impl From<ModelToolCall> for WireCall {
                     .chain(app.map(|app| ("app".to_owned(), Value::from(app))))
                     .collect(),
             },
+            ModelToolCall::AnswerLater => Self {
+                name: ANSWER_LATER.to_owned(),
+                input: Map::new(),
+            },
             ModelToolCall::Plugin { name, input } => Self {
                 name: name.to_string(),
                 input,
@@ -195,6 +223,10 @@ impl TryFrom<WireCall> for ModelToolCall {
     type Error = ParseModelToolCallError;
 
     fn try_from(call: WireCall) -> Result<Self, Self::Error> {
+        if call.name == ANSWER_LATER {
+            return Ok(Self::AnswerLater);
+        }
+
         if call.name != RECORDED_REPLY {
             return Identifier::new(&call.name)
                 .map(|name| Self::Plugin {
@@ -321,9 +353,10 @@ mod tests {
         let reply = json!({"name": "visible_reply", "input": {"text": "Hello."}});
         let sent_in =
             json!({"name": "visible_reply", "input": {"text": "Hello.", "app": "telegram"}});
+        let later = json!({"name": "answer_later", "input": {}});
         let plugin = json!({"name": "memory.search", "input": {"query": "Mira"}});
 
-        for call in [&reply, &sent_in, &plugin] {
+        for call in [&reply, &sent_in, &later, &plugin] {
             let parsed: ModelToolCall = serde_json::from_value(call.clone()).unwrap();
 
             assert_eq!(&serde_json::to_value(&parsed).unwrap(), call);

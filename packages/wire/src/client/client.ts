@@ -34,6 +34,8 @@ import {
   type PairingSubject,
   type PendingConfirmation,
   type PhoneOutcome,
+  type ReadBody,
+  type ReadOutcome,
   type RemoveCharacterOutcome,
   type ScreenOutcome,
   type StartOutcome,
@@ -203,6 +205,16 @@ export type GatewayClient = {
     page?: HistoryPage,
     options?: GatewayCallOptions,
   ): Promise<HistoryOutcome>;
+  /**
+   * Says the person read a message of hers in a conversation, the newest
+   * the chat showed them, which her phone's Messages keeps; a read of an
+   * older one than it keeps changes nothing.
+   */
+  readHers(
+    conversationId: string,
+    messageId: string,
+    options?: GatewayCallOptions,
+  ): Promise<ReadOutcome>;
   pendingConfirmations(
     options?: GatewayCallOptions,
   ): Promise<readonly PendingConfirmation[]>;
@@ -401,6 +413,12 @@ export function createGatewayClient(
           before: page.before,
           limit: page.limit === undefined ? undefined : String(page.limit),
         })}`,
+        callOptions,
+      ),
+    readHers: (conversationId, messageId, callOptions) =>
+      route.post<ReadOutcome>(
+        `/api/conversations/${segment(conversationId)}/read`,
+        {messageId} satisfies ReadBody,
         callOptions,
       ),
     pendingConfirmations: callOptions =>

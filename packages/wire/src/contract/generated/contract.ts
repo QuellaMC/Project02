@@ -417,7 +417,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 17, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 18, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -447,7 +447,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 17, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 18, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -456,10 +456,15 @@ export type GatewayRefusalReason = "unknown_conversation" | "character_unavailab
 
 /**
  * A committed message as the scrollback shows it: when it was sent, the
- * app it is in, by its id, and for the person's line the stamps its client
- * put on it.
+ * app it is in, by its id, and for the person's line when she read it and
+ * the stamps its client put on it.
  */
 export type HistoryMessage = { messageId: MessageId, role: VisibleMessageRole, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, sentAt: Timestamp, 
+/**
+ * When she read the person's line: the moment her turn took it. Hers
+ * has none.
+ */
+readAt?: Timestamp, 
 /**
  * The id of the app the person's line came in, or hers went in, as
  * `messages` or `telegram`.
@@ -530,7 +535,8 @@ export type MaintenanceFailure = { at: Timestamp, message: string, };
 /**
  * A message's place in its session: `<session id>:message-<n>`, numbered
  * from 1. Numbers climb but may skip, so a message's number is its order,
- * not a count.
+ * not a count. Messages order by session, then by number: a
+ * conversation's, as they were committed.
  */
 export type MessageId = string;
 
@@ -738,10 +744,17 @@ export type PhoneFront = { appId: Identifier, viewId: Identifier, screen?: Scree
 /**
  * Her phone as it stands, read from her data whether she runs or not:
  * her apps, in her phone's order; what she has in front, none her home
- * screen; what she last did on it; and what rings, which nothing does but
+ * screen; what she last did on it; the newest message of hers the person
+ * read, none before they read one; and what rings, which nothing does but
  * while a ring's moment of hers runs.
  */
-export type PhoneOutcome = { "status": "ok", apps: ReadonlyArray<PhoneApp>, front?: PhoneFront, did?: PhoneDid, ringing: ReadonlyArray<PhoneRing>, } | { "status": "refused", reason: PhoneRefusal, message: string, } | { "status": "failed", message: string, };
+export type PhoneOutcome = { "status": "ok", apps: ReadonlyArray<PhoneApp>, front?: PhoneFront, did?: PhoneDid, read?: PhoneRead, ringing: ReadonlyArray<PhoneRing>, } | { "status": "refused", reason: PhoneRefusal, message: string, } | { "status": "failed", message: string, };
+
+/**
+ * The newest message of hers the person has read, and when: her Messages
+ * keeps it, as it says under her newest message there.
+ */
+export type PhoneRead = { messageId: MessageId, at: Timestamp, };
 
 export type PhoneRefusal = "unknown_character" | "no_phone";
 
@@ -788,6 +801,20 @@ order: number,
 connection?: string, };
 
 /**
+ * The message of hers in a conversation that the person read: the newest
+ * the chat showed them.
+ */
+export type ReadBody = { messageId: Short, };
+
+/**
+ * What came of the person reading a message of hers: kept with her phone,
+ * whose Messages says so; or why it is not.
+ */
+export type ReadOutcome = { "status": "ok" } | { "status": "refused", reason: ReadRefusal, message: string, } | { "status": "failed", message: string, };
+
+export type ReadRefusal = "unknown_conversation" | "unknown_message" | "no_phone";
+
+/**
  * A transport refusal: the envelope's code and sentence.
  */
 export type Refusal = { code: string, message: string, };
@@ -816,20 +843,21 @@ export type RoleModelProvider = "chatgpt" | "openai" | "anthropic" | "nvidia";
 export type RosterState = "not_started" | "starting" | "ready" | "needs_model" | "stopping" | "stopped" | "failed";
 
 /**
- * A reply she is still writing: its text so far, under its draft's id.
- */
-export type RunningDraft = { draftId: string, text: string, };
-
-/**
  * A turn as it runs: her character, her thread, the stamps of the line
- * that began it, both or neither, and her drafts so far, each its whole
- * text, in the order they opened.
+ * that began it, both or neither, and whether she is writing.
  */
 export type RunningTurn = { characterId: Identifier, conversationId: ConversationId, 
 /**
  * Absent for a turn of her own, which no line began.
  */
-source?: ClientStamp, clientMessageId?: ClientStamp, drafts: ReadonlyArray<RunningDraft>, };
+source?: ClientStamp, clientMessageId?: ClientStamp, 
+/**
+ * Whether a round of hers is under way: from its request to her model
+ * until its answer is judged and what it said is committed. Never
+ * while her tools run, the plugins prepare or the work after her turn
+ * goes on.
+ */
+writing: boolean, };
 
 /**
  * A finding about the settings: its weight, its code, a sentence for a
@@ -1113,17 +1141,17 @@ export type TurnIdentity = { conversationId: ConversationId, source: ClientStamp
  */
 export type TurnProgress = { "kind": "user_message", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, sentAt: Timestamp, 
 /**
+ * When she read it: the moment her turn took it.
+ */
+readAt: Timestamp, 
+/**
  * The id of the app the line came in, as `messages` or `telegram`.
  */
 app: string, source: ClientStamp, clientMessageId: ClientStamp, } | { "kind": "visible_reply", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, sentAt: Timestamp, 
 /**
  * The id of the app it went in, as `messages` or `telegram`.
  */
-app: string, 
-/**
- * The draft this message replaces.
- */
-draftId: string, } | { "kind": "tool_calls_requested", round: number, toolNames: ReadonlyArray<Identifier>, } | { "kind": "tool_call_completed", round: number, status: ToolCallStatus, 
+app: string, } | { "kind": "tool_calls_requested", round: number, toolNames: ReadonlyArray<Identifier>, } | { "kind": "tool_call_completed", round: number, status: ToolCallStatus, 
 /**
  * The plugin that provides the tool, or `undeclared.<tool>` for a
  * tool the turn did not offer.

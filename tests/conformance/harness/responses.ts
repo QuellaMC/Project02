@@ -108,9 +108,7 @@ export function saying(words: string): OutputItem {
 }
 
 /** The events of a response that completes with these items. */
-export function responseEvents(
-  ...items: readonly OutputItem[]
-): ResponseEvent[] {
+function responseEvents(...items: readonly OutputItem[]): ResponseEvent[] {
   return [
     {type: 'response.created', response: {status: 'in_progress', output: []}},
     ...streamed(items),
@@ -141,7 +139,7 @@ export function respondedWhole(...items: readonly OutputItem[]): Answer {
 }
 
 /** The events of a response as a ChatGPT plan's service streams it: each item held whole by its own last event, and an end that carries no output. */
-export function planEvents(...items: readonly OutputItem[]): ResponseEvent[] {
+function planEvents(...items: readonly OutputItem[]): ResponseEvent[] {
   return [
     {type: 'response.created', response: {status: 'in_progress', output: []}},
     ...streamed(items),

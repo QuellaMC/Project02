@@ -19,14 +19,13 @@ use reqwest::header::{HeaderName, HeaderValue};
 use serde::Serialize;
 use serde_json::{Map, Value};
 
-use crate::draft::ReplyDrafts;
 use crate::prompt::{
     CallIds, ToolNameMapping, json_text, provider_name, provider_names, runtime_name,
 };
 use crate::transport::{
     self, Access, BuildAdapterError, Client, FailureCode, Fault, MAX_OUTPUT_TOKENS, Silence, said,
 };
-use stream::{MessageFold, Stopped, Told};
+use stream::{MessageFold, Stopped};
 
 /// What a failure's words call the service.
 const CLAUDE: &str = "Claude";
@@ -117,14 +116,9 @@ impl AnthropicAdapter {
         })
     }
 
-    /// Sends `body` and reads the message it streams back to its stop, what
-    /// it tells of its calls told to `heard`, with the status that answered;
-    /// or why there is none.
-    async fn ask(
-        &self,
-        body: &[u8],
-        heard: &mut impl FnMut(Told<'_>),
-    ) -> Result<(Stopped, u16), Fault> {
+    /// Sends `body` and reads the message it streams back to its stop, with
+    /// the status that answered; or why there is none.
+    async fn ask(&self, body: &[u8]) -> Result<(Stopped, u16), Fault> {
         let http = self.http.get()?;
         let mut silence = Silence::start(self.silence);
         let response = transport::send(http, &self.endpoint, &self.access, body, &mut silence)
@@ -132,24 +126,14 @@ impl AnthropicAdapter {
             .accepted()?;
         let status = response.status().as_u16();
         let mut fold = MessageFold::default();
-        let stopped =
-            transport::streamed(response, &mut silence, |chunk| fold.push(chunk, heard)).await?;
+        let stopped = transport::streamed(response, &mut silence, |chunk| fold.push(chunk)).await?;
 
         Ok((stopped, status))
     }
 
     /// Sends a round and reads its answer to the end.
-    async fn exchange(
-        &self,
-        request: &RoundRequest,
-        drafts: &mut ReplyDrafts<'_>,
-    ) -> Result<ProviderAnswer, Fault> {
-        let (stopped, status) = self
-            .ask(&request.bytes, &mut |told| match told {
-                Told::Piece(fragment) => drafts.hear(fragment),
-                Told::LetGo => drafts.let_go(),
-            })
-            .await?;
+    async fn exchange(&self, request: &RoundRequest) -> Result<ProviderAnswer, Fault> {
+        let (stopped, status) = self.ask(&request.bytes).await?;
 
         answer(stopped, &request.mappings).map_err(|(code, message)| Fault {
             code,
@@ -161,10 +145,7 @@ impl AnthropicAdapter {
     /// A plain completion's text, or why there is none.
     async fn completion(&self, request: &TextCompletionRequest) -> Result<String, String> {
         let body = completion_request(&self.model, self.fallback, request);
-        let (stopped, _) = self
-            .ask(&body, &mut |_| {})
-            .await
-            .map_err(|fault| fault.message)?;
+        let (stopped, _) = self.ask(&body).await.map_err(|fault| fault.message)?;
 
         stop_reason(&stopped).map_err(|(_, message)| message)?;
 
@@ -183,15 +164,10 @@ impl RoleModelAdapter for AnthropicAdapter {
             invocation.messages(),
             invocation.tools(),
         );
-        let mut drafts = ReplyDrafts::new(*invocation, &request.mappings);
 
-        match self.exchange(&request, &mut drafts).await {
-            Ok(answer) => {
-                drafts.finish();
-                answer
-            }
-            Err(fault) => fault.answer(CLAUDE, &self.access),
-        }
+        self.exchange(&request)
+            .await
+            .unwrap_or_else(|fault| fault.answer(CLAUDE, &self.access))
     }
 
     async fn complete_text(&self, request: &TextCompletionRequest) -> TextCompletion {
@@ -272,8 +248,9 @@ enum Block<'a> {
 }
 
 /// A tool as the protocol offers one, its arguments streamed as the model
-/// writes them, so her reply can be drafted as it is written. The service
-/// then checks them no more, and the runtime judges every call in any case.
+/// writes them, so a long message keeps the answer streaming while it is
+/// written, within the bound on the provider's silence. The service then
+/// checks them no more, and the runtime judges every call in any case.
 #[derive(Serialize)]
 struct Tool<'a> {
     name: String,

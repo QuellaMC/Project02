@@ -94,6 +94,31 @@ function momentNote(when: string): RegExp {
 const pastMoment =
   /^<time_of_your_own>\nOn [^\n]+, at \d\d:\d\d, nobody had written to you, and the time was yours\.\n<\/time_of_your_own>$/u;
 
+/** `answer_later` as she is offered it. */
+const answerLater = {
+  type: 'function',
+  function: {
+    name: 'answer_later',
+    description:
+      'Leave the message unanswered for now. The one who wrote it sees that you read it, and nothing else.',
+    parameters: {
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false,
+    },
+    strict: true,
+  },
+};
+
+/** The tools a request offered her, in order. */
+function toolsOf(request: ModelRequest | undefined): readonly unknown[] {
+  return (
+    (request?.body as {readonly tools?: readonly unknown[]} | undefined)
+      ?.tools ?? []
+  );
+}
+
 /** A host field as the target's view shows it, if the view has it. */
 async function hostField(
   wire: Wire,
@@ -120,7 +145,7 @@ it("heartbeat.moment: after a person's turn and a heartbeat of quiet a turn of h
 
   expect(dataOf(await events.next(own('turn_running')))).toMatchObject({
     conversationId: expect.any(String) as string,
-    drafts: [],
+    writing: false,
   });
   expect(performance.now() - spoke).toBeGreaterThanOrEqual(heartbeat / 2);
   expect(dataOf(await events.next(own('turn_completed')))).toMatchObject({
@@ -156,7 +181,7 @@ it("heartbeat.moment: after a person's turn and a heartbeat of quiet a turn of h
   expect(performance.now() - spokeAgain).toBeGreaterThanOrEqual(heartbeat / 2);
 });
 
-it('heartbeat.quiet: a moment answered with plain text or with nothing commits no message: the stream holds only its start and its end, her log keeps the thought, and no later prompt replays it; one whose provider fails ends rejected, leaves her ready, and her next moment comes on time', async () => {
+it('heartbeat.quiet: a moment answered with plain text or with nothing commits no message: the stream holds only its start, that she writes and then no longer does, and its end, her log keeps the thought, and no later prompt replays it; one whose provider fails ends rejected, leaves her ready, and her next moment comes on time', async () => {
   const model = await startModelServer();
   const home = heartbeatHome(model);
   const daemon = await startDaemon(home, shortened);
@@ -185,12 +210,15 @@ it('heartbeat.quiet: a moment answered with plain text or with nothing commits n
   ]) {
     const moment = await nextMoment(events);
 
-    expect(moment.map(frame => frame.event)).toEqual([
-      'turn_running',
-      'turn_completed',
+    expect(
+      moment.map(frame => [frame.event, dataOf(frame)['writing']]),
+    ).toEqual([
+      ['turn_running', false],
+      ['turn_running', true],
+      ['turn_running', false],
+      ['turn_completed', undefined],
     ]);
-    expect(dataOf(moment[0])).toMatchObject({drafts: []});
-    expect(dataOf(moment[1])).toMatchObject(ended);
+    expect(dataOf(moment.at(-1))).toMatchObject(ended);
   }
 
   const failed = performance.now();
@@ -365,6 +393,57 @@ it("heartbeat.tools: a moment in which she uses a tool and says nothing ends wit
       content: expect.stringMatching(headed('How are you?')) as string,
     },
   ]);
+});
+
+it("heartbeat.unanswered: she is offered answer_later second, after send_message, in a line's turn and in a moment alike; a line she leaves replays as any line, with nothing where her answer would be, and her next moment's note says she has not answered, until she writes", async () => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(heartbeatHome(model), shortened);
+  const events = await openEvents(daemon);
+  const say = await converse(wireOf(daemon), 'mira');
+
+  model.answer(
+    calling(['answer_later', {}]),
+    {chunks: [...visibleReply('Sorry, I was out.'), finish('tool_calls')]},
+    nothing,
+  );
+  expect(await say('Morning.', 'morning')).toMatchObject({
+    status: 'completed',
+    messages: [{text: 'Morning.'}],
+  });
+  await nextMoment(events);
+  await nextMoment(events);
+
+  const [line, first, second] = model.requests;
+
+  for (const request of [line, first]) {
+    expect(toolsOf(request).slice(0, 2)).toEqual([
+      expect.objectContaining({
+        function: expect.objectContaining({name: 'send_message'}) as object,
+      }),
+      answerLater,
+    ]);
+  }
+
+  expect(conversationIn(first)).toMatchObject([
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Morning.')) as string,
+    },
+    {
+      role: 'user',
+      content: expect.stringMatching(
+        momentNote(
+          '[^\\n]+; Sam last wrote to you just now, and you have not answered\\.',
+        ),
+      ) as string,
+    },
+  ]);
+  expect(messagesOf(second).at(-1)).toMatchObject({
+    role: 'user',
+    content: expect.stringMatching(
+      momentNote('[^\\n]+; Sam last wrote to you just now\\.'),
+    ) as string,
+  });
 });
 
 it('heartbeat.person-first: a line that comes while a moment of hers runs is answered as soon as the moment ends, and one that comes while that turn runs, past a heartbeat, is taken before any moment', async () => {

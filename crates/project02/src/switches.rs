@@ -46,14 +46,7 @@ pub(crate) const TEST_ANTHROPIC_API: &str = "PROJECT02_TEST_ANTHROPIC_API";
 const APP_CATALOG: &str = "https://raw.githubusercontent.com/QuellaMC/Project02-Apps/main";
 
 /// The waits serve reads, in the order a refusal lists them.
-const SERVE_KEYS: [&str; 6] = [
-    "confirmation",
-    "pairing",
-    "silence",
-    "ping",
-    "grace",
-    "minute",
-];
+const SERVE_KEYS: [&str; 5] = ["confirmation", "pairing", "silence", "ping", "minute"];
 
 /// What the switches make of a run: the model every character answers
 /// through, the daemon's waits, where the App Store is, the stand-in her
@@ -109,7 +102,6 @@ pub(crate) fn read(variable: impl Fn(&str) -> Option<OsString>) -> Result<Switch
             "pairing" => switches.durations.pairing = wait,
             "silence" => switches.durations.model_silence = Some(wait),
             "ping" => switches.durations.ping = wait,
-            "grace" => switches.durations.grace = wait,
             _ => switches.durations.minute = wait,
         }
     }
@@ -227,7 +219,7 @@ mod tests {
             (TEST_PROVIDER, "deterministic"),
             (
                 TEST_DURATIONS,
-                "confirmation=1,pairing=2,silence=3,ping=4,grace=5,minute=6",
+                "confirmation=1,pairing=2,silence=3,ping=4,minute=5",
             ),
             (TEST_APP_CATALOG, "http://127.0.0.1:8765/apps/"),
             (TEST_APP_INTERNET, "http://127.0.0.1:8766"),
@@ -268,16 +260,14 @@ mod tests {
                 model_silence: Some(ms(3)),
                 settings_lock: Durations::default().settings_lock,
                 ping: ms(4),
-                grace: ms(5),
-                minute: ms(6),
+                grace: Durations::default().grace,
+                minute: ms(5),
             }
         );
         assert_eq!(
-            switched(&[(TEST_DURATIONS, "grace=100")])
-                .unwrap()
-                .durations,
+            switched(&[(TEST_DURATIONS, "ping=100")]).unwrap().durations,
             Durations {
-                grace: ms(100),
+                ping: ms(100),
                 ..Durations::default()
             }
         );
@@ -285,7 +275,7 @@ mod tests {
 
     #[test]
     fn a_switch_serve_cannot_use_is_refused_naming_it() {
-        let keys = "the keys here are confirmation, pairing, silence, ping, grace, minute.";
+        let keys = "the keys here are confirmation, pairing, silence, ping, minute.";
 
         for (variable, value, said) in [
             (
@@ -295,8 +285,8 @@ mod tests {
             ),
             (
                 TEST_DURATIONS,
-                "grace=1.5",
-                "PROJECT02_TEST_DURATIONS: key \"grace\" needs a whole number of milliseconds \
+                "ping=1.5",
+                "PROJECT02_TEST_DURATIONS: key \"ping\" needs a whole number of milliseconds \
                  above 0, not \"1.5\"."
                     .to_owned(),
             ),

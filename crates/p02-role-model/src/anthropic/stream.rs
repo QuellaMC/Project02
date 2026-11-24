@@ -1,10 +1,9 @@
 //! A streamed message, Anthropic's Messages protocol's events read until the
-//! one that stops it: each tool call's arguments are told as they arrive,
-//! under the name its block started with, so a draft can be shown while the
-//! model writes, and so is Anthropic's fallback taking the message over,
-//! which lets the calls before it go; each text block is kept, and thinking
-//! and any block of no use here are read past. Why the message stopped, its
-//! calls, its text and the tokens it took are what is judged.
+//! one that stops it: each text block and each tool call, under the name its
+//! block started with, is kept, Anthropic's fallback taking the message over
+//! lets the calls before it go, and thinking and any block of no use here are
+//! read past. Why the message stopped, its calls, its text and the tokens it
+//! took are what is judged.
 
 use std::collections::BTreeMap;
 
@@ -12,18 +11,8 @@ use p02_contracts::TokenUsage;
 use p02_shared::SseFrameSplitter;
 use serde_json::{Map, Value};
 
-use crate::draft::Fragment;
 use crate::prompt::json_text;
 use crate::transport::{FailureCode, StreamError, malformed, provider_error, typed_event};
-
-/// What a message tells of its tool calls while it streams.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Told<'a> {
-    /// A piece of one call's arguments.
-    Piece(Fragment<'a>),
-    /// Every call so far is let go.
-    LetGo,
-}
 
 /// A tool call as its block left it: the name the block started with, and
 /// its arguments as written, or the input it started with when none were.
@@ -68,17 +57,12 @@ pub(super) struct MessageFold {
 }
 
 impl MessageFold {
-    /// Takes the next bytes, cut anywhere, and tells `heard` each tool
-    /// call's pieces, and the calls let go: the message once an event stops
+    /// Takes the next bytes, cut anywhere: the message once an event stops
     /// it; what follows it is not read.
-    pub(super) fn push(
-        &mut self,
-        bytes: &[u8],
-        heard: &mut impl FnMut(Told<'_>),
-    ) -> Result<Option<Stopped>, StreamError> {
+    pub(super) fn push(&mut self, bytes: &[u8]) -> Result<Option<Stopped>, StreamError> {
         for frame in self.frames.push(bytes) {
             if let Some(data) = frame.data.as_deref()
-                && let Some(stopped) = self.take(data, heard)?
+                && let Some(stopped) = self.take(data)?
             {
                 return Ok(Some(stopped));
             }
@@ -87,11 +71,7 @@ impl MessageFold {
         Ok(None)
     }
 
-    fn take(
-        &mut self,
-        data: &str,
-        heard: &mut impl FnMut(Told<'_>),
-    ) -> Result<Option<Stopped>, StreamError> {
+    fn take(&mut self, data: &str) -> Result<Option<Stopped>, StreamError> {
         let (kind, event) = typed_event(data)?;
 
         match kind.as_str() {
@@ -101,8 +81,8 @@ impl MessageFold {
                     .and_then(|message| message.pointer("/usage/input_tokens"))
                     .and_then(Value::as_u64);
             }
-            "content_block_start" => self.started(&event, heard)?,
-            "content_block_delta" => self.delta(&event, heard)?,
+            "content_block_start" => self.started(&event)?,
+            "content_block_delta" => self.delta(&event)?,
             "message_delta" => self.message_delta(&event),
             "message_stop" => return Ok(Some(self.stopped())),
             "error" => {
@@ -117,16 +97,12 @@ impl MessageFold {
         Ok(None)
     }
 
-    /// A block, started: a text block, or a tool call under its name, which
-    /// a draft is told; thinking and any other block are read past. The
-    /// block that marks Anthropic's fallback taking over lets go every call
-    /// before it, which a draft is told too: the model that declined left
-    /// them unfinished, and only its text is carried on.
-    fn started(
-        &mut self,
-        event: &Map<String, Value>,
-        heard: &mut impl FnMut(Told<'_>),
-    ) -> Result<(), StreamError> {
+    /// A block, started: a text block, or a tool call under its name;
+    /// thinking and any other block are read past. The block that marks
+    /// Anthropic's fallback taking over lets go every call before it: the
+    /// model that declined left them unfinished, and only its text is
+    /// carried on.
+    fn started(&mut self, event: &Map<String, Value>) -> Result<(), StreamError> {
         let index = index(event)?;
         let block = event.get("content_block");
         let field = |name: &str| block.and_then(|block| block.get(name));
@@ -137,30 +113,17 @@ impl MessageFold {
                     .unwrap_or("")
                     .to_owned(),
             ),
-            Some("tool_use") => {
-                let name = field("name")
+            Some("tool_use") => Block::Call {
+                name: field("name")
                     .and_then(Value::as_str)
                     .filter(|name| !name.is_empty())
-                    .map(str::to_owned);
-
-                if let Some(name) = &name {
-                    heard(Told::Piece(Fragment {
-                        index,
-                        name,
-                        text: "",
-                    }));
-                }
-
-                Block::Call {
-                    name,
-                    opened: field("input").cloned().unwrap_or(Value::Null),
-                    arguments: String::new(),
-                }
-            }
+                    .map(str::to_owned),
+                opened: field("input").cloned().unwrap_or(Value::Null),
+                arguments: String::new(),
+            },
             Some("fallback") => {
                 self.blocks
                     .retain(|_, block| matches!(block, Block::Text(_)));
-                heard(Told::LetGo);
                 return Ok(());
             }
             _ => return Ok(()),
@@ -170,13 +133,8 @@ impl MessageFold {
         Ok(())
     }
 
-    /// The next piece of a block kept: its text, or a named call's
-    /// arguments, which a draft is told.
-    fn delta(
-        &mut self,
-        event: &Map<String, Value>,
-        heard: &mut impl FnMut(Told<'_>),
-    ) -> Result<(), StreamError> {
+    /// The next piece of a block kept: its text, or a call's arguments.
+    fn delta(&mut self, event: &Map<String, Value>) -> Result<(), StreamError> {
         let index = index(event)?;
         let delta = event.get("delta");
         let field = |name: &str| {
@@ -189,25 +147,8 @@ impl MessageFold {
             (Some(Block::Text(text)), Some("text_delta")) => {
                 text.push_str(field("text").unwrap_or(""));
             }
-            (
-                Some(Block::Call {
-                    name, arguments, ..
-                }),
-                Some("input_json_delta"),
-            ) => {
-                let piece = field("partial_json").unwrap_or("");
-
-                arguments.push_str(piece);
-
-                if let Some(name) = name
-                    && !piece.is_empty()
-                {
-                    heard(Told::Piece(Fragment {
-                        index,
-                        name,
-                        text: piece,
-                    }));
-                }
+            (Some(Block::Call { arguments, .. }), Some("input_json_delta")) => {
+                arguments.push_str(field("partial_json").unwrap_or(""));
             }
             _ => {}
         }
@@ -324,29 +265,16 @@ mod tests {
         "data: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"never read\"}}\n\n",
     );
 
-    type Heard = Vec<(u64, String, String)>;
-
-    fn read(pieces: &[&[u8]]) -> (Result<Option<Stopped>, StreamError>, Heard) {
+    fn read(pieces: &[&[u8]]) -> Result<Option<Stopped>, StreamError> {
         let mut fold = MessageFold::default();
-        let mut heard = Vec::new();
-        let mut record = |told: Told<'_>| {
-            if let Told::Piece(fragment) = told {
-                heard.push((
-                    fragment.index,
-                    fragment.name.to_owned(),
-                    fragment.text.to_owned(),
-                ));
-            }
-        };
 
         for piece in pieces {
-            match fold.push(piece, &mut record) {
-                Ok(None) => {}
-                stopped => return (stopped, heard),
+            if let Some(stopped) = fold.push(piece)? {
+                return Ok(Some(stopped));
             }
         }
 
-        (Ok(None), heard)
+        Ok(None)
     }
 
     fn call(name: &str, arguments: &str) -> Call {
@@ -357,33 +285,25 @@ mod tests {
     }
 
     #[test]
-    fn a_stream_cut_at_any_byte_tells_the_same_pieces_and_stops_with_the_same_message() {
+    fn a_stream_cut_at_any_byte_stops_with_the_same_message() {
         let bytes = SAMPLE.as_bytes();
         let whole = read(&[bytes]);
 
         assert_eq!(
             whole,
-            (
-                Ok(Some(Stopped {
-                    stop_reason: Some("tool_use".to_owned()),
-                    category: None,
-                    calls: vec![
-                        call("send_message", "{\"text\":\"ゼロツー💖\"}"),
-                        call("runtime_plugin_list", "{}"),
-                    ],
-                    text: "ダーリン、一緒に".to_owned(),
-                    usage: Some(TokenUsage {
-                        prompt_tokens: 42,
-                        completion_tokens: 17,
-                    }),
-                })),
-                vec![
-                    (2, "send_message".to_owned(), String::new()),
-                    (2, "send_message".to_owned(), "{\"text\":\"ゼロ".to_owned()),
-                    (2, "send_message".to_owned(), "ツー💖\"}".to_owned()),
-                    (3, "runtime_plugin_list".to_owned(), String::new()),
-                ]
-            )
+            Ok(Some(Stopped {
+                stop_reason: Some("tool_use".to_owned()),
+                category: None,
+                calls: vec![
+                    call("send_message", "{\"text\":\"ゼロツー💖\"}"),
+                    call("runtime_plugin_list", "{}"),
+                ],
+                text: "ダーリン、一緒に".to_owned(),
+                usage: Some(TokenUsage {
+                    prompt_tokens: 42,
+                    completion_tokens: 17,
+                }),
+            }))
         );
 
         for cut in 0..=bytes.len() {

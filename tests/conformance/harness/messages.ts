@@ -84,9 +84,7 @@ export function thinkingBlock(words: string): ContentBlock {
 }
 
 /** The events of a message with these blocks, stopped as they end it: for a tool if one calls one, else at the end of its turn. */
-export function messageEvents(
-  ...blocks: readonly ContentBlock[]
-): ResponseEvent[] {
+function messageEvents(...blocks: readonly ContentBlock[]): ResponseEvent[] {
   return [
     ...started(),
     ...streamed(blocks),

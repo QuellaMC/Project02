@@ -1,9 +1,10 @@
 //! A character's bot: her thread with the person, opened once the bot
 //! knows its name; a paired account's line handed to her inbox, and her
-//! typing shown in its chat while the turn it began runs; each message she
-//! sends in Telegram posted whole in every paired chat, and nothing else of
-//! her conversation; and a card with Approve and Deny for each confirmation
-//! a turn of this bot's line raises. Nothing is read from history.
+//! typing shown in its chat while she writes in the turn it began; each
+//! message she sends in Telegram posted whole in every paired chat, and
+//! nothing else of her conversation; and a card with Approve and Deny for
+//! each confirmation a turn of this bot's line raises. Nothing is read from
+//! history.
 
 use p02_core::{ClientStamp, ConversationId};
 use p02_shared::Identifier;
@@ -112,12 +113,12 @@ impl Character {
         }
     }
 
-    /// Her turn as the daemon says it now, none once it ended: while one a
-    /// line of this bot's began runs, the chat the line came from shows her
-    /// typing.
+    /// Her turn as the daemon says it now, none once it ended: while she
+    /// writes in one a line of this bot's began, the chat the line came from
+    /// shows her typing.
     fn running(&mut self, chat: &Chat, turn: Option<RunningTurn>) {
         let typing = |turn: Option<&RunningTurn>| {
-            turn.filter(|turn| turn.source.as_ref() == Some(&chat.source))
+            turn.filter(|turn| turn.writing && turn.source.as_ref() == Some(&chat.source))
                 .and_then(|turn| turn.client_message_id.as_ref())
                 .and_then(chat_of_line)
         };

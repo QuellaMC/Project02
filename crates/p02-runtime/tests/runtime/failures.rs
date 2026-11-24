@@ -12,10 +12,9 @@ use tokio::sync::Notify;
 
 use crate::support::{Chat, Round, Toy, id, make_read_only, reply, restore};
 
-/// A reply whose write fails after the reply before it was shown was only
-/// ever a draft: it is withdrawn and never announced, the turn's rejection
-/// names the shown reply, and what a plugin wrote to its store before the
-/// failure stays.
+/// A reply whose write fails after the reply before it was shown is never
+/// announced, the turn's rejection names the shown reply, and what a plugin
+/// wrote to its store before the failure stays.
 #[tokio::test]
 async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
     let keeper = Toy::new("keeper")
@@ -33,19 +32,19 @@ async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
     let writable = Mutex::new(None);
 
     chat.model.script([
-        Round::says(reply(&["Let me look.", "Found it."])).drafting(1, &["Fou", "nd it."]),
+        Round::says(reply(&["Let me look.", "Found it."])),
         Round::says(reply(&["Again."])),
     ]);
 
     // The log refuses writes from the first reply's announcement until the
-    // second's draft is withdrawn, so the second reply's write fails and the
-    // turn's own rejection lands.
+    // round ends, so the second reply's write fails and the turn's own
+    // rejection lands.
     let failed = chat
         .say_hearing("hello there", "hello", |progress| match progress {
             Progress::VisibleReply { .. } => {
                 *writable.lock().unwrap() = Some(make_read_only(&log));
             }
-            Progress::ReplyWithdrawn { .. } => {
+            Progress::RoundEnded => {
                 restore(&log, writable.lock().unwrap().take().unwrap());
             }
             _ => {}
@@ -57,10 +56,9 @@ async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
         chat.heard.take(),
         [
             "user_message hello there",
-            "reply_delta 1.1 Fou",
-            "reply_delta 1.1 nd it.",
-            "visible_reply 1.0 Let me look.",
-            "reply_withdrawn 1.1",
+            "round_began",
+            "visible_reply Let me look.",
+            "round_ended",
         ]
     );
     assert_eq!(chat.reopen().await, None);

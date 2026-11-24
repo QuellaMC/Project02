@@ -7,7 +7,6 @@ import {
   declined,
   messaged,
   messageErred,
-  messageEvents,
   replyUse,
   textBlock,
   thinkingBlock,
@@ -18,7 +17,6 @@ import {
 import {
   headed,
   reply,
-  responseStream,
   startModelServer,
   type ModelRequest,
 } from './harness/model-server.ts';
@@ -28,7 +26,6 @@ import {
   inputOf,
   replying,
   responded,
-  responseEvents,
 } from './harness/responses.ts';
 import {converse, saveConfig, wireOf} from './harness/wire.ts';
 
@@ -118,39 +115,6 @@ it("services.openai-turn: a home on the OpenAI API answers through its Responses
       strict: false,
     }),
   );
-});
-
-it('services.openai-drafts: her reply through the OpenAI API is drafted as the model writes its arguments, and committed whole once the response completes', async () => {
-  const model = await startModelServer();
-  const daemon = await startDaemon(
-    createHome({'config.json': configJson({project02: model.openai.settings})}),
-    model.openai.env,
-  );
-  const say = await converse(wireOf(daemon), 'mira');
-  const events = await openEvents(daemon);
-  const words = 'Hello there, you.';
-  // The arguments' first piece ends inside her words: `{"text":"Hello`.
-  const streamed = responseEvents(replying(words, 14));
-  const bytes = (part: typeof streamed) =>
-    new TextEncoder().encode(responseStream(part));
-  const driven = model.stream();
-  const turn = say('Hi?', 'drafted');
-
-  await driven.arrived();
-  // The response created, the call's item added, its first piece.
-  driven.send(bytes(streamed.slice(0, 3)));
-  await events.next(
-    frameOf('turn_running', {
-      clientMessageId: 'drafted',
-      drafts: [{text: 'Hello'}],
-    }),
-  );
-  driven.send(bytes(streamed.slice(3)));
-  driven.end();
-  expect(await turn).toMatchObject({
-    status: 'completed',
-    messages: [{}, {text: words}],
-  });
 });
 
 it('services.openai-tool-round: a tool her model calls through the OpenAI API goes out as a function call, and the next request carries the call and its result, tied to it by one call id', async () => {
@@ -283,41 +247,6 @@ it("services.claude-turn: a home on the Claude API answers through Anthropic's M
     eager_input_streaming: true,
   });
   expect(second?.text).not.toContain('They want to know how I am.');
-});
-
-it('services.claude-drafts: her reply through the Claude API is drafted as the model writes its arguments, and committed whole once the message stops', async () => {
-  const model = await startModelServer();
-  const daemon = await startDaemon(
-    createHome({
-      'config.json': configJson({project02: model.anthropic.settings}),
-    }),
-    model.anthropic.env,
-  );
-  const say = await converse(wireOf(daemon), 'mira');
-  const events = await openEvents(daemon);
-  const words = 'Hello there, you.';
-  // The arguments' first piece ends inside her words: `{"text":"Hello`.
-  const streamed = messageEvents(replyUse(words, 14));
-  const bytes = (part: typeof streamed) =>
-    new TextEncoder().encode(responseStream(part));
-  const driven = model.stream();
-  const turn = say('Hi?', 'drafted');
-
-  await driven.arrived();
-  // The message begun, a ping, the call's block started, its first piece.
-  driven.send(bytes(streamed.slice(0, 4)));
-  await events.next(
-    frameOf('turn_running', {
-      clientMessageId: 'drafted',
-      drafts: [{text: 'Hello'}],
-    }),
-  );
-  driven.send(bytes(streamed.slice(4)));
-  driven.end();
-  expect(await turn).toMatchObject({
-    status: 'completed',
-    messages: [{}, {text: words}],
-  });
 });
 
 it("services.claude-tool-round: a tool her model calls through the Claude API goes out as a tool use, and the next request replays the call in her turn and its result in the person's next, tied to it by one id", async () => {

@@ -5,10 +5,17 @@ import {Icon} from './settings-controls.tsx';
 import {
   characterName,
   composerText,
+  doingIn,
+  type LineState,
   type Thread,
   type WebState,
 } from './store.ts';
-import {laidOut, type Divider, type Placement} from './thread-layout.ts';
+import {
+  laidOut,
+  type Divider,
+  type Placement,
+  type Status,
+} from './thread-layout.ts';
 import {useFollowing} from './thread-scroll.ts';
 
 /** States a character rests in; one switched off and resting is off. */
@@ -86,18 +93,12 @@ export function ThreadPane({
   const pending = [...state.pending].filter(
     ([, line]) => line.conversationId === thread.conversationId,
   );
-  const turn = state.turns.get(thread.conversationId);
-  const drafts = turn?.drafts ?? [];
-  // She is using her phone, in a turn of her own as in a line's, until her
-  // next reply begins.
-  const phoning = state.phoning.has(thread.conversationId);
-  // A turn of her own, which no line began, shows nothing until she drafts.
-  const writing = turn?.clientMessageId !== undefined && drafts.length === 0;
+  const doing = doingIn(state, thread.conversationId);
   const {locale, timeZone} = Intl.DateTimeFormat().resolvedOptions();
   const laid = laidOut(
     {
       messages: [...(thread.stale ?? []), ...thread.messages],
-      between: drafts.length > 0 || phoning || writing,
+      between: doing !== undefined,
       pending,
     },
     {now: Date.now(), locale, timeZone},
@@ -106,6 +107,7 @@ export function ThreadPane({
   // its lines as a whole, where anything else changes only its end.
   const following = useFollowing(
     `${thread.stale === undefined ? 'read' : 'reading'} ${thread.earlier ?? ''}`,
+    session.endInView,
   );
 
   return (
@@ -117,7 +119,7 @@ export function ThreadPane({
         {state.phoneless.has(thread.characterId) ? null : (
           <HerPhoneButton
             pressed={state.phoneWindow === thread.characterId}
-            phoning={phoning}
+            phoning={doing === 'phoning'}
             onToggle={() => {
               session.togglePhone(thread.characterId);
             }}
@@ -151,21 +153,13 @@ export function ThreadPane({
               placement={placed}
             />
           ))}
-          {drafts.map(draft => (
-            <Bubble
-              key={draft.draftId}
-              speaker={name}
-              text={draft.text}
-              draft
-            />
-          ))}
-          {phoning ? (
-            <p className="typing muted small">
+          {doing === 'phoning' ? (
+            <p className="phoning muted small">
               <Icon name="phone" size={14} weight={1.8} />
               {name} is using her phone…
             </p>
-          ) : writing ? (
-            <p className="typing muted small">{name} is writing…</p>
+          ) : doing === 'typing' ? (
+            <Typing name={name} />
           ) : null}
           {laid.pending.map(placed => {
             const [clientMessageId, line] = placed.message;
@@ -176,7 +170,10 @@ export function ThreadPane({
                 own
                 text={line.text}
                 placement={placed}
-                pending
+                line={line.state}
+                onTakeBack={() => {
+                  session.takeBack(clientMessageId);
+                }}
               />
             );
           })}
@@ -259,51 +256,122 @@ function HerPhoneButton({
 }
 
 /**
- * A bubble, with what stands above it where the thread's layout puts
- * anything there; a draft of hers has no place of its own yet. Whose it
- * is, `speaker`, is said to a reader of the screen and not drawn: the
- * side and the colour say it to the eye. Her phone draws its threads with
- * it too.
+ * Her typing, where her next message will be: her bubble's look and three
+ * dots, the middle one stronger. A reader of the screen hears who types.
+ */
+function Typing({name}: {readonly name: string}) {
+  return (
+    <p className="typing">
+      <span className="typing-dot" aria-hidden="true" />
+      <span className="typing-dot" aria-hidden="true" />
+      <span className="typing-dot" aria-hidden="true" />
+      <span className="visually-hidden">{`${name} is typing`}</span>
+    </p>
+  );
+}
+
+/**
+ * A bubble, with what stands above it and under it where the thread's
+ * layout puts anything there. Whose it is, `speaker`, is said to a reader
+ * of the screen and not drawn: the side and the colour say it to the eye.
+ * A line of the person's not yet committed is faint while it is sending,
+ * and one that did not reach her is a button that takes it back into the
+ * message box, which takes the focus. Her phone draws its threads with it
+ * too.
  */
 export function Bubble({
   own = false,
-  draft = false,
-  pending = false,
+  line,
   speaker,
   placement,
   text,
+  onTakeBack,
 }: {
   readonly own?: boolean;
-  readonly draft?: boolean;
-  readonly pending?: boolean;
+  /** How far a line not yet committed got. */
+  readonly line?: LineState;
   readonly speaker?: string;
   readonly placement?: Placement;
   readonly text: string;
+  /** Takes back a line that did not reach her. */
+  readonly onTakeBack?: () => void;
 }) {
   const kind = own ? 'own' : 'theirs';
+  const drawn = {
+    className: `bubble bubble-${kind}${placement?.joined === true ? ' bubble-joined' : ''}${line === 'sending' ? ' bubble-sending' : ''}`,
+    style:
+      placement?.colour === undefined
+        ? undefined
+        : {background: placement.colour},
+    title: placement?.when,
+    'data-pending': line === undefined ? undefined : 'true',
+  };
+  const words = (
+    <>
+      {speaker === undefined ? null : (
+        <span className="visually-hidden">{`${speaker}: `}</span>
+      )}
+      <span className="bubble-text">{text}</span>
+    </>
+  );
 
   return (
     <>
       {placement?.divider === undefined ? null : (
         <TimeDivider divider={placement.divider} />
       )}
-      <div
-        className={`bubble bubble-${kind}${placement?.joined === true ? ' bubble-joined' : ''}${draft ? ' bubble-draft' : ''}${pending ? ' bubble-pending' : ''}`}
-        style={
-          placement?.colour === undefined
-            ? undefined
-            : {background: placement.colour}
-        }
-        title={placement?.when}
-        data-draft={draft ? 'true' : undefined}
-        data-pending={pending ? 'true' : undefined}
-      >
-        {speaker === undefined ? null : (
-          <span className="visually-hidden">{`${speaker}: `}</span>
-        )}
-        <span className="bubble-text">{text}</span>
-      </div>
+      {line === 'not_delivered' ? (
+        <button
+          type="button"
+          {...drawn}
+          aria-label={`Put back in the message box: ${text}`}
+          onClick={event => {
+            event.currentTarget
+              .closest('main')
+              ?.querySelector<HTMLElement>('.composer input')
+              ?.focus();
+            onTakeBack?.();
+          }}
+        >
+          {words}
+        </button>
+      ) : (
+        <div {...drawn}>{words}</div>
+      )}
+      {placement?.status === undefined ? null : (
+        <StatusLine
+          status={placement.status}
+          notDelivered={line === 'not_delivered'}
+        />
+      )}
     </>
+  );
+}
+
+/**
+ * How far the holder's newest message got, under it, at the end of the
+ * line: the word, then when one read was read; a line that did not reach
+ * her in red. Text, so a reader of the screen hears it too.
+ */
+function StatusLine({
+  status,
+  notDelivered,
+}: {
+  readonly status: Status;
+  readonly notDelivered: boolean;
+}) {
+  return (
+    <p
+      className={`bubble-status${notDelivered ? ' bubble-status-not-delivered' : ''}`}
+    >
+      <b>{status.word}</b>
+      {status.read === undefined ? null : (
+        <>
+          {' '}
+          <time dateTime={status.read.at}>{status.read.when}</time>
+        </>
+      )}
+    </p>
   );
 }
 

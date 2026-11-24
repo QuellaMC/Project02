@@ -9,9 +9,7 @@ use p02_plugins::PHONE_PLUGIN;
 use p02_runtime::Progress;
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{QueuedLine, StorageError};
-use p02_wire::{
-    Event, PackageReport, RunningDraft, RunningTurn, StorageFailure, ToolCallStatus, TurnProgress,
-};
+use p02_wire::{Event, PackageReport, RunningTurn, StorageFailure, ToolCallStatus, TurnProgress};
 
 /// What a line sent again once a turn took it is refused with: the
 /// message it was committed as.
@@ -45,7 +43,7 @@ pub fn package_report(diagnostic: &PackageDiagnostic) -> PackageReport {
 
 /// A turn of `character`'s on `conversation`, before anything of it is
 /// told: the turn of `line`, under its stamps, or one of her own when there
-/// is none.
+/// is none; she is not writing yet.
 pub(crate) fn running_turn(
     character: Identifier,
     conversation: ConversationId,
@@ -56,16 +54,17 @@ pub(crate) fn running_turn(
         conversation_id: conversation,
         source: line.map(|line| line.source.clone()),
         client_message_id: line.map(|line| line.client_message_id.clone()),
-        drafts: Vec::new(),
+        writing: false,
     }
 }
 
 /// What the stream is told of `progress` on `turn`, in order: the message
 /// or the tool calls it says, then the turn as it now runs when that
 /// changed, or that her phone is to be read again when a call of hers to
-/// it came back accepted. A commit comes before the turn without its
-/// draft, so a surface that shows the draft ends it as the message rather
-/// than taking it back.
+/// it came back accepted. The turn changes as the line that began it is
+/// committed, and as each round begins and ends: whether she is writing. A
+/// round's messages come before its end, so a surface that shows her
+/// writing ends it as the message rather than taking it back.
 pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
     let phoned = matches!(
         &progress,
@@ -77,6 +76,7 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
             message,
             source,
             client_message_id,
+            read_at,
         } => (
             Some(TurnProgress::UserMessage {
                 message_id: message.id,
@@ -84,51 +84,30 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
                 speaker_name: message.speaker_name,
                 text: message.text,
                 sent_at: message.sent_at,
+                read_at,
                 app: app_of(Some(&source)).to_owned(),
                 source,
                 client_message_id,
             }),
             true,
         ),
-        Progress::VisibleReply {
-            message,
-            draft,
-            app,
-        } => {
-            let draft_id = draft.to_string();
-
-            turn.drafts.retain(|open| open.draft_id != draft_id);
-            (
-                Some(TurnProgress::VisibleReply {
-                    message_id: message.id,
-                    speaker_id: message.speaker_id,
-                    speaker_name: message.speaker_name,
-                    text: message.text,
-                    sent_at: message.sent_at,
-                    app,
-                    draft_id,
-                }),
-                true,
-            )
-        }
-        Progress::ReplyDelta { draft, text } => {
-            let draft_id = draft.to_string();
-
-            match turn
-                .drafts
-                .iter_mut()
-                .find(|open| open.draft_id == draft_id)
-            {
-                Some(open) => open.text.push_str(&text),
-                None => turn.drafts.push(RunningDraft { draft_id, text }),
-            }
-
+        Progress::VisibleReply { message, app } => (
+            Some(TurnProgress::VisibleReply {
+                message_id: message.id,
+                speaker_id: message.speaker_id,
+                speaker_name: message.speaker_name,
+                text: message.text,
+                sent_at: message.sent_at,
+                app,
+            }),
+            false,
+        ),
+        Progress::RoundBegan => {
+            turn.writing = true;
             (None, true)
         }
-        Progress::ReplyWithdrawn { draft } => {
-            let draft_id = draft.to_string();
-
-            turn.drafts.retain(|open| open.draft_id != draft_id);
+        Progress::RoundEnded => {
+            turn.writing = false;
             (None, true)
         }
         Progress::ToolCallsRequested { round, tool_names } => (

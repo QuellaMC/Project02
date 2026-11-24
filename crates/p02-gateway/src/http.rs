@@ -23,7 +23,7 @@ use p02_core::SpeakerName;
 use p02_shared::DaemonToken;
 use p02_wire::{
     AnswerBody, AppSignInBody, AppWakeBody, ConfigChange, ConfigTarget, ConnectorBotsBody,
-    ErrorBody, GatewayMessage, OpenConversationBody, PairingRequestBody, Refusal,
+    ErrorBody, GatewayMessage, OpenConversationBody, PairingRequestBody, ReadBody, Refusal,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -153,6 +153,7 @@ pub(crate) fn router(app: App) -> Router {
         .route("/api/conversations/open", post(open))
         .route("/api/turns", post(turn))
         .route("/api/conversations/{id}/messages", get(history))
+        .route("/api/conversations/{id}/read", post(read_hers))
         .route("/api/confirmations", get(confirmations))
         .route("/api/confirmations/{id}", post(answer_confirmation))
         .route("/api/config", get(config_view).post(config_change))
@@ -426,6 +427,19 @@ async fn history(
     };
 
     answer(&app.0.daemon.history(&id, page).await)
+}
+
+async fn read_hers(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    match read::<ReadBody>("The read", body) {
+        Ok(ReadBody { message_id }) => {
+            answer(&app.0.daemon.read_hers(&id, message_id.as_str()).await)
+        }
+        Err(refusal) => refusal.into_response(),
+    }
 }
 
 async fn confirmations(State(app): State<App>) -> Response {

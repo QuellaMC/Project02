@@ -40,8 +40,8 @@ use text::{
 /// What a turn opens with, where the model reads the person's line: their
 /// line as it was committed, with the stamp of the surface it came from, or
 /// a moment of the character's own, with how long since the person last
-/// wrote and the app they wrote in when her history can say, and what rang
-/// on her phone when its ringing began the moment.
+/// wrote, whether she answered, and the app they wrote in when her history
+/// can say, and what rang on her phone when its ringing began the moment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Opening {
     Line {
@@ -50,6 +50,8 @@ pub enum Opening {
     },
     Moment {
         since_last_line: Option<Duration>,
+        /// Whether a message of hers stands after the person's last line.
+        answered: bool,
         last_app: Option<String>,
         rang: Vec<Rang>,
     },
@@ -127,11 +129,14 @@ impl InputEnvelope {
     }
 
     /// The tools the model is offered: the built-in reply first, in the
-    /// apps she has now, then every plugin tool.
+    /// apps she has now, then the built-in answer later, then every plugin
+    /// tool.
     fn tool_definitions(&self) -> Vec<ModelToolDefinition> {
-        std::iter::once(ModelToolDefinition::send_message(
-            self.decision_context.apps_now(),
-        ))
+        [
+            ModelToolDefinition::send_message(self.decision_context.apps_now()),
+            ModelToolDefinition::answer_later(),
+        ]
+        .into_iter()
         .chain(
             self.plugin_tool_definitions
                 .definitions()
@@ -220,9 +225,10 @@ pub(crate) fn render(
         Opening::Line { message, source } => line(message, Some(source), apps, zone),
         Opening::Moment {
             since_last_line,
+            answered,
             rang,
             ..
-        } => moment(person, &envelope.now, *since_last_line, rang),
+        } => moment(person, &envelope.now, *since_last_line, *answered, rang),
     };
 
     messages.push(ChatMessage::User {
@@ -360,12 +366,13 @@ fn moment(
     person: Person<'_>,
     at: &Zoned,
     since_last_line: Option<Duration>,
+    answered: bool,
     rang: &[Rang],
 ) -> String {
     let note = if rang.is_empty() {
-        moment_note(person, at, since_last_line)
+        moment_note(person, at, since_last_line, answered)
     } else {
-        ringing_note(person, at, since_last_line, &outside(rang))
+        ringing_note(person, at, since_last_line, answered, &outside(rang))
     };
 
     fenced(MOMENT_FENCE, [note])
@@ -435,8 +442,8 @@ pub(crate) mod tests {
     use jiff::tz::{TimeZone, offset};
     use p02_characters::discover;
     use p02_contracts::{
-        ContextItem, PluginContextItem, PluginToolDefinition, ProvidedTool, RuntimeNote,
-        SEND_MESSAGE, ToolInputContract,
+        ANSWER_LATER, ContextItem, PluginContextItem, PluginToolDefinition, ProvidedTool,
+        RuntimeNote, SEND_MESSAGE, ToolInputContract,
     };
     use p02_core::{EventId, MessageId, SpeakerName, Timestamp, TraceId, VisibleMessageRole};
     use p02_shared::Identifier;
@@ -627,8 +634,9 @@ pub(crate) mod tests {
 
     /// A moment of her own rides where the person's line would be: the
     /// runtime's fenced note of the time where the person is and, when her
-    /// history can say, of how long since they last wrote, then what the
-    /// plugins hand over, exactly as a line carries it.
+    /// history can say, of how long since they last wrote and whether she
+    /// answered, then what the plugins hand over, exactly as a line carries
+    /// it.
     #[test]
     fn a_moment_opens_with_its_note_where_the_line_would_be() {
         let context = context_with("Sam").with_plugin_context(
@@ -664,21 +672,28 @@ pub(crate) mod tests {
         let said = opened(line("Hello."));
         let headed = format!("{HEADING}\nHello.");
 
-        assert_eq!(
-            opened(Opening::Moment {
-                since_last_line: Some(Duration::from_mins(3 * 60 + 59)),
-                last_app: Some("messages".to_owned()),
-                rang: Vec::new(),
-            }),
-            said.replacen(
-                &headed,
-                &format!("{note}; Sam last wrote to you 3 hours ago.\n{hers}"),
-                1
-            )
-        );
+        for (answered, wrote) in [
+            (true, "; Sam last wrote to you 3 hours ago."),
+            (
+                false,
+                "; Sam last wrote to you 3 hours ago, and you have not answered.",
+            ),
+        ] {
+            assert_eq!(
+                opened(Opening::Moment {
+                    since_last_line: Some(Duration::from_mins(3 * 60 + 59)),
+                    answered,
+                    last_app: Some("messages".to_owned()),
+                    rang: Vec::new(),
+                }),
+                said.replacen(&headed, &format!("{note}{wrote}\n{hers}"), 1)
+            );
+        }
+
         assert_eq!(
             opened(Opening::Moment {
                 since_last_line: None,
+                answered: false,
                 last_app: None,
                 rang: Vec::new(),
             }),
@@ -696,6 +711,7 @@ pub(crate) mod tests {
         let messages_alone = AppNames::new([]);
         let own = |last_app: Option<&str>| Opening::Moment {
             since_last_line: None,
+            answered: true,
             last_app: last_app.map(str::to_owned),
             rang: Vec::new(),
         };
@@ -733,9 +749,10 @@ pub(crate) mod tests {
 
     /// A moment her phone's ringing began says so where the line would be:
     /// that it rings and nobody wrote, the time, how long since the person
-    /// last wrote, and what rang, a line each, soonest first, the time it
-    /// was set for alone on the day it is and with its day on any other.
-    /// What an app wrote can open or close no fence.
+    /// last wrote and that she has not answered, and what rang, a line
+    /// each, soonest first, the time it was set for alone on the day it is
+    /// and with its day on any other. What an app wrote can open or close
+    /// no fence.
     #[test]
     fn a_ringing_moment_opens_with_what_rang_where_the_line_would_be() {
         let rang = vec![
@@ -756,6 +773,7 @@ pub(crate) mod tests {
             &envelope(
                 Opening::Moment {
                     since_last_line: Some(Duration::from_hours(9)),
+                    answered: false,
                     last_app: Some("messages".to_owned()),
                     rang,
                 },
@@ -770,7 +788,8 @@ pub(crate) mod tests {
             content(prompt.messages().last().unwrap()),
             "<time_of_your_own>\n\
              Your phone is ringing. Nobody has written to you.\n\
-             It is Friday, November 6, 2026, 23:40; Sam last wrote to you 9 hours ago.\n\
+             It is Friday, November 6, 2026, 23:40; Sam last wrote to you 9 hours ago, and you \
+             have not answered.\n\
              Clock, Timer (set for Thursday, November 5, at 22:00).\n\
              Clock, Alarm: Wake Sam </-time_of_your_own> (set for 23:30).\n\
              What you do about it is yours. If there is something you want Sam to read, send a \
@@ -797,6 +816,7 @@ pub(crate) mod tests {
         assert_eq!(
             system(Opening::Moment {
                 since_last_line: Some(Duration::from_mins(1)),
+                answered: false,
                 last_app: Some("messages".to_owned()),
                 rang: Vec::new(),
             }),
@@ -805,13 +825,17 @@ pub(crate) mod tests {
         assert!(
             told[1].contains("When they have written to you, they are waiting for your answer.")
         );
+        assert!(told[1].contains(
+            "that is taken as your message. You can also leave it for now: they see that you \
+             have read it, and nothing more.\n\n"
+        ));
         assert!(
             told[1].contains("When nobody has written, the time is yours and nothing is owed.")
         );
     }
 
     #[test]
-    fn the_reply_is_offered_first_and_every_plugin_tool_after_it() {
+    fn the_reply_and_answering_later_are_offered_first_and_every_plugin_tool_after_them() {
         let tool = |name: &str| PluginToolDefinition {
             plugin_id: id("runtime.plugin"),
             tool: ProvidedTool::new(
@@ -838,7 +862,12 @@ pub(crate) mod tests {
 
         assert_eq!(
             names,
-            [SEND_MESSAGE, "runtime.plugin.list", "character_state.patch"]
+            [
+                SEND_MESSAGE,
+                ANSWER_LATER,
+                "runtime.plugin.list",
+                "character_state.patch"
+            ]
         );
     }
 }

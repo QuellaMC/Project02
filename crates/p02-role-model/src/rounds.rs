@@ -1,10 +1,11 @@
 //! A turn's model rounds: one after another until a round calls no plugin
-//! tool or the rounds run out, each made with what the character runs on
-//! when it starts. Every round is judged once, by what began the turn, and
-//! handed to the turn as soon as it is judged, before anything it decided
-//! happens.
-
-mod drafts;
+//! tool or leaves the message for later, or the rounds run out, each made
+//! with what the character runs on when it starts. Every round is judged
+//! once, by what began the turn and whether she has sent a message in it,
+//! and handed to the turn as soon as it is judged, before anything it
+//! decided happens. The turn hears a round begin as its request goes out,
+//! and end once its answer is judged and what it said is committed, before
+//! the calls it made run.
 
 use std::num::NonZeroU32;
 
@@ -14,15 +15,13 @@ use p02_characters::Persona;
 use p02_contracts::{
     CharacterDecision, ConversationToolCall, ConversationTurn, DecisionContext, DecisionRejection,
     DecisionRejectionReason, DecisionResult, Invocation, ModelToolCall, PluginToolDefinitions,
-    ProviderAnswer, ReplyDraft, RoleModelAdapter, ToolCallId, ToolCallResult, ToolRound,
+    ProviderAnswer, RoleModelAdapter, ToolCallId, ToolCallResult, ToolRound,
 };
 use p02_core::{EventIdentity, VisibleMessage, VisibleText};
 use p02_shared::Identifier;
 use serde_json::{Map, Value};
 
 use crate::prompt::{InputEnvelope, Opening, render, unusable_reply_note};
-use drafts::Drafts;
-pub use drafts::{DraftEvent, DraftId};
 
 /// How many rounds of tool calls one turn may spend, a refused round
 /// counted like any other. The round after the last is the model's to
@@ -59,9 +58,8 @@ pub struct ModelRound {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Reply<'a> {
     pub text: &'a VisibleText,
-    /// The draft the reply replaces, whether or not anything of it was
-    /// spoken, which names the round it was said in.
-    pub draft: DraftId,
+    /// The round it was said in.
+    pub round: NonZeroU32,
     /// The id of the app it goes in.
     pub app: &'a str,
 }
@@ -139,16 +137,20 @@ pub trait TurnSink: Send + Sync {
         calls: Vec<RoutedToolCall>,
     ) -> Result<Vec<ConversationToolCall>, Self::Error>;
 
-    /// Hears a draft, which is never awaited: the model writes on
-    /// meanwhile.
-    fn draft(&self, event: DraftEvent);
+    /// Hears that a round began, as its request to the model goes out.
+    fn round_began(&self);
+
+    /// Hears that the round ended: its answer judged and what it said
+    /// committed, before anything else it decided goes on.
+    fn round_ended(&self);
 }
 
 /// How a turn's rounds ended.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TurnOutcome {
-    /// A round called no plugin tool: what it said, if it said anything,
-    /// was committed.
+    /// A round called no plugin tool, or left the message for later and
+    /// its calls were done: what it said, if it said anything, was
+    /// committed.
     Completed {
         round: NonZeroU32,
         decision: CharacterDecision,
@@ -158,6 +160,23 @@ pub enum TurnOutcome {
     Refused {
         round: NonZeroU32,
         rejection: DecisionRejection,
+    },
+}
+
+/// What a round comes to once its answer is judged and what it said is
+/// committed: the turn's end, a refusal the model is told of in the next
+/// round, or the calls it made, to run before the next round, or before the
+/// turn's end when it left the message for later.
+enum Said {
+    Ended(TurnOutcome),
+    Refused,
+    Calls {
+        calls: Vec<RoutedToolCall>,
+        text: Option<String>,
+        interim_replies: Vec<VisibleMessage>,
+        /// How the turn ends once the calls are done, when the round left
+        /// the message for later.
+        then: Option<TurnOutcome>,
     },
 }
 
@@ -210,45 +229,70 @@ impl<'a> Rounds<'a> {
 
     /// Runs the next round, its request made with `adapter`: how the turn
     /// ended, once a round ends it, and none while another round follows.
+    /// The sink hears the round begin as its request goes out, and end once
+    /// its answer is judged and what it said is committed, however it ends,
+    /// before the calls it made run.
     ///
     /// # Errors
     ///
-    /// The sink's error, as soon as one of its calls fails: what the round
-    /// had drafted and not committed is withdrawn first.
+    /// The sink's error, as soon as one of its calls fails.
     pub async fn run<S: TurnSink>(
         &mut self,
         adapter: &dyn RoleModelAdapter,
         sink: &S,
     ) -> Result<Option<TurnOutcome>, S::Error> {
-        // Every draft a round opens ends with it, whichever way it ends.
-        let drafts = Drafts::new(self.next, sink);
-        let ended = self.round(adapter, sink, &drafts).await;
+        let round = self.next;
 
-        drafts.close();
-        self.next = self.next.saturating_add(1);
-        ended
+        self.next = round.saturating_add(1);
+        sink.round_began();
+
+        let said = self.said(adapter, sink, round).await;
+
+        sink.round_ended();
+
+        let (calls, text, interim_replies, then) = match said? {
+            Said::Ended(outcome) => return Ok(Some(outcome)),
+            Said::Refused => return Ok(None),
+            Said::Calls {
+                calls,
+                text,
+                interim_replies,
+                then,
+            } => (calls, text, interim_replies, then),
+        };
+        let tool_calls = sink.run_tool_calls(round, calls).await?;
+
+        if then.is_some() {
+            return Ok(then);
+        }
+
+        self.spent += 1;
+        self.envelope.tool_rounds.push(ToolRound {
+            round,
+            text,
+            interim_replies,
+            tool_calls,
+        });
+        Ok(None)
     }
 
-    async fn round<S: TurnSink>(
+    /// The round's request, its answer judged and recorded, and what it
+    /// said committed: what the round comes to.
+    async fn said<S: TurnSink>(
         &mut self,
         adapter: &dyn RoleModelAdapter,
         sink: &S,
-        drafts: &Drafts<'_, S>,
-    ) -> Result<Option<TurnOutcome>, S::Error> {
-        let round = drafts.round();
+        round: NonZeroU32,
+    ) -> Result<Said, S::Error> {
         let note = self.refusal_note.take();
         let prompt = render(&self.envelope, self.history, self.persona, note.as_deref());
-        let listener = |draft: ReplyDraft| match draft {
-            ReplyDraft::Delta(delta) => drafts.speak(delta),
-            ReplyDraft::LetGo => drafts.let_go(),
-        };
-        let invocation = Invocation::new(prompt.messages(), prompt.tools())
-            .with_history(self.history)
-            .with_reply_listener(&listener);
+        let invocation =
+            Invocation::new(prompt.messages(), prompt.tools()).with_history(self.history);
         let answer = adapter.invoke(&invocation).await;
         let result = DecisionResult::judge(
             &answer,
             self.envelope.opening.occasion(),
+            self.sent(),
             self.envelope.decision_context.apps_now(),
         );
         let recorded = ModelRound {
@@ -272,28 +316,32 @@ impl<'a> Rounds<'a> {
 
                 self.refusal_note = Some(unusable_reply_note(details));
                 self.spent += 1;
-                return Ok(None);
+                return Ok(Said::Refused);
             }
             DecisionResult::Rejected { rejection } => {
-                return Ok(Some(TurnOutcome::Refused { round, rejection }));
+                return Ok(Said::Ended(TurnOutcome::Refused { round, rejection }));
             }
         };
+        let later = decision
+            .tool_calls()
+            .iter()
+            .any(|call| matches!(call, ModelToolCall::AnswerLater));
         let calls: Vec<(&Identifier, &Map<String, Value>)> = decision
             .tool_calls()
             .iter()
             .filter_map(|call| match call {
                 ModelToolCall::Plugin { name, input } => Some((name, input)),
-                ModelToolCall::VisibleReply { .. } => None,
+                ModelToolCall::VisibleReply { .. } | ModelToolCall::AnswerLater => None,
             })
             .collect();
 
         if calls.is_empty() {
-            commit_replies(sink, drafts, &decision, &self.envelope).await?;
-            return Ok(Some(TurnOutcome::Completed { round, decision }));
+            commit_replies(sink, round, &decision, &self.envelope).await?;
+            return Ok(Said::Ended(TurnOutcome::Completed { round, decision }));
         }
 
         if self.spent >= MAX_TOOL_ROUNDS {
-            return Ok(Some(TurnOutcome::Refused {
+            return Ok(Said::Ended(TurnOutcome::Refused {
                 round,
                 rejection: DecisionRejection {
                     reason: DecisionRejectionReason::ToolRoundsExhausted,
@@ -304,22 +352,28 @@ impl<'a> Rounds<'a> {
             }));
         }
 
-        let interim_replies = commit_replies(sink, drafts, &decision, &self.envelope).await?;
-        let routed = calls
+        let interim_replies = commit_replies(sink, round, &decision, &self.envelope).await?;
+        let calls = calls
             .into_iter()
             .enumerate()
             .map(|(at, (name, input))| self.route(round, at + 1, name, input))
             .collect();
-        let tool_calls = sink.run_tool_calls(round, routed).await?;
 
-        self.spent += 1;
-        self.envelope.tool_rounds.push(ToolRound {
-            round,
+        Ok(Said::Calls {
+            calls,
             text: decision.text().map(str::to_owned),
             interim_replies,
-            tool_calls,
-        });
-        Ok(None)
+            then: later.then(|| TurnOutcome::Completed { round, decision }),
+        })
+    }
+
+    /// Whether she has sent a message in the turn: every round that did
+    /// not end it keeps what she said in it.
+    fn sent(&self) -> bool {
+        self.envelope
+            .tool_rounds
+            .iter()
+            .any(|round| !round.interim_replies.is_empty())
     }
 
     fn route(
@@ -361,37 +415,27 @@ fn undeclared(tool: &Identifier) -> Identifier {
         .unwrap_or_else(|_| Identifier::new("undeclared").expect("undeclared is an identifier"))
 }
 
-/// Commits the round's replies in order, each naming its draft and going in
-/// the app she named, or else the one `envelope`'s opening gives a message
-/// that names none, then withdraws what the round drafted and did not say,
-/// before anything else the round decided goes on.
+/// Commits round `round`'s replies in order, each going in the app she
+/// named, or else the one `envelope`'s opening gives a message that names
+/// none, before anything else the round decided goes on.
 async fn commit_replies<S: TurnSink>(
     sink: &S,
-    drafts: &Drafts<'_, S>,
+    round: NonZeroU32,
     decision: &CharacterDecision,
     envelope: &InputEnvelope,
 ) -> Result<Vec<VisibleMessage>, S::Error> {
     let replies = decision.tool_calls().iter().filter_map(|call| match call {
         ModelToolCall::VisibleReply { text, app } => Some((text, app.as_deref())),
-        ModelToolCall::Plugin { .. } => None,
+        ModelToolCall::AnswerLater | ModelToolCall::Plugin { .. } => None,
     });
     let mut committed = Vec::new();
 
-    for (reply, (text, named)) in replies.enumerate() {
+    for (text, named) in replies {
         let app =
             named.unwrap_or_else(|| envelope.opening.app(envelope.decision_context.apps_now()));
 
-        committed.push(
-            sink.commit_reply(Reply {
-                text,
-                draft: drafts.id(reply),
-                app,
-            })
-            .await?,
-        );
-        drafts.settle(reply);
+        committed.push(sink.commit_reply(Reply { text, round, app }).await?);
     }
 
-    drafts.close();
     Ok(committed)
 }

@@ -62,6 +62,8 @@
   --ask-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 2px 12px rgba(0, 0, 0, 0.08);
   --edge-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06);
   --green-ink: #248a3d;
+  /* Small red text, as the design draws a line that did not reach her. */
+  --red-ink: #d70015;
   /* Telegram's own colour, the same in light and dark. */
   --telegram: #0f7fb0;
   /*
@@ -140,6 +142,7 @@
       0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 2px 14px rgba(0, 0, 0, 0.5);
     --edge-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.14);
     --green-ink: #30d158;
+    --red-ink: #ff6961;
   }
 }
 
@@ -842,21 +845,65 @@ code {
   margin-top: -6px;
 }
 
-.bubble-draft {
-  outline: 1px dashed var(--chevron);
+/* A line of the person's on its way, faint until the daemon has it. */
+.bubble-sending {
+  opacity: 0.55;
 }
 
-.bubble-draft .bubble-text::after {
-  content: '▌';
-  opacity: 0.6;
+/* A line that did not reach her: pressed, it goes back to the message box. */
+button.bubble {
+  border: none;
+  text-align: start;
 }
 
-.bubble-pending {
-  opacity: 0.6;
+/*
+ * Under the holder's newest message, how far it got — the person's in
+ * their chat, hers on her phone: at the end of the line, 3px under its
+ * bubble where the thread's lines are 8px apart.
+ */
+.bubble-status {
+  align-self: flex-end;
+  margin: -5px 4px 0;
+  font-size: 11.5px;
+  color: var(--secondary);
 }
 
-/* What she is doing before her reply begins: writing it, or using her phone. */
+.bubble-status b {
+  font-weight: 600;
+}
+
+.bubble-status-not-delivered {
+  color: var(--red-ink);
+}
+
+/* Her typing where her next message will be: her bubble's look, three dots. */
 .typing {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 13px 14px;
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+
+.typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--secondary);
+  opacity: 0.45;
+}
+
+/* The middle one stronger, as the design draws it. */
+.typing-dot:nth-child(2) {
+  opacity: 0.75;
+}
+
+/* She is using her phone, where her next message will be. */
+.phoning {
   margin: 0;
   display: flex;
   align-items: center;
@@ -3077,6 +3124,11 @@ body:has(> #root > .phone-window) {
 .phone-thread .bubble {
   max-width: 78%;
   padding: 8px 13px;
+}
+
+/* Under her newest message, whether the person read it: a size smaller, as the design's phone has it. */
+.phone-thread .bubble-status {
+  font-size: 11px;
 }
 
 /* Why her conversation cannot be shown, where her messages would be. */

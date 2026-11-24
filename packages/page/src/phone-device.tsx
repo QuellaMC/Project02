@@ -40,7 +40,7 @@ import {
 import type {PhoneSession} from './phone-session.ts';
 import {Icon} from './settings-controls.tsx';
 import {Bubble} from './thread.tsx';
-import {labelOf, laidOut, onHerPhone} from './thread-layout.ts';
+import {hourAndMinute, labelOf, laidOut, onHerPhone} from './thread-layout.ts';
 import {useFollowing} from './thread-scroll.ts';
 
 type View = Extract<OnScreen, {kind: 'view'}>;
@@ -85,7 +85,9 @@ export function PhoneDevice({
             : undefined
         }
       >
-        <div className="phone-status">{clockParts(clockTime(now)).digits}</div>
+        <div className="phone-status">
+          {clockParts(hourAndMinute().format(now)).digits}
+        </div>
         <Drawn drawn={drawn} now={now} session={session} />
         {drawn.kind === 'blank' || drawn.kind === 'ringing' ? (
           <span className="phone-home-bar" aria-hidden="true">
@@ -225,9 +227,9 @@ function AppView({
  * screen and the person at its head, with the app's name under theirs but
  * in Messages; what went through it, laid out as the chat lays out the
  * conversation and mirrored, since it is her phone: hers at the end of the
- * line in the app's colour, the person's at its start on a card; and a
- * message box, which is only drawn. It follows its newest message as the
- * chat does.
+ * line in the app's colour, the person's at its start on a card, and under
+ * her newest message whether the person read it; and a message box, which
+ * is only drawn. It follows its newest message as the chat does.
  */
 function ThreadView({
   thread,
@@ -708,7 +710,7 @@ function Ringing({ring}: {readonly ring: PhoneRing}) {
       </span>
       <span className="phone-ringing-title">{ring.title}</span>
       <span className="phone-ringing-time">
-        {clockParts(clockTime(Date.parse(ring.at))).digits}
+        {clockParts(hourAndMinute().format(Date.parse(ring.at))).digits}
       </span>
       {ring.body === undefined ? null : (
         <span className="phone-ringing-body">{ring.body}</span>
@@ -716,14 +718,6 @@ function Ringing({ring}: {readonly ring: PhoneRing}) {
       <span className="phone-ringing-state">Ringing</span>
     </div>
   );
-}
-
-/** A moment as the person's own clock reads it, in their language and zone. */
-function clockTime(at: number): string {
-  return new Date(at).toLocaleTimeString([], {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
 
 /** The moment now, again at every frame the browser draws while a reading moves on screen. */

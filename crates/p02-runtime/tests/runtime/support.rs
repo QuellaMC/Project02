@@ -12,9 +12,8 @@ use async_trait::async_trait;
 use p02_characters::discover;
 use p02_contracts::{
     BeforeRoleModelCallOutput, ChatMessage, HookContext, Invocation, Manifest, ModelOutput,
-    PluginError, ProvidedTool, ProviderAnswer, ProviderFailure, ReplyDelta, ReplyDraft,
-    RoleModelAdapter, RuntimePlugin, TextCompletionRequest, ToolCall, ToolCallOutcome,
-    ToolInputContract, WrittenCall,
+    PluginError, ProvidedTool, ProviderAnswer, ProviderFailure, RoleModelAdapter, RuntimePlugin,
+    TextCompletionRequest, ToolCall, ToolCallOutcome, ToolInputContract, WrittenCall,
 };
 use p02_core::{AppNames, ClientStamp, ConversationId, SpeakerName, Timestamp};
 use p02_phone::{Account, Chats};
@@ -308,17 +307,14 @@ impl Chat {
     }
 }
 
-/// One round of a scripted model: what it says of the replies it drafts,
-/// then its answer, if it ever gives one.
+/// One round of a scripted model: its answer, if it ever gives one.
 pub(crate) struct Round {
-    drafts: Vec<ReplyDraft>,
     answer: Option<ProviderAnswer>,
 }
 
 impl Round {
     pub(crate) fn says(output: ModelOutput) -> Self {
         Self {
-            drafts: Vec::new(),
             answer: Some(ProviderAnswer::Answered {
                 output,
                 finish_reason: Some("stop".to_owned()),
@@ -330,7 +326,6 @@ impl Round {
     /// A provider that gave nothing usable, as `details` says.
     pub(crate) fn fails(details: &str) -> Self {
         Self {
-            drafts: Vec::new(),
             answer: Some(ProviderAnswer::Failed(ProviderFailure {
                 code: "http_error".to_owned(),
                 message: details.to_owned(),
@@ -341,28 +336,7 @@ impl Round {
 
     /// A provider that never answers.
     pub(crate) fn hangs() -> Self {
-        Self {
-            drafts: Vec::new(),
-            answer: None,
-        }
-    }
-
-    /// Drafts its reply `reply`, counted from zero, in `pieces` before it
-    /// answers.
-    pub(crate) fn drafting(mut self, reply: usize, pieces: &[&str]) -> Self {
-        self.drafts.extend(pieces.iter().map(|piece| {
-            ReplyDraft::Delta(ReplyDelta {
-                reply,
-                text: (*piece).to_owned(),
-            })
-        }));
-        self
-    }
-
-    /// Lets go the replies it drafted so far, before it drafts on.
-    pub(crate) fn letting_go(mut self) -> Self {
-        self.drafts.push(ReplyDraft::LetGo);
-        self
+        Self { answer: None }
     }
 }
 
@@ -400,14 +374,6 @@ impl RoleModelAdapter for Model {
         let Some(round) = self.rounds.lock().unwrap().pop_front() else {
             return Round::fails("No round was scripted.").answer.unwrap();
         };
-
-        for draft in round.drafts {
-            match draft {
-                ReplyDraft::Delta(delta) => invocation.hear(delta),
-                ReplyDraft::LetGo => invocation.let_go(),
-            }
-        }
-
         let Some(answer) = round.answer else {
             return std::future::pending().await;
         };
@@ -437,11 +403,9 @@ pub(crate) fn told(progress: &[Progress]) -> Vec<String> {
         .iter()
         .map(|progress| match progress {
             Progress::UserMessage { message, .. } => format!("user_message {}", message.text),
-            Progress::VisibleReply { message, draft, .. } => {
-                format!("visible_reply {draft} {}", message.text)
-            }
-            Progress::ReplyDelta { draft, text } => format!("reply_delta {draft} {text}"),
-            Progress::ReplyWithdrawn { draft } => format!("reply_withdrawn {draft}"),
+            Progress::VisibleReply { message, .. } => format!("visible_reply {}", message.text),
+            Progress::RoundBegan => "round_began".to_owned(),
+            Progress::RoundEnded => "round_ended".to_owned(),
             Progress::ToolCallsRequested { round, tool_names } => {
                 let names: Vec<&str> = tool_names.iter().map(Identifier::as_str).collect();
 

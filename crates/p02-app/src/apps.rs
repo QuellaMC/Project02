@@ -1,25 +1,28 @@
 //! Her apps in the person's hands, whether she runs or not: the App Store's
 //! catalog as they browse it for her, an app given to her from it or from
-//! a file, an app removed, their say on whether one may wake her, and how
-//! one that asks a model is signed in. Each is their own act, which asks
-//! nobody, made on her phone under a lease of its store, and no request is
-//! made under a lease. Each that changed her phone says so on the stream,
-//! and has her actor, while she runs, read its rings again, as after a
-//! turn of hers.
+//! a file, an app removed, their say on whether one may wake her, how one
+//! that asks a model is signed in, and the message of hers they read,
+//! which her Messages keeps. Each is their own act, which asks nobody,
+//! made on her phone under a lease of its store, and no request is made
+//! under a lease. Each that changed her phone says so on the stream, and
+//! has her actor, while she runs, read its rings again, as after a turn of
+//! hers.
 
 use std::sync::Arc;
 
-use p02_phone::{CatalogApp, CatalogError, Installed, OnPhone, PhoneError, Source, it_may};
+use p02_core::Timestamp;
+use p02_phone::{CatalogApp, CatalogError, Installed, OnPhone, PhoneError, Read, Source, it_may};
 use p02_plugins::{Installable, NotInstallable, installable};
-use p02_shared::{Identifier, sentence};
+use p02_shared::{Identifier, error_sentence, sentence};
 use p02_wire::{
     AppInstallOutcome, AppInstallRefusal, AppPreviewOutcome, AppRemoveOutcome, AppRemoveRefusal,
     AppSignInOutcome, AppSignInRefusal, AppWakeOutcome, AppWakeRefusal, Event, PhoneRefusal,
-    RoleModelProvider, StoreApp, StoreOutcome,
+    ReadOutcome, ReadRefusal, RoleModelProvider, StoreApp, StoreOutcome,
 };
 
 use crate::connections::Linked;
 use crate::daemon::{Daemon, blocking};
+use crate::history::{self, Hers, no_conversation};
 use crate::phone::{HerPhone, Unread, drawn, unread};
 
 /// What is said of a file the person picked that is not text.
@@ -246,6 +249,53 @@ impl Daemon {
         .await
     }
 
+    /// Keeps with the phone of the character whose conversation
+    /// `conversation` is that the person read `message`, a message of hers
+    /// in it, now: her Messages keeps the newest message of hers they read,
+    /// and a read of an older one changes nothing.
+    pub async fn read_hers(&self, conversation: &str, message: &str) -> ReadOutcome {
+        let home = self.world().home.clone();
+        let (named, id) = (conversation.to_owned(), message.to_owned());
+        let refused = |reason, message| ReadOutcome::Refused { reason, message };
+        let (character, message) = match blocking(move || history::hers(&home, &named, &id)).await {
+            Ok(Hers::Found { character, message }) => (character, message),
+            Ok(Hers::NoConversation) => {
+                return refused(
+                    ReadRefusal::UnknownConversation,
+                    no_conversation(conversation),
+                );
+            }
+            Ok(Hers::NoMessage) => {
+                return refused(
+                    ReadRefusal::UnknownMessage,
+                    format!(
+                        "There is no message \"{message}\" of hers in conversation \
+                             \"{conversation}\"."
+                    ),
+                );
+            }
+            Err(error) => {
+                return ReadOutcome::Failed {
+                    message: error_sentence(&error),
+                };
+            }
+        };
+
+        self.change(character.as_str(), move |her| {
+            her.with(|_, files| {
+                Read {
+                    message,
+                    at: Timestamp::now(),
+                }
+                .keep(files)
+                .map_err(|error| Unread::Failed(unread(&error)))?;
+
+                Ok(ReadOutcome::Ok)
+            })
+        })
+        .await
+    }
+
     /// Installs on her phone the app `text` makes, which came from
     /// `source`, as her phone installs any.
     async fn give(&self, her: HerPhone, text: String, source: Source) -> AppInstallOutcome {
@@ -351,6 +401,12 @@ impl Changed for AppWakeOutcome {
 }
 
 impl Changed for AppSignInOutcome {
+    fn changed(&self) -> bool {
+        matches!(self, Self::Ok)
+    }
+}
+
+impl Changed for ReadOutcome {
     fn changed(&self) -> bool {
         matches!(self, Self::Ok)
     }
@@ -510,6 +566,20 @@ impl From<Unread> for AppSignInOutcome {
             },
             Unread::NoPhone(message) => Self::Refused {
                 reason: AppSignInRefusal::NoPhone,
+                message,
+            },
+            Unread::Failed(message) => Self::Failed { message },
+        }
+    }
+}
+
+impl From<Unread> for ReadOutcome {
+    fn from(unread: Unread) -> Self {
+        match unread {
+            // A character the daemon no longer knows, whose conversation
+            // outlived her, has no phone to keep it either.
+            Unread::UnknownCharacter(message) | Unread::NoPhone(message) => Self::Refused {
+                reason: ReadRefusal::NoPhone,
                 message,
             },
             Unread::Failed(message) => Self::Failed { message },

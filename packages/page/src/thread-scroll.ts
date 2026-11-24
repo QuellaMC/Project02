@@ -9,7 +9,8 @@
  * end at once. Only a scroll of the person's stops it following, by leaving
  * the end, where one the page makes itself, or the browser makes to keep
  * its place, says nothing; whatever scroll comes back to the end starts it
- * again. Browser-only: the browser suite is its cover.
+ * again. Whoever asks hears whether it follows its end, which is whether
+ * that end is in view. Browser-only: the browser suite is its cover.
  */
 import {useLayoutEffect, useRef, type RefObject} from 'react';
 
@@ -53,13 +54,20 @@ type Ease = {
 
 /**
  * Follows the chat's newest line, `page` naming the pages of its history
- * read so far: when it changes, a page landed.
+ * read so far: when it changes, a page landed. `onEndInView` hears whether
+ * the chat follows its end, as it starts and each time that changes.
  */
-export function useFollowing(page: string): Following {
+export function useFollowing(
+  page: string,
+  onEndInView?: (inView: boolean) => void,
+): Following {
   const scroller = useRef<HTMLDivElement>(null);
   const lines = useRef<HTMLDivElement>(null);
   const slack = useRef<HTMLDivElement>(null);
   const follower = useRef<Follower>(undefined);
+  const heard = useRef(onEndInView);
+
+  heard.current = onEndInView;
 
   useLayoutEffect(() => {
     if (
@@ -70,7 +78,12 @@ export function useFollowing(page: string): Following {
       return undefined;
     }
 
-    const made = createFollower(scroller.current, lines.current, slack.current);
+    const made = createFollower(
+      scroller.current,
+      lines.current,
+      slack.current,
+      inView => heard.current?.(inView),
+    );
 
     follower.current = made;
 
@@ -91,6 +104,7 @@ function createFollower(
   scroller: HTMLElement,
   lines: HTMLElement,
   slack: HTMLElement,
+  endInView: (inView: boolean) => void,
 ): Follower {
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const easeFrom = closingEase();
@@ -168,11 +182,17 @@ function createFollower(
       return;
     }
 
+    const followed = following;
+
     if (scroller.scrollHeight - top - scroller.clientHeight <= nearEnd) {
       following = true;
     } else if (pressing || performance.now() - theirs <= theirsFor) {
       following = false;
       settle();
+    }
+
+    if (following !== followed) {
+      endInView(following);
     }
   };
   const touched = (): void => {
@@ -214,6 +234,7 @@ function createFollower(
   resized.observe(scroller);
   regrown.observe(lines);
   pin();
+  endInView(following);
 
   return {
     rendered(page) {

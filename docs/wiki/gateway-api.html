@@ -90,7 +90,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 17,
+  "protocolVersion": 18,
   "token": "…",
   "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -210,8 +210,9 @@
               the daemon, one before the tail — opens with a
               <code>ready</code> frame that carries the daemon's snapshot:
               health, the confirmations and pairing requests still waiting, and
-              the turns running with their drafts so far, taken in one breath
-              with the stream's registration, so every later frame moves on from
+              the turns running, each saying whether she is writing, taken in
+              one breath with the stream's registration, so every later frame
+              moves on from
               exactly that state. A client installs the snapshot and reads on;
               what it wants of a conversation's history it reads as one page,
               deduplicated by message id. The log on disk stays the truth.
@@ -414,7 +415,8 @@
               → <code>PhoneOutcome</code>: <code>ok</code> with her
               <code>apps</code>, <code>front</code> when she has an app in
               front rather than her home screen, <code>did</code> once she
-              did anything on it, and <code>ringing</code>; or
+              did anything on it, <code>read</code> once the person read a
+              message of hers, and <code>ringing</code>; or
               <code>refused</code> (<code>unknown_character</code>,
               <code>no_phone</code>, when her settings switch it off), or
               <code>failed</code> with why it could not be read. Read from her
@@ -575,8 +577,22 @@
               (default 100); <code>before</code> is the opaque cursor from a
               previous page. Every message carries <code>sentAt</code>, when
               it was sent, and the <code>app</code> it is in, and each of the
-              person's its stamps; a message of hers an earlier build kept is
-              in the app of the person's line before it.
+              person's its stamps and <code>readAt</code>, when she read it:
+              the moment her turn took it. A message of hers an earlier build
+              kept is in the app of the person's line before it.
+            </td>
+          </tr>
+          <tr>
+            <td>read</td>
+            <td><code>POST /api/conversations/:id/read</code></td>
+            <td>
+              <code>{messageId}</code> → <code>ReadOutcome</code>:
+              <code>ok</code>, her phone keeping that the person read that
+              message of hers, now, unless it keeps a later one;
+              <code>refused</code> (<code>unknown_conversation</code>,
+              <code>unknown_message</code> for an id that is no message of
+              hers in it, <code>no_phone</code>); or <code>failed</code>.
+              Then <code>phone_changed</code>. Described below.
             </td>
           </tr>
           <tr>
@@ -788,16 +804,21 @@ Content-Type: application/json
       </p>
 
       <p>
+        She may also read a line and leave it for later: its turn then
+        ends <code>completed</code>, with no message of hers.
+      </p>
+
+      <p>
         A character also has turns of her own, while she is ready: her
         heartbeat gives her a moment every so often while the person is
         quiet, as her own settings say, and a ring on her phone that comes
         due, an alarm or a timer she set, gives her one that tells her what
         rang. Such a turn begins from no line, so it carries neither stamp:
-        <code>turn_running</code> says it as it begins, with no drafts, then
+        <code>turn_running</code> says it as it begins, not writing, then
         as it changes, and its <code>turn_completed</code> ends it. Most
-        moments end with nothing on the stream between the two; a message
-        she sends is a <code>visible_reply</code> of that turn. A
-        confirmation raised in one has no <code>turn</code>.
+        moments end with nothing on the stream between the two but her
+        writing; a message she sends is a <code>visible_reply</code> of that
+        turn. A confirmation raised in one has no <code>turn</code>.
       </p>
 
       <h2>The event stream</h2>
@@ -818,7 +839,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":17,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":18,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -826,25 +847,21 @@ data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","
 
 id: 5f1c9a02b7e4d310-63
 event: turn_running
-data: {"kind":"turn_running","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","drafts":[]}
+data: {"kind":"turn_running","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","writing":false}
 
 id: 5f1c9a02b7e4d310-64
 event: turn_running
-data: {"kind":"turn_running",…,"drafts":[{"draftId":"1.0","text":"I remember "}]}
+data: {"kind":"turn_running",…,"writing":true}
 
 id: 5f1c9a02b7e4d310-65
-event: turn_running
-data: {"kind":"turn_running",…,"drafts":[{"draftId":"1.0","text":"I remember you said "}]}
+event: turn_progress
+data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"visible_reply","messageId":"conv_….1:message-2",…,"app":"messages"}}
 
 id: 5f1c9a02b7e4d310-66
-event: turn_progress
-data: {"kind":"turn_progress","characterId":"mira","conversationId":"conv_…","progress":{"kind":"visible_reply","messageId":"conv_….1:message-2",…,"draftId":"1.0"}}
+event: turn_running
+data: {"kind":"turn_running",…,"writing":false}
 
 id: 5f1c9a02b7e4d310-67
-event: turn_running
-data: {"kind":"turn_running",…,"drafts":[]}
-
-id: 5f1c9a02b7e4d310-68
 event: turn_completed
 data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…","source":"web","clientMessageId":"8b1f…","status":"completed","committed":true}</code></pre>
 
@@ -857,11 +874,11 @@ data: {"kind":"turn_completed","characterId":"mira","conversationId":"conv_…",
 data: {}
 
 id: 5f1c9a02b7e4d310-65
-event: turn_running
-data: {"kind":"turn_running",…,"drafts":[{"draftId":"1.0","text":"I remember you said "}]}
+event: turn_progress
+data: {"kind":"turn_progress",…,"progress":{"kind":"visible_reply",…}}
 
 id: 5f1c9a02b7e4d310-66
-event: turn_progress
+event: turn_running
 data: {…}</code></pre>
 
       <table>
@@ -883,8 +900,8 @@ data: {…}</code></pre>
               waiting, and <code>turns</code> — each turn in progress, named by
               its <code>conversationId</code> and, when a line began it, the
               line's <code>source</code> and <code>clientMessageId</code>, with
-              its character and its open drafts' text so far. A client installs
-              it on every one it sees.
+              its character and whether she is writing. A client installs it on
+              every one it sees.
             </td>
           </tr>
           <tr>
@@ -899,13 +916,13 @@ data: {…}</code></pre>
             <td><code>turn_progress</code></td>
             <td>
               A turn's progress: both committed roles —
-              <code>user_message</code> (with <code>sentAt</code>, its
-              <code>app</code>, <code>source</code> and
-              <code>clientMessageId</code>) and <code>visible_reply</code>
-              (with <code>sentAt</code> and the <code>app</code> it went in),
-              which names the <code>draftId</code> it replaces — and its
-              rounds'
-              tool calls: <code>tool_calls_requested</code> with the
+              <code>user_message</code> (with <code>sentAt</code>,
+              <code>readAt</code> as history has it, its <code>app</code>,
+              <code>source</code> and <code>clientMessageId</code>) and
+              <code>visible_reply</code>
+              (with <code>sentAt</code> and the <code>app</code> it went in) —
+              and its rounds' tool calls: <code>tool_calls_requested</code> with
+              the
               <code>toolNames</code> a round called, then a
               <code>tool_call_completed</code> for each call as it came back,
               <code>accepted</code> or <code>rejected</code>, with its
@@ -922,9 +939,9 @@ data: {…}</code></pre>
               completion: its <code>conversationId</code>, the
               <code>source</code> and <code>clientMessageId</code> of the line
               that began it, both absent for a turn of her own, its character,
-              and her <code>drafts</code> so far, each its whole text — a reply
-              the model is still writing, the one thing the stream says before
-              the log. A client replaces its copy of the turn with each.
+              and whether she is <code>writing</code>: from each round's request
+              to her model until its answer is judged and what it said is
+              committed. A client replaces its copy of the turn with each.
             </td>
           </tr>
           <tr>
@@ -935,13 +952,13 @@ data: {…}</code></pre>
               <code>source</code> and <code>clientMessageId</code> so every
               surface knows whose turn ended — even one that committed nothing.
               <code>committed</code> says whether the turn put that line in the
-              log: a surface holding the line hands back one that was not, and
-              leaves one that was to the thread. Nothing else answers it, since
-              the log is read in pages and a busy turn can put a hundred
-              messages between a line and now. A turn of her own carries
-              neither stamp and says <code>committed: true</code>: nothing of
-              the person's waits on it, and nobody asked for anything, so a
-              surface says nothing of how it ended.
+              log: a surface holding the line says one that was not never
+              reached her, and leaves one that was to the thread. Nothing else
+              answers it, since the log is read in pages and a busy turn can
+              put a hundred messages between a line and now. A turn of her own
+              carries neither stamp and says <code>committed: true</code>:
+              nothing of the person's waits on it, and nobody asked for
+              anything, so a surface says nothing of how it ended.
             </td>
           </tr>
           <tr>
@@ -1177,11 +1194,12 @@ data: {…}</code></pre>
         the line it was. It hands each line to her inbox and asks Telegram past
         the message only once the line is queued. It answers private chats
         only, and keeps nothing between runs — each starts from the record, its
-        <code>ready</code> and its config read. While a turn a line from a chat
-        began runs, that chat shows her typing; each message of hers whose
-        <code>app</code> is <code>telegram</code> is posted whole, once
-        committed, in every paired chat, and nothing else of the conversation
-        is. <code>crates/p02-telegram/README.md</code> has the rest.
+        <code>ready</code> and its config read. As a line from a chat arrives,
+        and while she writes in the turn it began, that chat shows her
+        typing; each message of hers whose <code>app</code> is
+        <code>telegram</code> is posted whole, once committed, in every paired
+        chat, and nothing else of the conversation is.
+        <code>crates/p02-telegram/README.md</code> has the rest.
       </p>
 
       <h2>Her phone</h2>
@@ -1235,12 +1253,17 @@ data: {…}</code></pre>
         home screen. <code>did</code> is what she last did on it: the
         <code>appId</code>, a few <code>words</code> in the past tense —
         <code>Opened Clock</code>, or an action's own, such as
-        <code>Set an alarm</code> — and the moment <code>at</code>. An app
-        messages come in shows her, on its one view,
-        <code>conversation</code>, the newest twenty messages that went
-        through it as bubbles, a <code>note</code> of the day and the time
-        where time has passed, and has no action: a message is sent one
-        way, as she sends any.
+        <code>Set an alarm</code> — and the moment <code>at</code>.
+        <code>read</code> is the newest message of hers the person read, by
+        its <code>messageId</code>, and the moment <code>at</code> her phone
+        kept it: her Messages keeps it. An app messages come in shows her, on
+        its one view, <code>conversation</code>, the newest twenty messages
+        that went through it as bubbles, a <code>note</code> of the day and
+        the time where time has passed, and under her newest message a
+        <code>note</code> saying <code>Delivered</code>, or, in Messages, once
+        <code>read</code> is of it or of a later message, <code>Read</code>
+        and the time it was read, or the day when that was not today; it has
+        no action: a message is sent one way, as she sends any.
         <code>ringing</code> is empty but while a moment of hers that a ring
         began runs, and then holds each ring it tells: its
         <code>appName</code>, <code>title</code>, <code>body</code> when it
@@ -1391,12 +1414,25 @@ data: {…}</code></pre>
       </p>
 
       <p>
+        A client says the person read a message of hers with
+        <code>POST /api/conversations/:id/read</code>, naming it by its
+        <code>messageId</code>: the daemon finds it among her messages in
+        that conversation, and her Messages keeps it, with the moment, as
+        <code>read</code>, whether she runs or not, unless it keeps a later
+        one, so a read of an older message changes nothing. The web page says
+        it of the newest message of hers its chat shows while its window has
+        the focus, once; her phone's window never does, being her phone.
+        Telegram tells nobody whether a message was read, so in Telegram her
+        phone says <code>Delivered</code> whatever the person read.
+      </p>
+
+      <p>
         <code>phone_changed</code> says her phone is to be read again: after a
         call of her phone's tools came back accepted, as a moment that a ring
         began begins, and once that moment's rings went to their apps, before
         its <code>turn_completed</code>; and once the person gave her an app,
-        removed one, said whether one may wake her or said how one is signed
-        in. A surface showing her
+        removed one, said whether one may wake her, said how one is signed
+        in or read a message of hers. A surface showing her
         phone reads it again then, and on every <code>ready</code>. A call of
         one of her phone's tools comes back as a
         <code>tool_call_completed</code> whose
@@ -1491,27 +1527,23 @@ data: {…}</code></pre>
         lines for its own.
       </p>
 
-      <h2>Streaming replies</h2>
+      <h2>Her writing</h2>
 
       <p class="rule">
-        The reply reaches every surface as the model writes it, as a draft: a
-        draft is not a message, the daemon says what she is writing, and a
-        client works nothing out.
+        A message of hers reaches every surface whole, the moment it is
+        committed: while she writes, the daemon says only that she is
+        writing, and a client works nothing out.
       </p>
 
       <p>
-        While a turn runs, every change of it — her line committed, a draft
-        that grows, a draft committed or withdrawn — is told as the
-        <code>turn_running</code> frame of the whole turn: each open draft
-        under its <code>draftId</code>, with all its text so far. A draft has
-        no message id, is never persisted, and no surface treats it as
-        history. It ends in one of two ways: the <code>visible_reply</code>
-        that names its <code>draftId</code> comes first, then the turn without
-        that draft; or the turn without it comes alone, a draft withdrawn — a
-        round the parser refused, a reply whose write failed, a reply its
-        model let go, whose <code>draftId</code> the next draft may take. The
-        daemon closes every draft a round opened before the round moves on, so
-        none is open at <code>turn_completed</code>.
+        While a turn runs, every change of it — her line committed, a round
+        begun, a round ended — is told as the <code>turn_running</code> frame
+        of the whole turn. She is <code>writing</code> from the moment a round
+        asks her model until its answer is judged and what it said is
+        committed: each message of that round comes before the frame that
+        ends her writing, never while her tools run, the plugins prepare or
+        the work after her turn goes on. Nothing she has not committed is on
+        the stream, and every round ends before <code>turn_completed</code>.
       </p>
 
       <table>
@@ -1526,12 +1558,13 @@ data: {…}</code></pre>
             <td><code>turn_running</code></td>
             <td>
               Replaces its copy of the turn under its
-              <code>conversationId</code>: a bubble per draft with its text, or
-              a typing indicator while there is none, for a turn a line began.
+              <code>conversationId</code>: while she writes in a turn a line
+              began, her typing where her next message will be; nothing of her
+              writing in a turn of her own.
             </td>
           </tr>
           <tr>
-            <td><code>visible_reply {…, draftId}</code></td>
+            <td><code>visible_reply</code></td>
             <td>Shows the message, keyed <code>messageId</code>.</td>
           </tr>
           <tr>
@@ -1557,14 +1590,10 @@ data: {…}</code></pre>
       </table>
 
       <p>
-        Draft ids are <code>round.reply</code>, unique within the turn; a
-        conversation runs one turn at a time. The committed text is the draft
-        after the runtime's normalization (line endings, trim), which is why
-        the commit replaces the draft rather than confirming it. Only the
-        reply is ever drafted: what a model writes to itself beside a tool call
-        is never on the stream. Pacing is each surface's own: a page renders
-        every frame, a connector edits its message on a timer to the turn as
-        it was last told.
+        A conversation runs one turn at a time. What a model writes to itself
+        beside a tool call is never on the stream. Pacing is each surface's
+        own: a page renders every frame, and a connector keeps its typing mark
+        up while she writes.
       </p>
 
       <h2>What a client never has to notice</h2>

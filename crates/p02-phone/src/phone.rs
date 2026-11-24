@@ -463,7 +463,7 @@ impl Phone {
                 &Kept::read(files, app.id())?,
                 &self.listed(files)?.apps,
             )),
-            Runs::Chat => chat::screen(chats, app, now),
+            Runs::Chat => chat::screen(files, chats, app, now),
         }
     }
 }

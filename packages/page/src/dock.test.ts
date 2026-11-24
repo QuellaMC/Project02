@@ -4,7 +4,6 @@ import type {
   CharacterSummary,
   ConfigView,
   GatewayEvent,
-  RunningDraft,
 } from '@project02/wire/contract';
 import {
   askKey,
@@ -32,9 +31,9 @@ function character(id: string, displayName: string): CharacterSummary {
 /** A live tab of Mira's and Nova's home, nothing waiting. */
 function live(): WebState {
   return installSnapshot(initialState, {
-    protocolVersion: 17,
+    protocolVersion: 18,
     health: {
-      protocolVersion: 17,
+      protocolVersion: 18,
       homeRoot: '/home/person/.project02',
       config: {diagnostics: []},
       packages: {diagnostics: []},
@@ -93,18 +92,15 @@ const alex = {
   expiresAt: 3_600_000,
 };
 
-/** Mira's turn on her line as the daemon says it runs now, with `drafts` begun. */
-function running(
-  drafts: readonly RunningDraft[],
-  characterId = 'mira',
-): GatewayEvent {
+/** Mira's turn on her line as the daemon says it runs now, `writing` or not. */
+function running(writing: boolean, characterId = 'mira'): GatewayEvent {
   return {
     kind: 'turn_running',
     characterId,
     conversationId: `dm-${characterId}`,
     source: 'web',
     clientMessageId: 'line-1',
-    drafts,
+    writing,
   };
 }
 
@@ -120,7 +116,6 @@ const reply: GatewayEvent = {
     text: 'Thank you.',
     sentAt: '2026-09-11T00:00:00.000Z',
     app: 'messages',
-    draftId: 'd1',
   },
 };
 
@@ -225,7 +220,7 @@ describe('the dock above the message box', () => {
     expect(dockWaited(answered, confirmationKey('c1'))).toBe(answered);
   });
 
-  it('keeps an answered card its room, with nothing else waiting, until her next line begins or her turn ends, or else the wait is over, and gives it at once to an ask that comes meanwhile', () => {
+  it('keeps an answered card its room, with nothing else waiting, until a message of hers comes or her turn ends, or else the wait is over, and gives it at once to an ask that comes meanwhile', () => {
     const answered = applied(
       live(),
       asks('c1', 300_000),
@@ -236,24 +231,21 @@ describe('the dock above the message box', () => {
 
     expect(shown(lingering)).toBe(`${key} allowed`);
 
-    for (const went of [running([{draftId: 'd1', text: 'Th'}]), reply, ended]) {
+    for (const went of [reply, ended]) {
       expect(shown(applied(answered, went))).toBeUndefined();
       expect(shown(applied(lingering, went))).toBeUndefined();
     }
 
-    // A round without a line of hers yet, and a line of another's, are
-    // not her going on.
-    expect(shown(applied(lingering, running([])))).toBe(`${key} allowed`);
-    expect(
-      shown(applied(lingering, running([{draftId: 'd9', text: 'Hi'}], 'nova'))),
-    ).toBe(`${key} allowed`);
+    // Her turn running, writing or not, is not her going on.
+    expect(shown(applied(lingering, running(false)))).toBe(`${key} allowed`);
+    expect(shown(applied(lingering, running(true)))).toBe(`${key} allowed`);
     expect(shown(dockWaited(lingering, key))).toBeUndefined();
     expect(shown(applied(lingering, asks('c2', 400_000)))).toBe(
       confirmationKey('c2'),
     );
     expect(shown(connectionRefused(lingering, 'Gone.'))).toBeUndefined();
 
-    // With another waiting, her line leaves the next to its half second;
+    // With another waiting, her message leaves the next to its half second;
     // someone new on a connector is not hers to go on from.
     expect(
       shown(
@@ -262,7 +254,7 @@ describe('the dock above the message box', () => {
           asks('c1', 300_000),
           asks('c2', 400_000),
           settled('c1', 'approved'),
-          running([{draftId: 'd1', text: 'Th'}]),
+          reply,
         ),
       ),
     ).toBe(`${key} allowed`);

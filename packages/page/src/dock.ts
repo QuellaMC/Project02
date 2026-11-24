@@ -25,7 +25,8 @@ export type Answered = 'allowed' | 'not_allowed' | 'expired';
 /**
  * The ask that was in front when it ended, keeping the spot to say how:
  * for half a second whatever else waits, and then, with nothing else
- * waiting, until her next line begins, her turn ends or the wait is over.
+ * waiting, until a message of hers comes, her turn ends or the wait is
+ * over.
  */
 export type Held = {
   readonly ask: Ask;
@@ -176,9 +177,11 @@ export function dockWaited<State extends Asking>(
 }
 
 /**
- * She went on: her next line began, or her turn ended. An answered ask of
- * hers gives up its room then, so the dock closes as her line makes its
- * own, unless something else waits for the spot.
+ * She went on: a message of hers came, or her turn ended. An answered
+ * ask of hers gives up its room then, so the dock closes as her message
+ * takes it, unless something else waits for the spot. Her writing alone
+ * is not her going on: it begins the moment what she asked for is done,
+ * before the person has seen their answer stand.
  */
 export function sheWentOn<State extends Asking>(
   state: State,

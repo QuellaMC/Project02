@@ -20,6 +20,7 @@ import type {
   PhoneDid,
   PhoneFront,
   PhoneOutcome,
+  PhoneRead,
   PhoneRing,
   Screen,
   ScreenOutcome,
@@ -37,6 +38,7 @@ import {
   type Opened,
   type Thread,
 } from './store.ts';
+import {messagesApp} from './thread-layout.ts';
 
 /** Her phone as a read gave it. */
 export type HerPhone = Extract<PhoneOutcome, {status: 'ok'}>;
@@ -133,7 +135,7 @@ export type OnScreen =
   | {
       readonly kind: 'thread';
       readonly app: PhoneApp;
-      /** Her messages and the person's that went through it, oldest first. */
+      /** Her messages and the person's that went through it, oldest first, each of hers the person read saying when. */
       readonly messages: readonly Message[];
       /** The person, by the name their newest message goes by; none before they wrote. */
       readonly person?: string | undefined;
@@ -584,20 +586,46 @@ function viewOn(
  * `app`, an app messages come in, as her phone shows it: what went through
  * it of her conversation as the window holds it, the person by the name
  * their newest message goes by, and why her conversation cannot be shown,
- * when it cannot.
+ * when it cannot. In Messages, each message of hers the person read says
+ * when, as her phone keeps the read; Telegram tells nobody.
  */
 function threadOn(state: PhoneState, app: PhoneApp): OnScreen {
   const {thread} = state;
   const said = [...(thread?.stale ?? []), ...(thread?.messages ?? [])];
+  const read = app.id === messagesApp ? state.phone?.read : undefined;
 
   return {
     kind: 'thread',
     app,
-    messages: said.filter(message => message.app === app.id),
+    messages: readUpTo(said, read).filter(message => message.app === app.id),
     person: said.findLast(message => message.role === 'user')?.speakerName,
     message: state.unopened ?? thread?.unread,
     page: `${app.id} ${thread?.stale === undefined ? 'read' : 'reading'}`,
   };
+}
+
+/**
+ * `said`, her conversation, each message of hers up to the one `read` is
+ * of saying it was read when that says, in whichever app it went: the
+ * person read it, or a later one.
+ */
+function readUpTo(
+  said: readonly Message[],
+  read: PhoneRead | undefined,
+): readonly Message[] {
+  if (read === undefined) {
+    return said;
+  }
+
+  const reached = said.findIndex(
+    message => message.messageId === read.messageId,
+  );
+
+  return said.map((message, at) =>
+    at <= reached && message.role === 'character'
+      ? {...message, readAt: read.at}
+      : message,
+  );
 }
 
 /**

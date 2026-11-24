@@ -12,21 +12,29 @@ plugin or an earlier summary is fenced and never reaches a system message.
 Each of the person's lines, the one a turn opens with and each one her
 history replays, is told under one heading: the app it came in, by the
 name the daemon gives it, and when it was sent, where the person is; her
-own messages replay as she wrote them. A moment of the character's own
-opens where the person's line would be, with the runtime's fenced note of
-the time, and of what rang when her phone's ringing began it, and the
-system messages read the same whichever began the turn.
+own messages replay as she wrote them, and a line she left replays as
+any line, with nothing where her answer would be. A moment of the
+character's own opens where the person's line would be, with the
+runtime's fenced note of the time, of how long since the person last
+wrote and, while no message of hers stands after their line, that she
+has not answered, and of what rang when her phone's ringing began it,
+and the system messages read the same whichever began the turn.
 
-Each round is judged once, by what began its turn and the apps she has
-now, and recorded before anything it decided happens. While she has more
-than one app, `send_message` offers them by name; each message she says
-goes in the one she names. Naming none, an answer goes in the app its
-line came in, and a message of her own in the one the person last wrote
-in while she has it, otherwise in Messages. A round that calls no
-plugin tool ends the turn: in a moment it may say nothing, its text a
-thought she keeps. A refused round is told to the model in the next one,
-a provider failure ends the turn, and a turn spends at most 99 rounds of
-tool calls.
+Each round is judged once, by what began its turn, whether she has sent
+a message in it and the apps she has now, and recorded before anything
+it decided happens. The turn hears it begin as its request goes out, and
+end once what it said is committed, before the calls it made run. While
+she has more than one app, `send_message` offers them by name; each
+message she says goes in the one she names. Naming none, an answer goes
+in the app its line came in, and a message of her own in the one the
+person last wrote in while she has it, otherwise in Messages.
+`answer_later` is offered after it in every turn, ahead of every plugin
+tool. A round that calls no plugin tool ends the turn, and one that calls
+`answer_later` ends it once the calls it made beside it are done: in a
+moment, or once she has sent a message, a round may say nothing, and in
+a moment its text is a thought she keeps. A refused round is told to the
+model in the next one, a provider failure ends the turn, and a turn
+spends at most 99 rounds of tool calls.
 
 An adapter speaks one protocol. The NVIDIA adapter streams a chat
 completion from NVIDIA's cloud or a server of the person's own. The
@@ -65,17 +73,15 @@ model writes them. It asks for no sampling, thinking, effort or
 forced tool choice, sends no thinking back, and gives an answer the room
 the OpenAI API gives. For a model the setting offers, a request asks for
 Anthropic's own fallback for a decline; where it takes a message over,
-the calls before it are let go, and the replies drafted of them with
-them. A message is judged at its stop: a decline, said with its category,
-and a message cut short fail the round.
+the calls before it are let go. A message is judged at its stop: a
+decline, said with its category, and a message cut short fail the round.
 
 An adapter is built only with a key, or for NVIDIA a server of the
 person's own, which may ask for none, or for the plan the home signed
 in; building one does no I/O, its HTTP client made at its first request.
-Each hands back the model's calls and text as written, and hears her
-reply as its arguments stream. The exchange is one for all three: it
-retries a busy provider or a broken connection but never a timeout,
-bounds the provider's silence, reads an error under `error`, beside it or
-as its `detail`, and no failure repeats a key, a token or the account it
-went with, each said as its service's own. The test provider answers in
-fixed sentences, behind a test switch alone.
+Each hands back the model's calls and text as written. The exchange is
+one for all three: it retries a busy provider or a broken connection but
+never a timeout, bounds the provider's silence, reads an error under
+`error`, beside it or as its `detail`, and no failure repeats a key, a
+token or the account it went with, each said as its service's own. The
+test provider answers in fixed sentences, behind a test switch alone.

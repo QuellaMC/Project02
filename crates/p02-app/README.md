@@ -45,8 +45,9 @@ with an outcome of p02-wire, never an error.
   account it uses by a key, with whether the home's settings hold that
   key, or, for an app that asks a model, the connections of theirs it can
   sign in with now and how it is signed in; what
-  she has in front with its screen and what she last did, with what
-  rings, which her actor publishes while a ring's moment runs. A view of
+  she has in front with its screen, what she last did and the newest
+  message of hers the person read, with what rings, which her actor
+  publishes while a ring's moment runs. A view of
   an app is read on request too, and changes nothing of hers. One whose settings switch her phone off has none to
   read. The stream says her phone changed after a call of her phone's
   tools came back accepted, and as a ring's moment begins and once its
@@ -76,18 +77,23 @@ with an outcome of p02-wire, never an error.
   each app stands on her phone; an app of it given to her by the one path
   her own ask takes, an older version replaced keeping what it keeps;
   an app from a file, previewed with nothing written, then given; an app
-  removed; whether an app may wake her; and how an app that asks a model
+  removed; whether an app may wake her; how an app that asks a model
   is signed in: with a connection of theirs connected now, asking a model
-  it offers or the one it starts with, or signed out. Each that changed
+  it offers or the one it starts with, or signed out; and a message of
+  hers they read, found in her conversation by its id, which her Messages
+  keeps at that moment unless it keeps a later one. Each that changed
   her phone says so on the stream, and her actor, while she runs, reads
   its rings again.
 - **The stream** hears each turn as it goes: its messages once they are
-  on disk, each with when it was sent and the app it is in, as the
+  on disk, each with when it was sent and the app it is in, and the
+  person's line with when she read it, the moment her turn took it, as the
   scrollback reads them, where a message of hers an earlier build kept is
-  in the app of the person's line before it, the turn as it runs now, her
-  drafts whole, whenever that changes, and then its completion, which
-  says whether its line is in the log. A turn of her own carries no line's
-  stamps, and is said running as it begins.
+  in the app of the person's line before it, the turn as it runs now,
+  whenever that changes: whether she is writing, from each round's request
+  to her model until what it said is committed, and then its completion,
+  which says whether its line is in the log. Nothing she has not committed
+  reaches it. A turn of her own carries no line's stamps, and is said
+  running as it begins.
 - **Settings** change one way, a client's change or her own plugin's,
   through p02-config; health, which says the accounts of a key her phone
   knows, each with whether the home's settings hold it, then goes to every

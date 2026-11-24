@@ -236,4 +236,11 @@ synchronous, and its callers run it on the blocking pool.
   24, 14:10`, stands above the first and above one sent on another day
   or more than 15 minutes after the one before it; while there are none,
   "No Messages". A conversation that cannot be read is the app failing,
-  saying why.
+  saying why. Messages keeps, as its own data in `apps/messages.json`,
+  the newest message of hers the person read and when, which its caller
+  hands it; a read of an older message than the one kept changes
+  nothing. A note under her newest message there says `Read 14:12` once
+  the read is of it or of a later one, in any app, by the day, `Monday,
+  November 23`, when that was not today, and `Delivered` until then; in
+  Telegram, which tells nobody whether a message was read, always
+  `Delivered`.

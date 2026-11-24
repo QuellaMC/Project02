@@ -22,8 +22,8 @@ a pure function of the previous value and one input — the daemon's
 snapshot, an event, a history page, a send, a line's end. It is DOM-free
 and unit-tested in Node. `session.ts` holds the tab's one client and one
 stream and the verbs a page calls, and runs only in a browser; `app.tsx`
-and `thread.tsx` render the store — the roster and the thread with its
-draft bubbles — and `dock-view.tsx` the foot of the column, one surface:
+and `thread.tsx` render the store — the roster and the thread — and
+`dock-view.tsx` the foot of the column, one surface:
 the one-line message box, and above it the dock, where everything waiting
 for the person's answer is asked, every confirmation of whichever
 character and every pairing request, one at a time in one spot.
@@ -42,7 +42,7 @@ news of it comes first, a request the daemon no longer knows is no longer
 waiting, and an approval that could not be written keeps the card and
 says why. One that ended in front says how — Allowed, Not allowed,
 Expired — and keeps its room half a second, then, with nothing else
-waiting, until her next line begins or her turn ends, a few seconds at
+waiting, until a message of hers comes or her turn ends, a few seconds at
 most; which ask is in front and when one gives way are `dock.ts`'s rules,
 pure and tested in Node. While an ask of hers waits, her row in the
 roster says she is asking. The dock opens to the card's height as the
@@ -63,11 +63,21 @@ each bubble says its own on hover; the person's bubbles take their app's
 colour, Telegram's or the page's blue; one sender's messages in a row sit
 close; and the head of the chat names her, while a bubble says whose it is
 only to a reader of the screen. A line of the
-person's not yet committed is drawn as theirs sent now in Messages. Each
-turn in progress is the daemon's own word on it, replaced whole by each
-`turn_running` frame and installed from every `ready`; a stream the daemon
-resumed is live again with nothing installed.
-A turn of her own, which no line began, shows nothing until she drafts,
+person's not yet committed is drawn as theirs sent now in Messages, and
+under their newest message one line says how far it got: `Sending…`, the
+bubble faint, until the daemon answers; `Delivered` once her inbox has it;
+`Read` once her turn took it, with the time on that day and the day on
+another. Every line that did not reach her says `Not Delivered` under it,
+in red, as a notice says why; it stays in the thread and is never sent
+again by itself: pressed, it goes back into its message box.
+Each line keeps how far it got in what the tab keeps, so a reload shows it
+as it was. While she writes in a turn a line began, three dots in a
+bubble of hers stand where her next message will be, and the message
+arrives whole the moment it is committed. Each turn in progress is the
+daemon's own word on it, replaced whole by each `turn_running` frame and
+installed from every `ready`; a stream the daemon resumed is live again
+with nothing installed.
+A turn of her own, which no line began, shows nothing of her writing,
 and its end raises no notice. A reply of hers committed to a chat that
 is not on screen, whatever began her turn, puts a dot after her name in
 the roster until her chat opens: one dot however many wait, the tab's
@@ -75,11 +85,21 @@ own, so a reload starts without.
 In the desktop app, a message of hers the stream commits in Messages
 while the main window does not have the focus has the app show a
 notification, her name over her words, once for each message, by the
-rule of `notifications.ts`, pure and tested in Node: none for her drafts,
+rule of `notifications.ts`, pure and tested in Node: none for her writing,
 a page of the scrollback or a snapshot, for what she sends in Telegram,
 or while the window is in front. The first asks the system's permission,
 once, and a no is final and silent. Her phone's window never notifies,
 and a browser tab, which has no such call, shows none.
+A message of hers is read once the chat of its conversation shows it in
+the main window, the desktop app's or a tab, while that window has the
+focus, the chat's end is in view and the stream is live: as it arrives
+there, when her chat opens, when the window comes to the front with it
+open, or when the person scrolls back down to it, though not while the
+settings stand in front of the chat. The daemon is then told the newest
+message of hers the chat shows, by the rule of `reads.ts`, pure and
+tested in Node: one read at a time, told once the daemon answered it and
+again later when it could not keep it or did not answer, and nothing it
+answers is said. Her phone's window never tells: it is her phone.
 Her chat's head has a Her Phone button unless the daemon says she has no
 phone. It opens her phone in the one window every character's phone
 shares, and closes it, and is pressed while that window shows hers: the
@@ -88,9 +108,9 @@ it goes, over a channel of the page's origin (`phone-link.ts`). A browser
 that blocks that window is told so in a notice; in the desktop app, which
 opens the window itself and gives the page none, nothing is said. From a
 call of one of her phone's tools in a turn of hers, known by the plugin
-the stream names, until her next reply begins or the turn ends, she is
-using her phone: the button carries a dot, and her thread says so where
-it would say she is writing.
+the stream names, until her next message or the turn's end, she is
+using her phone: the button carries a dot, and her thread says so in
+place of her typing.
 A restart of the daemon is a reconnect on the same address, and the next
 line goes through without a click. The browser suite under `tests/browser`
 drives the built page in Chromium against a real daemon.
@@ -242,13 +262,17 @@ it as it joins the chat; no earlier page is read. It shows what went
 through that app alone, laid out by `thread-layout.ts` as the chat is and
 mirrored, since it is her phone: hers at the line's end in the app's
 colour and the person's at its start on a card, a time where time has
-passed and no app's name, one app being on screen; her drafts are not
-there. At its head stand a way back to her home screen and the person,
-by the name their newest message goes by, with the app's name under
-theirs but in Messages; at its foot a message box that is only drawn. It
-follows its newest message as the chat does, and a conversation that
-cannot be opened or read is said in the daemon's sentence where her
-messages would be.
+passed and no app's name, one app being on screen; her typing is not
+there. Under her newest message one line says whether the person read
+it, as the chat says how far the person's got: in Messages `Read` and
+when, once the read her phone keeps is of it or of a later message in
+any app, and `Delivered` until then; in Telegram, which tells nobody,
+always `Delivered`. At its head stand a way back to her home screen and
+the person, by the name their newest message goes by, with the app's name
+under theirs but in Messages; at its foot a message box that is only
+drawn. It follows its newest message as the chat does, and a
+conversation that cannot be opened or read is said in the daemon's
+sentence where her messages would be.
 A character the daemon does not know, or whose settings give her no phone,
 is said in the daemon's sentence where her phone would be.
 `phone-window.tsx` and `phone-device.tsx` draw it as the design draws an

@@ -16,14 +16,14 @@ use p02_contracts::{
 };
 use p02_core::{
     BlankTextError, ClientStamp, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
-    UserLine, VisibleMessage, app_of,
+    UserLine, VisibleMessage, VisibleMessageRole, app_of,
 };
 use p02_plugins::{
     BeforeCallOutcome, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall, ToolCallReport,
 };
 use p02_role_model::{
-    DraftEvent, DraftId, ModelRound, Opening, Person, Reply, Rounds, RoutedToolCall, TurnInput,
-    TurnOutcome, TurnSink, select_history_window, today_note,
+    ModelRound, Opening, Person, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,
+    select_history_window, today_note,
 };
 use p02_shared::{Identifier, error_chain};
 use p02_store::{
@@ -38,29 +38,29 @@ use crate::continuation;
 use crate::conversation::{Character, Delivery, Disk, Mind, Submission, on_disk};
 
 /// What a turn announces, in order. A message is announced once its record
-/// is on disk, so the stream never says more than the log; a draft, a reply
-/// the model is still writing, is the one exception and says so by its
-/// kind, and every draft ends exactly once, in the reply that names it or
-/// in its withdrawal.
+/// is on disk, so the stream never says more than the log. Each round is
+/// announced as it begins and as it ends, what it said between the two and
+/// the calls it made after.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Progress {
-    /// The person's line, committed, with the stamps its client put on it.
+    /// The person's line, committed, with the stamps its client put on it
+    /// and when she read it: the moment her turn took it, its record's.
     UserMessage {
         message: VisibleMessage,
         source: ClientStamp,
         client_message_id: ClientStamp,
+        read_at: Timestamp,
     },
-    /// A reply, committed in place of its draft, with the id of the app it
-    /// went in.
+    /// A reply, committed, with the id of the app it went in.
     VisibleReply {
         message: VisibleMessage,
-        draft: DraftId,
         app: String,
     },
-    /// The next piece of a draft.
-    ReplyDelta { draft: DraftId, text: String },
-    /// A draft that ended unsaid.
-    ReplyWithdrawn { draft: DraftId },
+    /// A round began: her model is asked for it.
+    RoundBegan,
+    /// The round ended: its answer judged and what it said committed,
+    /// before anything else it decided goes on.
+    RoundEnded,
     /// A round's tool calls, recorded as started, in the model's order.
     ToolCallsRequested {
         round: NonZeroU32,
@@ -203,6 +203,7 @@ pub(crate) async fn run(
                 message: message.clone(),
                 source: source.clone(),
                 client_message_id,
+                read_at: identity.created_at().clone(),
             });
             (
                 Opening::Line {
@@ -213,18 +214,22 @@ pub(crate) async fn run(
             )
         }
         Opened::Moment(rang) => {
-            let last = begun
-                .history
-                .turns
+            let turns = &begun.history.turns;
+            let last = turns.iter().rev().find(|turn| turn.user_message.is_some());
+            // Every message after the person's last line is hers: she
+            // answered it once the newest message is hers.
+            let newest = turns
                 .iter()
-                .rev()
-                .find(|turn| turn.user_message.is_some());
+                .flat_map(ConversationTurn::visible_messages)
+                .last();
 
             (
                 Opening::Moment {
                     since_last_line: last
                         .and_then(|turn| turn.user_message.as_ref())
                         .map(|line| since_sent(line, identity.created_at())),
+                    answered: newest
+                        .is_some_and(|message| message.role == VisibleMessageRole::Character),
                     last_app: last.map(|turn| app_of(turn.source.as_ref()).to_owned()),
                     rang,
                 },
@@ -668,7 +673,7 @@ impl OpenTurn<'_> {
             .rev()
             .find_map(|call| match call {
                 ModelToolCall::VisibleReply { text, .. } => Some(text.clone()),
-                ModelToolCall::Plugin { .. } => None,
+                ModelToolCall::AnswerLater | ModelToolCall::Plugin { .. } => None,
             });
         let evidence = self.recorded().await;
         let (messages, finished) = {
@@ -768,7 +773,7 @@ impl TurnSink for Round<'_, '_> {
         let turn = self.turn;
         let identity = turn.identity.clone();
         let text = reply.text.clone();
-        let round = reply.draft.round();
+        let round = reply.round;
         let app = reply.app.to_owned();
         let mut ledger = turn.ledger.lock().await;
         let evidence = ledger.prepared.clone();
@@ -797,7 +802,6 @@ impl TurnSink for Round<'_, '_> {
         drop(ledger);
         (turn.listener)(Progress::VisibleReply {
             message: message.clone(),
-            draft: reply.draft,
             app: reply.app.to_owned(),
         });
         Ok(message)
@@ -886,11 +890,12 @@ impl TurnSink for Round<'_, '_> {
             .collect())
     }
 
-    fn draft(&self, event: DraftEvent) {
-        (self.turn.listener)(match event {
-            DraftEvent::Delta { draft, text } => Progress::ReplyDelta { draft, text },
-            DraftEvent::Withdrawn { draft } => Progress::ReplyWithdrawn { draft },
-        });
+    fn round_began(&self) {
+        (self.turn.listener)(Progress::RoundBegan);
+    }
+
+    fn round_ended(&self) {
+        (self.turn.listener)(Progress::RoundEnded);
     }
 }
 

@@ -43,6 +43,7 @@ import type {Session} from './session.ts';
 import {Icon} from './settings-controls.tsx';
 import {characterName, type WebState} from './store.ts';
 import {Composer} from './thread.tsx';
+import {hourAndMinute} from './thread-layout.ts';
 
 /** How long an answered card says so before the next takes the spot, as the prototype times it. */
 const answerShows = 520;
@@ -402,7 +403,7 @@ function AskCard({
             <TimeLeft at={expiryOf(ask)} />
           </span>
           <span className="visually-hidden">
-            {`${words.where === undefined ? '' : `${words.where}. `}Expires at ${clockTime(expiryOf(ask))}.`}
+            {`${words.where === undefined ? '' : `${words.where}. `}Expires at ${hourAndMinute().format(expiryOf(ask))}.`}
           </span>
         </span>
         <span className="ask-choices">
@@ -519,14 +520,6 @@ function wordsOf(state: WebState, ask: Ask): AskWords {
     characterName(state, characterId),
     state.herSettings.get(characterId),
   );
-}
-
-/** The hour and minute an ask expires at, on the person's clock. */
-function clockTime(at: number): string {
-  return new Date(at).toLocaleTimeString([], {
-    hour: 'numeric',
-    minute: '2-digit',
-  });
 }
 
 /** Whether the person asked their system for less motion, as it says now. */

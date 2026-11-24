@@ -11,6 +11,7 @@ import type {
   PhoneDid,
   PhoneFront,
   PhoneOutcome,
+  PhoneRead,
   PhoneRing,
   Screen,
   ScreenRow,
@@ -79,7 +80,7 @@ const now = Date.parse('2026-11-11T09:00:00.000Z');
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 17,
+    protocolVersion: 18,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -96,7 +97,7 @@ function ready(
   ...confirmations: readonly PendingConfirmation[]
 ): GatewayReady {
   return {
-    protocolVersion: 17,
+    protocolVersion: 18,
     health: said,
     confirmations,
     pairings: [],
@@ -220,6 +221,50 @@ function watching(outcome: PhoneOutcome = herPhone()): PhoneState {
     outcome,
   );
 }
+
+/** An app her phone says messages come in, `id` named `name`. */
+function messaging(id: string, name: string): PhoneApp {
+  return {
+    ...store,
+    id,
+    name,
+    messaging: true,
+    icon: id,
+    tint: id,
+    views: [{id: 'conversation', title: name, icon: id}],
+    opensOn: 'conversation',
+  };
+}
+
+const [messagesApp, telegramApp] = [
+  messaging('messages', 'Messages'),
+  messaging('telegram', 'Telegram'),
+];
+
+/** Message `messageId` of her conversation, by `role`, in `app`, its speaker going by `speakerName`. */
+function said(
+  messageId: string,
+  role: 'user' | 'character',
+  app: string,
+  speakerName: string,
+): HistoryMessage {
+  return {
+    messageId,
+    role,
+    speakerId: role === 'user' ? 'local-user' : 'mira',
+    speakerName,
+    text: `${messageId} in ${app}`,
+    sentAt: new Date(now).toISOString(),
+    app,
+  };
+}
+
+/** Her conversation as the window opens it, `conv-1`. */
+const opened = {
+  status: 'opened',
+  conversationId: 'conv-1',
+  characterId: 'mira',
+} as const;
 
 describe("her phone's window", () => {
   it('follows her: what she has in front, her home screen while nothing is; what the person opens instead, which a read of hers that says nothing new keeps; and her again at the next thing she does, or as a ring begins', () => {
@@ -614,36 +659,12 @@ describe("her phone's window", () => {
   });
 
   it('draws an app her phone says messages come in from her conversation: once it is opened, of its newest page and what the stream commits after, only what went through that app, with the person by the name their newest message goes by; why it could not be opened or read in its place; and a frame of another conversation changes nothing', () => {
-    const messaging = (id: string, name: string): PhoneApp => ({
-      ...store,
-      id,
-      name,
-      messaging: true,
-      icon: id,
-      tint: id,
-      views: [{id: 'conversation', title: name, icon: id}],
-      opensOn: 'conversation',
-    });
-    const [messages, telegram] = [
-      messaging('messages', 'Messages'),
-      messaging('telegram', 'Telegram'),
-    ];
-    const said = (
-      messageId: string,
-      role: 'user' | 'character',
-      app: string,
-      speakerName: string,
-    ): HistoryMessage => ({
-      messageId,
-      role,
-      speakerId: role === 'user' ? 'local-user' : 'mira',
-      speakerName,
-      text: `${messageId} in ${app}`,
-      sentAt: new Date(now).toISOString(),
-      app,
-    });
     let state = looked(
-      watching({status: 'ok', apps: [messages, telegram, clock], ringing: []}),
+      watching({
+        status: 'ok',
+        apps: [messagesApp, telegramApp, clock],
+        ringing: [],
+      }),
       {kind: 'view', appId: 'telegram', viewId: 'conversation'},
     );
 
@@ -653,7 +674,7 @@ describe("her phone's window", () => {
     ]).toEqual([true, false]);
     expect(screenOf(state)).toMatchObject({
       kind: 'thread',
-      app: telegram,
+      app: telegramApp,
       messages: [],
       message: undefined,
     });
@@ -661,11 +682,7 @@ describe("her phone's window", () => {
     state = conversationUnopened(state, 'Mira is not running.');
     expect(screenOf(state)).toMatchObject({message: 'Mira is not running.'});
 
-    state = conversationOpened(state, {
-      status: 'opened',
-      conversationId: 'conv-1',
-      characterId: 'mira',
-    });
+    state = conversationOpened(state, opened);
     state = conversationUnread(state, 'conv-1', 'The daemon is away.');
     expect(screenOf(state)).toMatchObject({message: 'The daemon is away.'});
 
@@ -687,7 +704,6 @@ describe("her phone's window", () => {
       progress: {
         kind: 'visible_reply',
         ...said('m4', 'character', 'telegram', 'Mira'),
-        draftId: '1.0',
       },
     };
 
@@ -697,7 +713,7 @@ describe("her phone's window", () => {
     ).toBe(state);
     expect(screenOf(state)).toMatchObject({
       kind: 'thread',
-      app: telegram,
+      app: telegramApp,
       messages: [
         {messageId: 'm3', role: 'user', app: 'telegram'},
         {messageId: 'm4', role: 'character', app: 'telegram'},
@@ -705,5 +721,65 @@ describe("her phone's window", () => {
       person: 'Sam',
       message: undefined,
     });
+  });
+
+  it('says each message of hers in Messages up to the one her phone says the person read, in whichever app that went, was read when her phone says; none before the person read one, and none in Telegram, which tells nobody', () => {
+    const at = '2026-11-11T08:55:00.000Z';
+    /** When each message of `appId`'s thread says it was read, the person having read `read`. */
+    const readIn = (appId: string, read?: PhoneRead) => {
+      const shown = screenOf(
+        conversationRead(
+          conversationOpened(
+            looked(
+              watching({
+                status: 'ok',
+                apps: [messagesApp, telegramApp],
+                ringing: [],
+                ...(read === undefined ? {} : {read}),
+              }),
+              {kind: 'view', appId, viewId: 'conversation'},
+            ),
+            opened,
+          ),
+          'conv-1',
+          {
+            status: 'ok',
+            conversationId: 'conv-1',
+            characterId: 'mira',
+            messages: [
+              said('m1', 'character', 'messages', 'Mira'),
+              said('m2', 'user', 'messages', 'Sam'),
+              said('m3', 'character', 'telegram', 'Mira'),
+              said('m4', 'character', 'messages', 'Mira'),
+              said('m5', 'character', 'telegram', 'Mira'),
+            ],
+          },
+        ),
+      );
+
+      return shown.kind === 'thread'
+        ? shown.messages.map(({messageId, readAt}) => [messageId, readAt])
+        : [];
+    };
+
+    expect(readIn('messages')).toEqual([
+      ['m1', undefined],
+      ['m2', undefined],
+      ['m4', undefined],
+    ]);
+    expect(readIn('messages', {messageId: 'm3', at})).toEqual([
+      ['m1', at],
+      ['m2', undefined],
+      ['m4', undefined],
+    ]);
+    expect(readIn('messages', {messageId: 'm5', at})).toEqual([
+      ['m1', at],
+      ['m2', undefined],
+      ['m4', at],
+    ]);
+    expect(readIn('telegram', {messageId: 'm5', at})).toEqual([
+      ['m3', undefined],
+      ['m5', undefined],
+    ]);
   });
 });
