@@ -30,12 +30,13 @@ use p02_wire::{
     HistoryRefusal, LiveReading, MaintenanceFailure, OpenConversationBody, OpenOutcome,
     OpenRefusal, PackageReport, PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome,
     PairingRefusal, PairingRequest, PairingRequestBody, PairingSubject, PendingConfirmation,
-    PersonAccount, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing,
-    PlanAccount, ProtocolVersion, Ready, Refusal, RemoveCharacterOutcome, RemoveCharacterRefusal,
-    RoleModelProvider, RosterState, RunningTurn, Screen, ScreenCell, ScreenItem, ScreenOutcome,
-    ScreenRange, ScreenRefusal, ScreenRow, ScreenTile, Settlement, StartOutcome, StartRefusal,
-    StorageFailure, StoreApp, StoreAppStatus, StoreOutcome, SubmitOutcome, ToolCallStatus,
-    TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
+    PersonAccount, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRead, PhoneRefusal,
+    PhoneRing, PlanAccount, ProtocolVersion, ReadBody, ReadOutcome, ReadRefusal, Ready, Refusal,
+    RemoveCharacterOutcome, RemoveCharacterRefusal, RoleModelProvider, RosterState, RunningTurn,
+    Screen, ScreenCell, ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow,
+    ScreenTile, Settlement, StartOutcome, StartRefusal, StorageFailure, StoreApp, StoreAppStatus,
+    StoreOutcome, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp, TurnStatus,
+    ViewRefusal,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -62,6 +63,7 @@ fn walk(wire: &mut impl Wire) {
     wire.written::<OpenOutcome>();
     wire.written::<SubmitOutcome>();
     wire.written::<HistoryOutcome>();
+    wire.written::<ReadOutcome>();
     wire.written::<PendingConfirmation>();
     wire.written::<ConfirmationAnswer>();
     wire.written::<ConfigView>();
@@ -88,6 +90,7 @@ fn walk(wire: &mut impl Wire) {
     wire.written::<Settlement>();
     wire.read::<OpenConversationBody>();
     wire.read::<GatewayMessage>();
+    wire.read::<ReadBody>();
     wire.read::<AnswerBody>();
     wire.read::<PairingRequestBody>();
     wire.read::<ConnectorBotsBody>();
@@ -329,6 +332,7 @@ fn read() -> Vec<(&'static str, Value)> {
                 "clientMessageId": "line-1",
             }),
         ),
+        reads::<ReadBody>("ReadBody", json!({"messageId": "conv_1.1:message-2"})),
         reads::<AnswerBody>("AnswerBody", json!({"decision": "approved"})),
         reads::<PairingRequestBody>(
             "PairingRequestBody",
@@ -527,6 +531,10 @@ fn written() -> Vec<(&'static str, Value)> {
     let did = PhoneDid {
         app_id: id("clock"),
         words: "Set an alarm".to_owned(),
+        at: at.clone(),
+    };
+    let read = PhoneRead {
+        message_id: message_id.clone(),
         at: at.clone(),
     };
     let ring = PhoneRing {
@@ -730,6 +738,16 @@ fn written() -> Vec<(&'static str, Value)> {
                 message: "The disk is full.".to_owned(),
             }),
         ),
+        value("ReadOutcome", &ReadOutcome::Ok),
+        value(
+            "ReadOutcome",
+            &ReadOutcome::Refused {
+                reason: ReadRefusal::UnknownMessage,
+                message: "There is no message \"conv_1.1:message-1\" of hers in conversation \
+                          \"conv_1\"."
+                    .to_owned(),
+            },
+        ),
         read_back("PendingConfirmation", &pending),
         read_back("AnswerOutcome", &ConfirmationAnswer::Expired),
         value("ConfigView", &diagnosed),
@@ -789,6 +807,7 @@ fn written() -> Vec<(&'static str, Value)> {
                 apps: vec![clock.clone(), asker],
                 front: Some(Box::new(front.clone())),
                 did: Some(did),
+                read: Some(read),
                 ringing: vec![ring],
             },
         ),
@@ -802,6 +821,7 @@ fn written() -> Vec<(&'static str, Value)> {
                     ..front
                 })),
                 did: None,
+                read: None,
                 ringing: Vec::new(),
             },
         ),

@@ -721,3 +721,46 @@ test("page.phone-messages: in her phone's window, Messages, first on her home sc
     'Still here.',
   ]);
 });
+
+test("page.phone-read: in her phone's window, under her message in Messages, Delivered while the chat that shows it is not in front, and Read with the time the daemon kept once the chat comes to the front", async ({
+  page,
+}) => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(quietHome(model));
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const chat = await page.context().newPage();
+  const status = page.locator('.phone-thread .bubble-status');
+
+  // The chat's window, which has the focus only once the test says so.
+  await chat.addInitScript(`
+    window.inFront = false;
+    document.hasFocus = () => window.inFront;
+  `);
+  model.answer(reply('Hello, Sam.'));
+  await page.goto(phoneOf(daemon, 'mira'));
+  await page.getByRole('button', {name: 'Messages', exact: true}).click();
+  await chat.goto(daemon.url);
+  await expect(chat.getByRole('textbox', {name: 'Message Mira'})).toBeVisible();
+  await say('Hello.', 'hello');
+  await expect(chat.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Hello, Sam.',
+  ]);
+  await expect(
+    page.locator('.phone-thread .bubble-own .bubble-text'),
+  ).toHaveText(['Hello, Sam.']);
+  await expect(status).toHaveText('Delivered');
+
+  await chat.evaluate(`
+    window.inFront = true;
+    window.dispatchEvent(new Event('focus'));
+  `);
+  await expect(status.locator('b')).toHaveText('Read');
+
+  const {read} = (await wire.phone('mira')) as {
+    readonly read: {readonly at: string};
+  };
+
+  await expect(status.locator('time')).toHaveAttribute('datetime', read.at);
+  await expect(status.locator('time')).toHaveText(/\d/u);
+});

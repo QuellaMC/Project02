@@ -1,9 +1,10 @@
 //! Her phone as a client reads it: her apps, what she has in front with
-//! its screen, what she last did and what rings; and one view's screen, on
-//! request. A screen is one piece of data, which her phone reads from the
-//! app and her window draws: what the window shows is what she reads.
+//! its screen, what she last did, what the person read of hers and what
+//! rings; and one view's screen, on request. A screen is one piece of
+//! data, which her phone reads from the app and her window draws: what the
+//! window shows is what she reads.
 
-use p02_core::Timestamp;
+use p02_core::{MessageId, Timestamp};
 use p02_shared::Identifier;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -13,7 +14,8 @@ use crate::config::RoleModelProvider;
 
 /// Her phone as it stands, read from her data whether she runs or not:
 /// her apps, in her phone's order; what she has in front, none her home
-/// screen; what she last did on it; and what rings, which nothing does but
+/// screen; what she last did on it; the newest message of hers the person
+/// read, none before they read one; and what rings, which nothing does but
 /// while a ring's moment of hers runs.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(
@@ -30,6 +32,8 @@ pub enum PhoneOutcome {
         front: Option<Box<PhoneFront>>,
         #[serde(skip_serializing_if = "Option::is_none")]
         did: Option<PhoneDid>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        read: Option<PhoneRead>,
         ringing: Vec<PhoneRing>,
     },
     Refused {
@@ -177,6 +181,15 @@ pub struct PhoneFront {
 pub struct PhoneDid {
     pub app_id: Identifier,
     pub words: String,
+    pub at: Timestamp,
+}
+
+/// The newest message of hers the person has read, and when: her Messages
+/// keeps it, as it says under her newest message there.
+#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+pub struct PhoneRead {
+    pub message_id: MessageId,
     pub at: Timestamp,
 }
 

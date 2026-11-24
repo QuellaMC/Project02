@@ -857,8 +857,9 @@ button.bubble {
 }
 
 /*
- * Under the person's newest message, how far it got: at the end of the
- * line, 3px under its bubble where the thread's lines are 8px apart.
+ * Under the holder's newest message, how far it got — the person's in
+ * their chat, hers on her phone: at the end of the line, 3px under its
+ * bubble where the thread's lines are 8px apart.
  */
 .bubble-status {
   align-self: flex-end;
@@ -3123,6 +3124,11 @@ body:has(> #root > .phone-window) {
 .phone-thread .bubble {
   max-width: 78%;
   padding: 8px 13px;
+}
+
+/* Under her newest message, whether the person read it: a size smaller, as the design's phone has it. */
+.phone-thread .bubble-status {
+  font-size: 11px;
 }
 
 /* Why her conversation cannot be shown, where her messages would be. */

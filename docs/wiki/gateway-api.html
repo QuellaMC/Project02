@@ -415,7 +415,8 @@
               → <code>PhoneOutcome</code>: <code>ok</code> with her
               <code>apps</code>, <code>front</code> when she has an app in
               front rather than her home screen, <code>did</code> once she
-              did anything on it, and <code>ringing</code>; or
+              did anything on it, <code>read</code> once the person read a
+              message of hers, and <code>ringing</code>; or
               <code>refused</code> (<code>unknown_character</code>,
               <code>no_phone</code>, when her settings switch it off), or
               <code>failed</code> with why it could not be read. Read from her
@@ -579,6 +580,19 @@
               person's its stamps and <code>readAt</code>, when she read it:
               the moment her turn took it. A message of hers an earlier build
               kept is in the app of the person's line before it.
+            </td>
+          </tr>
+          <tr>
+            <td>read</td>
+            <td><code>POST /api/conversations/:id/read</code></td>
+            <td>
+              <code>{messageId}</code> → <code>ReadOutcome</code>:
+              <code>ok</code>, her phone keeping that the person read that
+              message of hers, now, unless it keeps a later one;
+              <code>refused</code> (<code>unknown_conversation</code>,
+              <code>unknown_message</code> for an id that is no message of
+              hers in it, <code>no_phone</code>); or <code>failed</code>.
+              Then <code>phone_changed</code>. Described below.
             </td>
           </tr>
           <tr>
@@ -1239,12 +1253,17 @@ data: {…}</code></pre>
         home screen. <code>did</code> is what she last did on it: the
         <code>appId</code>, a few <code>words</code> in the past tense —
         <code>Opened Clock</code>, or an action's own, such as
-        <code>Set an alarm</code> — and the moment <code>at</code>. An app
-        messages come in shows her, on its one view,
-        <code>conversation</code>, the newest twenty messages that went
-        through it as bubbles, a <code>note</code> of the day and the time
-        where time has passed, and has no action: a message is sent one
-        way, as she sends any.
+        <code>Set an alarm</code> — and the moment <code>at</code>.
+        <code>read</code> is the newest message of hers the person read, by
+        its <code>messageId</code>, and the moment <code>at</code> her phone
+        kept it: her Messages keeps it. An app messages come in shows her, on
+        its one view, <code>conversation</code>, the newest twenty messages
+        that went through it as bubbles, a <code>note</code> of the day and
+        the time where time has passed, and under her newest message a
+        <code>note</code> saying <code>Delivered</code>, or, in Messages, once
+        <code>read</code> is of it or of a later message, <code>Read</code>
+        and the time it was read, or the day when that was not today; it has
+        no action: a message is sent one way, as she sends any.
         <code>ringing</code> is empty but while a moment of hers that a ring
         began runs, and then holds each ring it tells: its
         <code>appName</code>, <code>title</code>, <code>body</code> when it
@@ -1395,12 +1414,25 @@ data: {…}</code></pre>
       </p>
 
       <p>
+        A client says the person read a message of hers with
+        <code>POST /api/conversations/:id/read</code>, naming it by its
+        <code>messageId</code>: the daemon finds it among her messages in
+        that conversation, and her Messages keeps it, with the moment, as
+        <code>read</code>, whether she runs or not, unless it keeps a later
+        one, so a read of an older message changes nothing. The web page says
+        it of the newest message of hers its chat shows while its window has
+        the focus, once; her phone's window never does, being her phone.
+        Telegram tells nobody whether a message was read, so in Telegram her
+        phone says <code>Delivered</code> whatever the person read.
+      </p>
+
+      <p>
         <code>phone_changed</code> says her phone is to be read again: after a
         call of her phone's tools came back accepted, as a moment that a ring
         began begins, and once that moment's rings went to their apps, before
         its <code>turn_completed</code>; and once the person gave her an app,
-        removed one, said whether one may wake her or said how one is signed
-        in. A surface showing her
+        removed one, said whether one may wake her, said how one is signed
+        in or read a message of hers. A surface showing her
         phone reads it again then, and on every <code>ready</code>. A call of
         one of her phone's tools comes back as a
         <code>tool_call_completed</code> whose

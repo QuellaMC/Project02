@@ -92,7 +92,8 @@ pub enum Event {
     },
     /// Her phone is to be read again: a call of hers to it came back
     /// accepted, a ring's moment of hers began or ended, or the person gave
-    /// her an app, removed one, or said whether one may wake her.
+    /// her an app, removed one, said whether one may wake her or how one is
+    /// signed in, or read a message of hers.
     PhoneChanged {
         character_id: Identifier,
     },

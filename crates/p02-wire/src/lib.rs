@@ -39,7 +39,8 @@ pub use confirmation::{
 };
 pub use conversation::{
     GatewayMessage, HistoryMessage, HistoryOutcome, HistoryRefusal, OpenConversationBody,
-    OpenOutcome, OpenRefusal, StorageFailure, SubmitOutcome, TurnRefusal,
+    OpenOutcome, OpenRefusal, ReadBody, ReadOutcome, ReadRefusal, StorageFailure, SubmitOutcome,
+    TurnRefusal,
 };
 pub use diagnostic::{Code, Diagnostic, Severity};
 pub use event::{Event, Ready, RunningTurn, ToolCallStatus, TurnProgress, TurnStatus};
@@ -58,8 +59,9 @@ pub use pairing::{
 };
 pub use phone::{
     AppAccount, AppConnection, AppModel, AppSignIn, AppSignedIn, AppSource, AppView, BubbleFrom,
-    LiveReading, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing, Screen,
-    ScreenCell, ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow, ScreenTile,
+    LiveReading, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRead, PhoneRefusal, PhoneRing,
+    Screen, ScreenCell, ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow,
+    ScreenTile,
 };
 pub use protocol::{PROTOCOL_VERSION, ProtocolVersion};
 pub use refusal::{ErrorBody, Refusal};

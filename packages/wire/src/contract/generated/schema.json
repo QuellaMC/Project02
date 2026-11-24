@@ -2038,7 +2038,7 @@
             "kind",
             "characterId"
           ],
-          "description": "Her phone is to be read again: a call of hers to it came back\naccepted, a ring's moment of hers began or ended, or the person gave\nher an app, removed one, or said whether one may wake her."
+          "description": "Her phone is to be read again: a call of hers to it came back\naccepted, a ring's moment of hers began or ended, or the person gave\nher an app, removed one, said whether one may wake her or how one is\nsigned in, or read a message of hers."
         }
       ],
       "description": "What every surface hears."
@@ -2424,7 +2424,7 @@
     },
     "MessageId": {
       "type": "string",
-      "description": "A message's place in its session: `<session id>:message-<n>`, numbered\nfrom 1. Numbers climb but may skip, so a message's number is its order,\nnot a count."
+      "description": "A message's place in its session: `<session id>:message-<n>`, numbered\nfrom 1. Numbers climb but may skip, so a message's number is its order,\nnot a count. Messages order by session, then by number: a\nconversation's, as they were committed."
     },
     "ModelService": {
       "type": "object",
@@ -3131,6 +3131,9 @@
             "did": {
               "$ref": "#/$defs/PhoneDid"
             },
+            "read": {
+              "$ref": "#/$defs/PhoneRead"
+            },
             "ringing": {
               "type": "array",
               "items": {
@@ -3186,7 +3189,23 @@
           "description": "Her phone could not be read."
         }
       ],
-      "description": "Her phone as it stands, read from her data whether she runs or not:\nher apps, in her phone's order; what she has in front, none her home\nscreen; what she last did on it; and what rings, which nothing does but\nwhile a ring's moment of hers runs."
+      "description": "Her phone as it stands, read from her data whether she runs or not:\nher apps, in her phone's order; what she has in front, none her home\nscreen; what she last did on it; the newest message of hers the person\nread, none before they read one; and what rings, which nothing does but\nwhile a ring's moment of hers runs."
+    },
+    "PhoneRead": {
+      "type": "object",
+      "properties": {
+        "messageId": {
+          "$ref": "#/$defs/MessageId"
+        },
+        "at": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "required": [
+        "messageId",
+        "at"
+      ],
+      "description": "The newest message of hers the person has read, and when: her Messages\nkeeps it, as it says under her newest message there."
     },
     "PhoneRefusal": {
       "oneOf": [
@@ -3289,6 +3308,93 @@
         "order"
       ],
       "description": "How a plugin's row on a settings page is drawn, as its manifest\ndeclares it."
+    },
+    "ReadBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "messageId": {
+          "$ref": "#/$defs/Short"
+        }
+      },
+      "required": [
+        "messageId"
+      ],
+      "description": "The message of hers in a conversation that the person read: the newest\nthe chat showed them."
+    },
+    "ReadOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/ReadRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "The conversation, or her phone, could not be read or written."
+        }
+      ],
+      "description": "What came of the person reading a message of hers: kept with her phone,\nwhose Messages says so; or why it is not."
+    },
+    "ReadRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown_conversation"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "unknown_message",
+          "description": "The conversation holds no message of hers by that id."
+        },
+        {
+          "type": "string",
+          "const": "no_phone",
+          "description": "She has no phone to keep it: her settings switch it off."
+        }
+      ]
     },
     "Refusal": {
       "type": "object",

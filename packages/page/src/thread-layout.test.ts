@@ -250,7 +250,7 @@ describe('thread layout', () => {
     ]);
   });
 
-  it("stands one line under the person's newest message, the last line still on its way when there is one, saying how far it got; under a message of theirs, Read and the time on the day she read it, else the day, whatever app it was in; under every line that did not reach her, that it did not; under none of hers, and none on her phone", () => {
+  it("stands one line under the holder's newest message, the last line still on its way when there is one, saying how far it got: in the chat, under a message of the person's, Read and the time on the day she read it, else the day, whatever app it was in, under every line that did not reach her, that it did not, and under none of hers; on her phone, under her newest, Delivered until the person read it, then Read and when", () => {
     const statuses = (shown: Shown, holder?: Holder) => {
       const laid = laidOut(shown, newYork, holder);
 
@@ -328,15 +328,29 @@ describe('thread layout', () => {
         {word: 'Read', read: {when, at: read}},
         undefined,
       ]);
-      expect(
-        statuses(thread(...messages), onHerPhone('messages')).filter(
-          status => status !== undefined,
-        ),
-      ).toEqual([]);
     }
 
     expect(statuses(thread(hers(nyc('2026-11-24T18:45'))))).toEqual([
       undefined,
+    ]);
+
+    const before = [
+      readAt(mine(nyc('2026-11-24T18:40')), nyc('2026-11-24T18:40')),
+      hers(nyc('2026-11-24T18:41')),
+    ];
+    const newest = hers(nyc('2026-11-24T18:45'));
+    const onPhone = (last: Message) =>
+      statuses(thread(...before, last), onHerPhone('messages'));
+
+    expect(onPhone(newest)).toEqual([
+      undefined,
+      undefined,
+      {word: 'Delivered'},
+    ]);
+    expect(onPhone(readAt(newest, nyc('2026-11-24T18:46')))).toEqual([
+      undefined,
+      undefined,
+      {word: 'Read', read: {when: '6:46 PM', at: nyc('2026-11-24T18:46')}},
     ]);
   });
 

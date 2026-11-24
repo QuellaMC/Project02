@@ -145,8 +145,11 @@ impl fmt::Display for SessionId {
 
 /// A message's place in its session: `<session id>:message-<n>`, numbered
 /// from 1. Numbers climb but may skip, so a message's number is its order,
-/// not a count.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+/// not a count. Messages order by session, then by number: a
+/// conversation's, as they were committed.
+#[derive(
+    Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema, TS,
+)]
 #[serde(try_from = "String", into = "String")]
 #[ts(as = "String")]
 pub struct MessageId {

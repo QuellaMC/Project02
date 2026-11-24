@@ -227,9 +227,9 @@ function AppView({
  * screen and the person at its head, with the app's name under theirs but
  * in Messages; what went through it, laid out as the chat lays out the
  * conversation and mirrored, since it is her phone: hers at the end of the
- * line in the app's colour, the person's at its start on a card; and a
- * message box, which is only drawn. It follows its newest message as the
- * chat does.
+ * line in the app's colour, the person's at its start on a card, and under
+ * her newest message whether the person read it; and a message box, which
+ * is only drawn. It follows its newest message as the chat does.
  */
 function ThreadView({
   thread,

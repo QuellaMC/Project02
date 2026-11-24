@@ -30,7 +30,7 @@ pub use app::App;
 pub use asks::{Asks, it_may};
 pub use bundled::BundledAppError;
 pub use catalog::{Catalog, CatalogApp};
-pub use chat::Chats;
+pub use chat::{Chats, Read};
 pub use data::Ring;
 pub use error::{CatalogError, PackageError, PhoneError};
 pub use exchange::{Ask, Exchange};

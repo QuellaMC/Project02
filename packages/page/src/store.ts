@@ -56,8 +56,9 @@ type Connected = {readonly connection: Connection};
 
 /**
  * A committed message as the page shows it, with when it was sent and the
- * id of the app it is in; a person's own is told by its role, and says
- * when she read it.
+ * id of the app it is in; a person's own is told by its role. Once the one
+ * it went to read it, it says when: the person's, when her turn took it
+ * in; hers, on her phone, when the person read it or a later one.
  */
 export type Message = {
   readonly messageId: string;

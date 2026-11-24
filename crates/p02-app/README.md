@@ -45,8 +45,9 @@ with an outcome of p02-wire, never an error.
   account it uses by a key, with whether the home's settings hold that
   key, or, for an app that asks a model, the connections of theirs it can
   sign in with now and how it is signed in; what
-  she has in front with its screen and what she last did, with what
-  rings, which her actor publishes while a ring's moment runs. A view of
+  she has in front with its screen, what she last did and the newest
+  message of hers the person read, with what rings, which her actor
+  publishes while a ring's moment runs. A view of
   an app is read on request too, and changes nothing of hers. One whose settings switch her phone off has none to
   read. The stream says her phone changed after a call of her phone's
   tools came back accepted, and as a ring's moment begins and once its
@@ -76,9 +77,11 @@ with an outcome of p02-wire, never an error.
   each app stands on her phone; an app of it given to her by the one path
   her own ask takes, an older version replaced keeping what it keeps;
   an app from a file, previewed with nothing written, then given; an app
-  removed; whether an app may wake her; and how an app that asks a model
+  removed; whether an app may wake her; how an app that asks a model
   is signed in: with a connection of theirs connected now, asking a model
-  it offers or the one it starts with, or signed out. Each that changed
+  it offers or the one it starts with, or signed out; and a message of
+  hers they read, found in her conversation by its id, which her Messages
+  keeps at that moment unless it keeps a later one. Each that changed
   her phone says so on the stream, and her actor, while she runs, reads
   its rings again.
 - **The stream** hears each turn as it goes: its messages once they are

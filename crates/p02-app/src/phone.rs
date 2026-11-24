@@ -1,10 +1,10 @@
 //! Her phone as a client reads it, from her data whether she runs or not:
 //! her apps, the apps that carry her messages now, those it comes with and
 //! those installed on it, what she has in front with its screen, what she
-//! last did on it and what rings; and one view's screen, which a person
-//! looking around her phone reads, and which changes nothing of hers. Her
-//! conversation with the person, as her phone's own apps show it, is the
-//! daemon's to say.
+//! last did on it, the newest message of hers the person read and what
+//! rings; and one view's screen, which a person looking around her phone
+//! reads, and which changes nothing of hers. Her conversation with the
+//! person, as her phone's own apps show it, is the daemon's to say.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -13,14 +13,15 @@ use p02_characters::discover;
 use p02_contracts::{CharacterStorage, FileStoreBackend, LeasedFiles, StoreError};
 use p02_core::AppNames;
 use p02_phone::{
-    Account, AccountKind, Chats, Listed, Now, OnPhone, Phone, PhoneError, Source, it_may,
+    Account, AccountKind, Chats, Listed, Now, OnPhone, Phone, PhoneError, Read, Source, it_may,
 };
 use p02_plugins::PHONE_PLUGIN;
 use p02_shared::{Identifier, error_chain, error_sentence, sentence};
 use p02_store::{CharacterData, Home};
 use p02_wire::{
     AppAccount, AppSignIn, AppSource, AppView, HistoryMessage, PersonAccount, PhoneApp, PhoneDid,
-    PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing, Screen, ScreenOutcome, ScreenRefusal,
+    PhoneFront, PhoneOutcome, PhoneRead, PhoneRefusal, PhoneRing, Screen, ScreenOutcome,
+    ScreenRefusal,
 };
 
 use crate::connections::Linked;
@@ -64,9 +65,9 @@ pub(crate) struct HerChats {
 
 impl Daemon {
     /// Her phone as it stands: her apps, what she has in front with its
-    /// screen and what she last did on it, read from her data on the
-    /// blocking pool under a lease of its store, and what rings on it as
-    /// her actor last published.
+    /// screen, what she last did on it and the newest message of hers the
+    /// person read, read from her data on the blocking pool under a lease
+    /// of its store, and what rings on it as her actor last published.
     pub async fn phone(&self, character: &str) -> PhoneOutcome {
         let world = Arc::clone(self.world());
         let daemon = self.downgrade();
@@ -224,6 +225,7 @@ fn shown(
     let state = phone
         .state(files, chats)
         .map_err(|error| Unread::Failed(unread(&error)))?;
+    let read = Read::kept(files).map_err(|error| Unread::Failed(unread(&error)))?;
     let front = match state.front {
         None => None,
         Some(front) => {
@@ -254,6 +256,10 @@ fn shown(
             app_id: did.app,
             words: did.words,
             at: did.at,
+        }),
+        read: read.map(|read| PhoneRead {
+            message_id: read.message,
+            at: read.at,
         }),
         ringing,
     })

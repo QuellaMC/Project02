@@ -90,6 +90,14 @@ a page of the scrollback or a snapshot, for what she sends in Telegram,
 or while the window is in front. The first asks the system's permission,
 once, and a no is final and silent. Her phone's window never notifies,
 and a browser tab, which has no such call, shows none.
+A message of hers is read once the chat of its conversation shows it in
+the main window, the desktop app's or a tab, while that window has the
+focus and the stream is live: as it arrives there, when her chat opens,
+or when the window comes to the front with it open, though not while the
+settings stand in front of the chat. The daemon is then told the newest
+message of hers the chat shows, once, by the rule of `reads.ts`, pure and
+tested in Node, and nothing it answers is said. Her phone's window never
+tells: it is her phone.
 Her chat's head has a Her Phone button unless the daemon says she has no
 phone. It opens her phone in the one window every character's phone
 shares, and closes it, and is pressed while that window shows hers: the
@@ -253,12 +261,16 @@ through that app alone, laid out by `thread-layout.ts` as the chat is and
 mirrored, since it is her phone: hers at the line's end in the app's
 colour and the person's at its start on a card, a time where time has
 passed and no app's name, one app being on screen; her typing is not
-there. At its head stand a way back to her home screen and the person,
-by the name their newest message goes by, with the app's name under
-theirs but in Messages; at its foot a message box that is only drawn. It
-follows its newest message as the chat does, and a conversation that
-cannot be opened or read is said in the daemon's sentence where her
-messages would be.
+there. Under her newest message one line says whether the person read
+it, as the chat says how far the person's got: in Messages `Read` and
+when, once the read her phone keeps is of it or of a later message in
+any app, and `Delivered` until then; in Telegram, which tells nobody,
+always `Delivered`. At its head stand a way back to her home screen and
+the person, by the name their newest message goes by, with the app's name
+under theirs but in Messages; at its foot a message box that is only
+drawn. It follows its newest message as the chat does, and a
+conversation that cannot be opened or read is said in the daemon's
+sentence where her messages would be.
 A character the daemon does not know, or whose settings give her no phone,
 is said in the daemon's sentence where her phone would be.
 `phone-window.tsx` and `phone-device.tsx` draw it as the design draws an

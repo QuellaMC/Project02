@@ -535,7 +535,8 @@ export type MaintenanceFailure = { at: Timestamp, message: string, };
 /**
  * A message's place in its session: `<session id>:message-<n>`, numbered
  * from 1. Numbers climb but may skip, so a message's number is its order,
- * not a count.
+ * not a count. Messages order by session, then by number: a
+ * conversation's, as they were committed.
  */
 export type MessageId = string;
 
@@ -743,10 +744,17 @@ export type PhoneFront = { appId: Identifier, viewId: Identifier, screen?: Scree
 /**
  * Her phone as it stands, read from her data whether she runs or not:
  * her apps, in her phone's order; what she has in front, none her home
- * screen; what she last did on it; and what rings, which nothing does but
+ * screen; what she last did on it; the newest message of hers the person
+ * read, none before they read one; and what rings, which nothing does but
  * while a ring's moment of hers runs.
  */
-export type PhoneOutcome = { "status": "ok", apps: ReadonlyArray<PhoneApp>, front?: PhoneFront, did?: PhoneDid, ringing: ReadonlyArray<PhoneRing>, } | { "status": "refused", reason: PhoneRefusal, message: string, } | { "status": "failed", message: string, };
+export type PhoneOutcome = { "status": "ok", apps: ReadonlyArray<PhoneApp>, front?: PhoneFront, did?: PhoneDid, read?: PhoneRead, ringing: ReadonlyArray<PhoneRing>, } | { "status": "refused", reason: PhoneRefusal, message: string, } | { "status": "failed", message: string, };
+
+/**
+ * The newest message of hers the person has read, and when: her Messages
+ * keeps it, as it says under her newest message there.
+ */
+export type PhoneRead = { messageId: MessageId, at: Timestamp, };
 
 export type PhoneRefusal = "unknown_character" | "no_phone";
 
@@ -791,6 +799,20 @@ order: number,
  * a plugin whose home settings are an account set up once.
  */
 connection?: string, };
+
+/**
+ * The message of hers in a conversation that the person read: the newest
+ * the chat showed them.
+ */
+export type ReadBody = { messageId: Short, };
+
+/**
+ * What came of the person reading a message of hers: kept with her phone,
+ * whose Messages says so; or why it is not.
+ */
+export type ReadOutcome = { "status": "ok" } | { "status": "refused", reason: ReadRefusal, message: string, } | { "status": "failed", message: string, };
+
+export type ReadRefusal = "unknown_conversation" | "unknown_message" | "no_phone";
 
 /**
  * A transport refusal: the envelope's code and sentence.

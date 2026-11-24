@@ -3,8 +3,10 @@
  * event and every outcome passes through the store's reducers, and the
  * page reads the store, never the client. In the desktop app's main
  * window, each event also passes through the rule of when the app shows a
- * notification. The address is the page's own, so this runs only in a
- * browser: the browser suite is its cover.
+ * notification. Whatever the page shows changing, and the window coming
+ * to the front, pass through the rule of when the person read a message
+ * of hers. The address is the page's own, so this runs only in a browser:
+ * the browser suite is its cover.
  */
 import type {
   Answer,
@@ -20,6 +22,7 @@ import {settingAskOf} from './ask-words.ts';
 import {dockStepped, dockWaited, herSettingsRead} from './dock.ts';
 import {notificationFor} from './notifications.ts';
 import {followHerPhone, openHerPhone} from './phone-link.ts';
+import {readOf} from './reads.ts';
 import {
   createSettingsVerbs,
   noSettingsVerbs,
@@ -265,6 +268,8 @@ export function createSession(address: string): Session {
     },
   });
 
+  tellReads(client, getState, subscribe);
+
   const sending = (): Sending => ({client, apply});
   const accounting = (): Accounting => ({...sending(), readPage, getState});
 
@@ -455,6 +460,37 @@ function notifying(
       void notify(asked.notification).catch(() => undefined);
     }
   };
+}
+
+/**
+ * Tells the daemon of each message of hers the person read, by the rule in
+ * `reads.ts`, with the window's focus as it is then: whenever what the
+ * tab shows changes, and whenever the window comes to the front. What the
+ * daemon answers is not said: nothing the person did went wrong.
+ */
+function tellReads(
+  client: GatewayClient,
+  getState: () => WebState,
+  subscribe: (listener: () => void) => () => void,
+): void {
+  let told: ReadonlyMap<string, string> = new Map();
+  const tell = (): void => {
+    const next = readOf(told, getState(), document.hasFocus());
+
+    if (next === undefined) {
+      return;
+    }
+
+    const {read} = next;
+
+    told = next.told;
+    void client
+      .readHers(read.conversationId, read.messageId)
+      .catch(() => undefined);
+  };
+
+  subscribe(tell);
+  window.addEventListener('focus', tell);
 }
 
 /**

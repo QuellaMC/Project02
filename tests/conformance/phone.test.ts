@@ -807,7 +807,7 @@ it('phone.ring-on-the-wire: while her settings switch her phone off, her phone i
   expect(await wire.phone('mira')).toMatchObject({status: 'ok', ringing: []});
 });
 
-it("phone.messages: once a line from the page has her answer and a line from Telegram has hers, she opens Messages and is shown what went through Messages alone, the person's and hers as bubbles under the day and the time where the person is, and nothing to do in it; her phone then has Messages in front, opened", async () => {
+it("phone.messages: once a line from the page has her answer and a line from Telegram has hers, she opens Messages and is shown what went through Messages alone, the person's and hers as bubbles under the day and the time where the person is, with a note under her newest there, and nothing to do in it; her phone then has Messages in front, opened", async () => {
   const model = await startModelServer();
   const wire = wireOf(await startDaemon(quietHome(model), utc));
   const say = await converse(wire, 'mira');
@@ -846,6 +846,7 @@ it("phone.messages: once a line from the page has her answer and a line from Tel
         {kind: 'note', text: dayAndTime(messages[0]?.sentAt ?? '')},
         {kind: 'bubble', from: 'them', text: 'Hello from the page.'},
         {kind: 'bubble', from: 'her', text: 'Hello, Sam.'},
+        {kind: 'note', text: 'Delivered'},
         {kind: 'bubble', from: 'them', text: 'What is on your phone?'},
       ],
     },
@@ -853,6 +854,133 @@ it("phone.messages: once a line from the page has her answer and a line from Tel
   expect(await wire.phone('mira')).toMatchObject({
     front: {appId: 'messages', viewId: 'conversation'},
     did: {appId: 'messages', words: 'Opened Messages'},
+  });
+});
+
+it('phone.read: a read of a message of hers is answered ok and kept with her phone, which then says the newest message of hers the person read and the moment it was kept, and the stream says her phone changed; a read of an older one after it changes nothing; when she opens Messages herself, a note under her newest message there says Delivered before the read and Read with its time where the person is after', async () => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(quietHome(model), utc);
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+  /** What she was shown as she last opened Messages. */
+  const shownToHer = () =>
+    (
+      toolResults(model.requests.at(-1)).at(-1) as {
+        readonly output: {readonly screen: unknown};
+      }
+    ).output.screen;
+  /** The id of her message, the last a line's turn committed. */
+  const hersIn = (turn: unknown) =>
+    (turn as {readonly messages: readonly {readonly messageId: string}[]})
+      .messages[1]?.messageId ?? '';
+
+  model.answer(
+    reply('Hi, Sam.'),
+    calling(['phone_open', {app: 'messages'}]),
+    reply('Nothing new.'),
+    calling(['phone_open', {app: 'messages'}]),
+    reply('You read it.'),
+  );
+
+  const hiSam = hersIn(await say('Hello.', 'hello'));
+  const nothingNew = hersIn(await say('Look at your phone.', 'before'));
+  const {messages} = (await wire.history(conversationId)) as {
+    readonly messages: readonly {readonly sentAt: string}[];
+  };
+  const opening = {kind: 'note', text: dayAndTime(messages[0]?.sentAt ?? '')};
+  const them = (text: string) => ({kind: 'bubble', from: 'them', text});
+  const her = (text: string) => ({kind: 'bubble', from: 'her', text});
+
+  expect(shownToHer()).toEqual({
+    items: [
+      opening,
+      them('Hello.'),
+      her('Hi, Sam.'),
+      {kind: 'note', text: 'Delivered'},
+      them('Look at your phone.'),
+    ],
+  });
+
+  const events = await openEvents(daemon);
+
+  expect(await wire.readHers(conversationId, nothingNew)).toEqual({
+    status: 'ok',
+  });
+  await events.next(frameOf('phone_changed', {characterId: 'mira'}));
+
+  const {read} = (await wire.phone('mira')) as {
+    readonly read: {readonly messageId: string; readonly at: string};
+  };
+
+  expect(read).toEqual({
+    messageId: nothingNew,
+    at: expect.stringMatching(
+      /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u,
+    ) as string,
+  });
+  expect(await wire.readHers(conversationId, hiSam)).toEqual({status: 'ok'});
+  expect(await wire.phone('mira')).toMatchObject({read});
+
+  await say('And now?', 'after');
+  expect(shownToHer()).toEqual({
+    items: [
+      opening,
+      them('Hello.'),
+      her('Hi, Sam.'),
+      them('Look at your phone.'),
+      her('Nothing new.'),
+      {kind: 'note', text: `Read ${read.at.slice(11, 16)}`},
+      them('And now?'),
+    ],
+  });
+});
+
+it("phone.read-refused: a read is refused in a sentence for a conversation the home does not hold, for an id that is no message of hers in it, the person's own among them, and while her settings switch her phone off", async () => {
+  const model = await startModelServer();
+  const wire = wireOf(await startDaemon(quietHome(model)));
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+
+  model.answer(reply('Hi, Sam.'));
+
+  const {messages} = (await say('Hello.', 'hello')) as {
+    readonly messages: readonly {readonly messageId: string}[];
+  };
+  const [theirs, hers] = messages.map(message => message.messageId);
+
+  expect(await wire.readHers('conv_nowhere', hers ?? '')).toEqual({
+    status: 'refused',
+    reason: 'unknown_conversation',
+    message: 'Conversation "conv_nowhere" does not exist.',
+  });
+
+  for (const messageId of [
+    theirs ?? '',
+    `${conversationId}.1:message-99`,
+    'hello',
+  ]) {
+    expect(await wire.readHers(conversationId, messageId)).toEqual({
+      status: 'refused',
+      reason: 'unknown_message',
+      message: `There is no message "${messageId}" of hers in conversation "${conversationId}".`,
+    });
+  }
+
+  await saveConfig(
+    wire,
+    {scope: 'character', characterId: 'mira'},
+    {
+      kind: 'section_enabled',
+      namespace: 'plugins',
+      id: 'phone',
+      enabled: false,
+    },
+  );
+  expect(await wire.readHers(conversationId, hers ?? '')).toEqual({
+    status: 'refused',
+    reason: 'no_phone',
+    message: 'Mira has no phone: her settings switch it off.',
   });
 });
 

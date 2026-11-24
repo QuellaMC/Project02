@@ -120,7 +120,7 @@ const pause = 15 * 60_000;
 
 const dayLength = 24 * 60 * 60_000;
 
-/** What the line under a line not yet committed says, by how far it got. */
+/** What the line under a line not yet committed says, by how far it got; a message not yet read got as far as delivered. */
 const lineWords: Readonly<Record<LineState, string>> = {
   sending: 'Sending…',
   delivered: 'Delivered',
@@ -162,7 +162,7 @@ export function hourAndMinute(
  * under it, whichever it is. Under the holder's newest message besides —
  * the last line still on its way, when there is one — stands how far it
  * got: for a line on its way, as far as the daemon has said; for a
- * message, `Read` and when, once it was read.
+ * message, `Read` and when once it was read, and `Delivered` until then.
  */
 export function laidOut(
   shown: Shown,
@@ -204,26 +204,42 @@ export function laidOut(
     return {messages, pending: pending.with(onItsWay, said(sent))};
   }
 
-  const today = write(clock.now).day;
   const newest = messages.findLastIndex(placed => placed.own);
-  const read = messages[newest];
-  const readAt = read?.message.readAt;
+  const last = messages[newest];
 
-  if (read === undefined || readAt === undefined) {
+  if (last === undefined) {
     return {messages, pending};
+  }
+
+  return {
+    messages: messages.with(newest, {
+      ...last,
+      status: reached(write, clock.now, last.message.readAt),
+    }),
+    pending,
+  };
+}
+
+/**
+ * What stands under a message, the holder's newest, read at `readAt`:
+ * `Read` and when, the time alone on the day it was read and the day on
+ * another, as a divider writes them, with that moment as the daemon
+ * writes one; while it was not read, `Delivered`.
+ */
+function reached(
+  write: (at: number) => Written,
+  now: number,
+  readAt: string | undefined,
+): Status {
+  if (readAt === undefined) {
+    return {word: lineWords.delivered};
   }
 
   const {day, words, time} = write(Date.parse(readAt));
 
   return {
-    messages: messages.with(newest, {
-      ...read,
-      status: {
-        word: 'Read',
-        read: {when: day === today ? time : words, at: readAt},
-      },
-    }),
-    pending,
+    word: 'Read',
+    read: {when: day === write(now).day ? time : words, at: readAt},
   };
 }
 
