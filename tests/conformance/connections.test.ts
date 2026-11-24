@@ -383,7 +383,7 @@ it("connections.unasked: her ask to sign in is refused before anyone is asked, e
     refused('signs_in_to_nothing', 'Clock signs in to nothing.'),
     refused(
       'app_not_found',
-      'There is no app "nope" on the phone. Your apps: Clock ("clock"), Asker ("asker"), App Store ("store").',
+      'There is no app "nope" on the phone. Your apps: Messages ("messages"), Clock ("clock"), Asker ("asker"), App Store ("store").',
     ),
   ]);
 

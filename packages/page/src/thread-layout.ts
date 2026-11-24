@@ -1,11 +1,13 @@
 /**
- * The one conversation as the chat draws it, as a messaging app does: a
- * time stands where time has passed, with the app's name above it where
- * the app changes; the person's bubbles are in their app's colour; and one
- * sender's messages in a row sit close together. A line of the person's
- * not yet committed is drawn as theirs sent now in Messages. Nothing here
- * touches the DOM or reads a clock: the viewer's clock comes in, so the
- * rules are tested in Node.
+ * The one conversation as a messaging app draws it: a time stands where
+ * time has passed, with the app's name above it where the app changes; the
+ * holder's own bubbles are in their app's colour; and one sender's
+ * messages in a row sit close together. The chat draws it in Messages as
+ * the person holds it, theirs at the end of the line, and a line of theirs
+ * not yet committed as theirs sent now in Messages; her phone draws what
+ * went through one app as she holds it, the mirror of the chat. Nothing
+ * here touches the DOM or reads a clock: the viewer's clock comes in, so
+ * the rules are tested in Node.
  */
 import type {VisibleMessageRole} from '@project02/wire/contract';
 import type {Message, PendingLine} from './store.ts';
@@ -43,6 +45,17 @@ export type Divider = {
   readonly at: string;
 };
 
+/**
+ * Whose screen a thread is drawn on, and in which app: the app it is
+ * drawn in, which the first message follows, so that an app's name stands
+ * only where the conversation moved away from it; and whose messages are
+ * the holder's own.
+ */
+export type Holder = {
+  readonly app: string;
+  readonly own: VisibleMessageRole;
+};
+
 /** Where a message stands and how its bubble looks. */
 export type Placement = {
   /** What stands above it, where anything does. */
@@ -51,11 +64,13 @@ export type Placement = {
   readonly joined: boolean;
   /** When it was sent, as a divider writes it: what its bubble says on hover. */
   readonly when: string;
-  /** The person's bubble's colour, their app's; hers keep their own. */
+  /** Whether it is the holder's own, at the end of the line. */
+  readonly own: boolean;
+  /** The holder's own bubble's colour, its app's; the other's keep their own. */
   readonly colour?: string;
 };
 
-/** A message, or a line not yet committed, as the chat draws it. */
+/** A message, or a line not yet committed, as its thread is drawn. */
 export type Laid<T> = Placement & {readonly message: T};
 
 /** What the rules read of a message: who sent it, when, and in which app. */
@@ -69,10 +84,10 @@ type CalendarDay = {readonly year: number; readonly day: number};
 /** The app's own chat, which every line of the page's is sent in. */
 const messagesApp = 'messages';
 
-/** The page's own blue: the person's bubbles in Messages, and in any app the chat does not know. */
+/** The page's own blue: the holder's own bubbles in Messages, and in any app the page does not know. */
 const pageBlue = 'var(--link)';
 
-/** Each app the chat knows, by its id: its name, and the colour of the person's bubbles in it. */
+/** Each app the page knows, by its id: its name, and the colour of the holder's own bubbles in it. */
 const apps: ReadonlyMap<string, App> = new Map([
   [messagesApp, {name: 'Messages', colour: pageBlue}],
   ['telegram', {name: 'Telegram', colour: 'var(--telegram)'}],
@@ -83,18 +98,33 @@ const pause = 15 * 60_000;
 
 const dayLength = 24 * 60 * 60_000;
 
+/** The person's chat: Messages, which shows what went through every app, theirs at the end of the line. */
+export const chat: Holder = {app: messagesApp, own: 'user'};
+
+/** Her phone, in the app `app`, which shows what went through it alone: hers at the end of the line. */
+export function onHerPhone(app: string): Holder {
+  return {app, own: 'character'};
+}
+
+/** What the head of her phone's thread in `app` says under the person's name: the app's name, but in Messages, the phone's own, nothing. */
+export function labelOf(app: string): string | undefined {
+  return app === messagesApp ? undefined : appOf(app).name;
+}
+
 /**
- * The thread as the chat draws it: each message, then each line not yet
- * committed, with where it stands and how its bubble looks.
+ * The thread as `holder` draws it, the person's chat unless another is
+ * named: each message, then each line not yet committed, with where it
+ * stands and how its bubble looks.
  */
 export function laidOut(
   shown: Shown,
   clock: Clock,
+  holder: Holder = chat,
 ): {
   readonly messages: readonly Laid<Message>[];
   readonly pending: readonly Laid<Pending>[];
 } {
-  const lay = layer(clock);
+  const lay = layer(clock, holder);
   const messages = shown.messages.map(message => lay.next(message, message));
 
   if (shown.between) {
@@ -113,21 +143,24 @@ export function laidOut(
   };
 }
 
-/** An app by its id; one the chat does not know goes by its id, in the page's blue. */
+/** An app by its id; one the page does not know goes by its id, in the page's blue. */
 function appOf(id: string): App {
   return apps.get(id) ?? {name: id, colour: pageBlue};
 }
 
 /**
- * Lays messages out one after another, as the thread shows them. A
- * divider stands before a message that is the first, or was sent on
- * another day, more than 15 minutes after, or in another app than the
- * message before it, whoever wrote that; the first counts as following
- * Messages, so an app's name stands only where the conversation moved to
- * it. A message sits close under the one directly above it when the same
- * sender wrote both and no divider stands between.
+ * Lays messages out one after another, as `holder` draws the thread. A
+ * divider stands before a message that is the first, or was sent
+ * on another day, more than 15 minutes after, or in another app than the
+ * message before it, whoever wrote that; the first counts as following the
+ * app the thread is drawn in, so an app's name stands only where the
+ * conversation moved to it. A message sits close under the one directly
+ * above it when the same sender wrote both and no divider stands between.
  */
-function layer(clock: Clock): {
+function layer(
+  clock: Clock,
+  holder: Holder,
+): {
   readonly next: <T>(message: T, sent: Sent) => Laid<T>;
   /** Something that is no message stands here: the next message is under it. */
   readonly apart: () => void;
@@ -142,7 +175,7 @@ function layer(clock: Clock): {
     next: (message, sent) => {
       const at = Date.parse(sent.sentAt);
       const {day, words, time} = write(at);
-      const named = sent.app !== (before?.app ?? messagesApp);
+      const named = sent.app !== (before?.app ?? holder.app);
       const divided =
         before === undefined ||
         named ||
@@ -150,6 +183,7 @@ function layer(clock: Clock): {
         at - before.at > pause;
       const joined = !divided && above === sent.role;
       const app = appOf(sent.app);
+      const own = sent.role === holder.own;
 
       before = {at, day, app: sent.app};
       above = sent.role;
@@ -168,7 +202,8 @@ function layer(clock: Clock): {
           : {}),
         joined,
         when: `${words} ${time}`,
-        ...(sent.role === 'user' ? {colour: app.colour} : {}),
+        own,
+        ...(own ? {colour: app.colour} : {}),
       };
     },
     apart: () => {

@@ -7,6 +7,7 @@ use p02_contracts::{
     PluginToolDefinitions, ProvidedTool, Registration, RegistrationError, RuntimePlugin,
     SessionHistoryFeed, StoreAccess,
 };
+use p02_phone::Chats;
 use p02_shared::Identifier;
 use serde_json::{Map, Value};
 
@@ -42,6 +43,7 @@ pub struct PluginHostBuilder {
     catalog: Arc<AppCatalog>,
     internet: Arc<AppInternet>,
     connections: Arc<dyn Connections>,
+    chats: Arc<dyn Chats>,
 }
 
 /// A plugin as it is enabled: its manifest, the values its character's
@@ -121,8 +123,9 @@ impl PluginHost {
     /// through `confirmer` before an approval-gated call takes effect,
     /// whose settings `config_control` reads and changes for the host's own
     /// plugin, and whose phone reads the App Store's catalog through
-    /// `catalog`, has her apps' requests made through `internet`, and their
-    /// questions asked through the person's `connections`.
+    /// `catalog`, has her apps' requests made through `internet`, their
+    /// questions asked through the person's `connections`, and shows her
+    /// conversation with the person as `chats` reads it.
     #[must_use]
     pub fn builder(
         storage: Arc<dyn CharacterStorage>,
@@ -131,6 +134,7 @@ impl PluginHost {
         catalog: Arc<AppCatalog>,
         internet: Arc<AppInternet>,
         connections: Arc<dyn Connections>,
+        chats: Arc<dyn Chats>,
     ) -> PluginHostBuilder {
         PluginHostBuilder {
             storage,
@@ -140,6 +144,7 @@ impl PluginHost {
             catalog,
             internet,
             connections,
+            chats,
         }
     }
 
@@ -235,6 +240,7 @@ impl PluginHostBuilder {
                     Arc::clone(&self.catalog),
                     Arc::clone(&self.internet),
                     Arc::clone(&self.connections),
+                    Arc::clone(&self.chats),
                 ),
                 _ => factory,
             };
@@ -391,6 +397,7 @@ impl fmt::Debug for PluginHostBuilder {
             .field("catalog", &self.catalog)
             .field("internet", &self.internet)
             .field("connections", &self.connections)
+            .field("chats", &self.chats)
             .finish()
     }
 }

@@ -22,7 +22,13 @@ import {
   type ModelServer,
 } from '../conformance/harness/model-server.ts';
 import {respondedWhole, saying} from '../conformance/harness/responses.ts';
-import {converse, saveConfig, wireOf} from '../conformance/harness/wire.ts';
+import {
+  conversationOf,
+  converse,
+  saveConfig,
+  sender,
+  wireOf,
+} from '../conformance/harness/wire.ts';
 import {test} from './fixture.ts';
 
 // A ring's time is drawn on the person's clock, in their language and zone:
@@ -649,4 +655,69 @@ test("page.phone-bubbles: her phone's window draws a conversation as bubbles, he
       })()`,
     ),
   ).toEqual({runsPast: true, atEnd: true});
+});
+
+test("page.phone-messages: in her phone's window, Messages, first on her home screen, opens the conversation as it went through Messages, Sam named at its head: her message at the line's end in the page's blue, his at its start on a card, and nothing written in Telegram; a message committed there joins it", async ({
+  page,
+}) => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(quietHome(model));
+  const wire = wireOf(daemon);
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const send = await sender(wire);
+  const thread = page.locator('.phone-thread');
+  const said = thread.locator('.bubble-text');
+
+  model.answer(
+    reply('Hello, Sam.'),
+    reply('Hello on Telegram.'),
+    reply('Still here.'),
+  );
+  await say('Hello from the page.', 'page');
+  await send({
+    conversationId,
+    text: 'From Telegram.',
+    source: 'telegram:mira_bot',
+    clientMessageId: 'telegram',
+  });
+  await page.goto(phoneOf(daemon, 'mira'));
+  await expect(page.locator('.phone-app')).toHaveText([
+    'Messages',
+    'Clock',
+    'App Store',
+  ]);
+  await page.getByRole('button', {name: 'Messages', exact: true}).click();
+  await expect(said).toHaveText(['Hello from the page.', 'Hello, Sam.']);
+  await expect(thread.locator('.phone-thread-name')).toHaveText('Sam');
+
+  const hers = thread.locator('.bubble-own');
+  const theirs = thread.locator('.bubble-theirs');
+  const [her, them, lines] = await Promise.all([
+    boxOf(hers),
+    boxOf(theirs),
+    boxOf(thread.locator('.lines')),
+  ]);
+
+  expect({
+    herAtTheEnd: Math.abs(her.x + her.width - (lines.x + lines.width)) <= near,
+    theirsAtTheStart: Math.abs(them.x - lines.x) <= near,
+  }).toEqual({herAtTheEnd: true, theirsAtTheStart: true});
+  await expect(hers.locator('.bubble-text')).toHaveText('Hello, Sam.');
+  await expect(hers).toHaveCSS(
+    'background-color',
+    await colourOf(page, '--link'),
+  );
+  await expect(theirs).toHaveCSS(
+    'background-color',
+    await colourOf(page, '--card'),
+  );
+
+  await say('Are you there?', 'there');
+  await expect(said).toHaveText([
+    'Hello from the page.',
+    'Hello, Sam.',
+    'Are you there?',
+    'Still here.',
+  ]);
 });

@@ -5,12 +5,16 @@
 //! again. `phone.install` is her ask: preparing it changes nothing, the
 //! person is shown what would be installed, and their yes installs it.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use p02_contracts::{
     Confirmation, EvidenceKind, EvidenceNote, EvidenceStatus, HookContext, PluginError,
     PreparedEffect, ProvidedTool, StoreError, ToolCall, ToolCallOutcome, ToolPreparation,
 };
-use p02_phone::{Catalog, CatalogApp, CatalogError, Listed, OnPhone, Phone, PhoneError, Source};
+use p02_phone::{
+    Catalog, CatalogApp, CatalogError, Chats, Listed, OnPhone, Phone, PhoneError, Source,
+};
 use p02_shared::sentence;
 use p02_wire::StoreAppStatus;
 use serde::Deserialize;
@@ -66,12 +70,14 @@ struct Installing {
     app: String,
 }
 
-/// Whether the App Store's app `id` can be installed on `phone`: the one
-/// path her ask and the person's own hand both take. The catalog is read
-/// anew through `catalog`, `on_phone` reads her phone under a lease of its
-/// store once the catalog lists the app, which is installed only where her
-/// phone holds no version of it as new, and its file is then fetched and
-/// judged: no request is made under a lease, and nothing is written.
+/// Whether the App Store's app `id` can be installed on `phone`, never over
+/// an app it comes with, those `chats` says carry her messages among them:
+/// the one path her ask and the person's own hand both take. The catalog
+/// is read anew through `catalog`, `on_phone` reads her phone under a lease
+/// of its store once the catalog lists the app, which is installed only
+/// where her phone holds no version of it as new, and its file is then
+/// fetched and judged: no request is made under a lease, and nothing is
+/// written.
 ///
 /// # Errors
 ///
@@ -79,11 +85,12 @@ struct Installing {
 /// not run.
 pub async fn installable(
     phone: &'static Phone,
+    chats: &dyn Chats,
     catalog: &AppCatalog,
     id: &str,
     on_phone: impl FnOnce() -> Result<OnPhone, StoreError> + Send + 'static,
 ) -> Result<Result<Installable, NotInstallable>, PluginError> {
-    if let Some(own) = phone.comes_with(id) {
+    if let Some(own) = phone.comes_with(chats, id) {
         return Ok(Err(NotInstallable::ComesWithPhone(own.name().to_owned())));
     }
 
@@ -141,18 +148,21 @@ pub(super) fn tool_of() -> Result<ProvidedTool, PluginError> {
     .with_confirmation(Confirmation::Required))
 }
 
-/// Prepares the install `call` asks for on `phone`, reading the App Store
-/// through `catalog`, or refuses it unasked.
+/// Prepares the install `call` asks for on `phone`, with the apps `chats`
+/// says carry her messages, reading the App Store through `catalog`, or
+/// refuses it unasked.
 pub(super) async fn prepare(
     phone: &'static Phone,
+    chats: Arc<dyn Chats>,
     catalog: &AppCatalog,
     call: &ToolCall,
     context: &HookContext,
 ) -> Result<ToolPreparation, PluginError> {
     let Installing { app: id } = admitted(call)?;
     let store = store(context)?;
-    let installable = installable(phone, catalog, &id, move || {
-        store.with_lease(|files| phone.apps(files))
+    let reader = Arc::clone(&chats);
+    let installable = installable(phone, chats.as_ref(), catalog, &id, move || {
+        store.with_lease(|files| phone.apps(files, reader.as_ref()))
     })
     .await?;
 
@@ -172,7 +182,12 @@ pub(super) async fn prepare(
                     app.version()
                 ),
             )],
-            effect: Box::new(Install { phone, app, text }),
+            effect: Box::new(Install {
+                phone,
+                chats,
+                app,
+                text,
+            }),
         },
         Err(refusal) => refused(&id, &refusal),
     })
@@ -257,10 +272,11 @@ fn refused(id: &str, refusal: &NotInstallable) -> ToolPreparation {
 }
 
 /// An install the person approved: the text judged, as the catalog lists
-/// it.
+/// it, for her phone with the apps that carry her messages.
 #[derive(Debug)]
 struct Install {
     phone: &'static Phone,
+    chats: Arc<dyn Chats>,
     app: CatalogApp,
     text: String,
 }
@@ -268,11 +284,16 @@ struct Install {
 #[async_trait]
 impl PreparedEffect for Install {
     async fn apply(self: Box<Self>, context: &HookContext) -> Result<ToolCallOutcome, PluginError> {
-        let Self { phone, app, text } = *self;
+        let Self {
+            phone,
+            chats,
+            app,
+            text,
+        } = *self;
 
         // The text was judged, so her phone refuses it no more than it did.
         leased(store(context)?, move |files| {
-            match phone.install(files, &text, Source::Catalog) {
+            match phone.install(files, chats.as_ref(), &text, Source::Catalog) {
                 Err(PhoneError::Store(error)) => Err(FilesError::Store(error)),
                 installed => Ok(installed.map(drop).map_err(|refusal| refusal.to_string())),
             }

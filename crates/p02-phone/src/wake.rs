@@ -83,7 +83,7 @@ impl Phone {
     ) -> Result<(), PhoneError> {
         let OnPhone {
             apps, mut muted, ..
-        } = self.apps(files)?;
+        } = self.listed(files)?;
         let app = apps
             .into_iter()
             .find(|app| app.id.as_str() == id)

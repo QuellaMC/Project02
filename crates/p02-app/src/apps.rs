@@ -68,16 +68,23 @@ impl Daemon {
             Err(unread) => return unread.into(),
         };
         let reader = her.clone();
-        let Installable { text, .. } =
-            match installable(her.phone, &self.world().catalog, app, move || reader.apps()).await {
-                Ok(Ok(installable)) => installable,
-                Ok(Err(refusal)) => return not_installable(app, &refusal),
-                Err(failure) => {
-                    return AppInstallOutcome::Failed {
-                        message: unread(&failure),
-                    };
-                }
-            };
+        let Installable { text, .. } = match installable(
+            her.phone,
+            &her.chats,
+            &self.world().catalog,
+            app,
+            move || reader.apps(),
+        )
+        .await
+        {
+            Ok(Ok(installable)) => installable,
+            Ok(Err(refusal)) => return not_installable(app, &refusal),
+            Err(failure) => {
+                return AppInstallOutcome::Failed {
+                    message: unread(&failure),
+                };
+            }
+        };
 
         self.give(her, text, Source::Catalog).await
     }
@@ -100,7 +107,7 @@ impl Daemon {
             let Ok(text) = String::from_utf8(file) else {
                 return Ok(refused(NOT_TEXT.to_owned()));
             };
-            let app = match her.phone.preview(&text) {
+            let app = match her.phone.preview(&her.chats, &text) {
                 Ok(app) => app,
                 Err(refusal) => {
                     return Ok(AppPreviewOutcome::Refused {
@@ -155,7 +162,7 @@ impl Daemon {
         let app = app.to_owned();
 
         self.change(character, move |her| {
-            her.with(|phone, files| match phone.remove(files, &app) {
+            her.with(|phone, files| match phone.remove(files, &her.chats, &app) {
                 Ok(()) => Ok(AppRemoveOutcome::Ok),
                 Err(PhoneError::Store(error)) => Err(Unread::Failed(unread(&error))),
                 Err(refusal) => Ok(AppRemoveOutcome::Refused {
@@ -214,7 +221,7 @@ impl Daemon {
 
             her.with(|phone, files| {
                 let on_phone = phone
-                    .apps(files)
+                    .apps(files, &her.chats)
                     .map_err(|error| Unread::Failed(unread(&error)))?;
                 let signed_in = match (on_phone.signing_in(&app), connection) {
                     (Err(refusal), _) => return Ok(sign_in_refused(&refusal)),
@@ -250,10 +257,10 @@ impl Daemon {
             her.with(|phone, files| {
                 // What the person said of her apps, which installing keeps.
                 let before = phone
-                    .apps(files)
+                    .apps(files, &her.chats)
                     .map_err(|error| Unread::Failed(unread(&error)))?;
 
-                match phone.install(files, &text, source) {
+                match phone.install(files, &her.chats, &text, source) {
                     Ok(Installed { app, replaced }) => Ok(AppInstallOutcome::Ok {
                         app: Box::new(drawn(&app, &before, &linked)),
                         replaced,

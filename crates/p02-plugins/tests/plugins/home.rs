@@ -28,7 +28,7 @@ use serde_json::{Value, json};
 use tempfile::TempDir;
 use tokio::sync::Notify;
 
-use crate::support::{Unconnected, builder, id, nowhere, offline};
+use crate::support::{Quiet, Unconnected, builder, id, nowhere, offline};
 
 /// How long a test waits for a settings document's lock.
 const SETTINGS_WAIT: Duration = Duration::from_secs(5);
@@ -147,6 +147,7 @@ impl MiraHome {
                     nowhere(),
                     offline(),
                     Arc::new(Unconnected),
+                    Arc::new(Quiet),
                 ),
                 |builder, (plugin, values)| {
                     let (manifest, _, factory) = bundled(plugin.as_str());

@@ -6,7 +6,7 @@
 use p02_phone::{Acting, Ask, Exchange, Fetch, Fetched, Method, Now, Phone, Source};
 use serde_json::{Value, json};
 
-use crate::support::{Files, in_zone, input, millis};
+use crate::support::{Files, in_zone, input, millis, quiet};
 
 /// Weather as the catalog serves it.
 const WEATHER: &str = include_str!("../../catalog/weather.js");
@@ -22,7 +22,7 @@ fn installed() -> Files {
     let mut files = Files::default();
 
     phone()
-        .install(&mut files, WEATHER, Source::Catalog)
+        .install(&mut files, &quiet(), WEATHER, Source::Catalog)
         .unwrap();
     files
 }
@@ -46,6 +46,7 @@ fn look_up(
     let came = loop {
         match phone().act(
             files,
+            &quiet(),
             "weather",
             "look_up",
             &input(given),
@@ -77,7 +78,7 @@ fn look_up(
 fn look(files: &Files, moment: &str) -> Value {
     serde_json::to_value(
         phone()
-            .look(files, "weather", "weather", &at(moment))
+            .look(files, &quiet(), "weather", "weather", &at(moment))
             .unwrap(),
     )
     .unwrap()

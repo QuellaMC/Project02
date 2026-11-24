@@ -6,7 +6,7 @@
 use p02_phone::{Now, Phone, SetRing, Source};
 use serde_json::{Value, json};
 
-use crate::support::{Files, in_zone, millis, took};
+use crate::support::{Files, in_zone, millis, quiet, took};
 
 /// Reminders as the catalog serves it.
 const REMINDERS: &str = include_str!("../../catalog/reminders.js");
@@ -22,7 +22,7 @@ fn installed() -> Files {
     let mut files = Files::default();
 
     phone()
-        .install(&mut files, REMINDERS, Source::Catalog)
+        .install(&mut files, &quiet(), REMINDERS, Source::Catalog)
         .unwrap();
     files
 }
@@ -49,7 +49,7 @@ fn add(files: &mut Files, given: &Value) -> Result<Value, String> {
 fn look(files: &Files, moment: &str) -> Value {
     serde_json::to_value(
         phone()
-            .look(files, "reminders", "reminders", &at(moment))
+            .look(files, &quiet(), "reminders", "reminders", &at(moment))
             .unwrap(),
     )
     .unwrap()

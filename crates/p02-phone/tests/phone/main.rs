@@ -12,6 +12,7 @@ mod apps;
 mod calls;
 mod catalog;
 mod chatgpt;
+mod chats;
 mod clock;
 mod front;
 mod installed;

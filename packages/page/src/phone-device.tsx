@@ -1,11 +1,12 @@
 /**
  * Her phone, as the approved design draws it: the bezel; the person's own
  * clock at the top; her home screen, a view of an app in the pieces her
- * phone knows with its views as tabs under it, or, over everything, what
- * rings; and the bar at the bottom, which goes to her home screen. It
- * holds no rule: what it draws comes from the window's store, and what the
- * person opens goes to the session. Nothing here changes anything of hers:
- * a switch is drawn, never pressed.
+ * phone knows with its views as tabs under it, an app messages come in as
+ * its thread, or, over everything, what rings; and the bar at the bottom,
+ * which goes to her home screen. It holds no rule: what it draws comes
+ * from the window's store, and what the person opens goes to the session.
+ * Nothing here changes anything of hers: a switch is drawn, never pressed,
+ * and a message box is drawn, never typed in.
  */
 import {
   useEffect,
@@ -27,7 +28,7 @@ import type {
   ScreenRow,
   ScreenTile,
 } from '@project02/wire/contract';
-import {avatarColor, iconOf, tintOf} from './look.ts';
+import {avatarColor, iconOf, initialOf, tintOf} from './look.ts';
 import {
   clockParts,
   liveAt,
@@ -38,8 +39,12 @@ import {
 } from './phone.ts';
 import type {PhoneSession} from './phone-session.ts';
 import {Icon} from './settings-controls.tsx';
+import {Bubble} from './thread.tsx';
+import {labelOf, laidOut, onHerPhone} from './thread-layout.ts';
+import {useFollowing} from './thread-scroll.ts';
 
 type View = Extract<OnScreen, {kind: 'view'}>;
+type Thread = Extract<OnScreen, {kind: 'thread'}>;
 type ReadoutItem = Extract<ScreenItem, {kind: 'readout'}>;
 type AppItem = Extract<ScreenItem, {kind: 'app'}>;
 type GlanceItem = Extract<ScreenItem, {kind: 'glance'}>;
@@ -81,7 +86,7 @@ export function PhoneDevice({
         }
       >
         <div className="phone-status">{clockParts(clockTime(now)).digits}</div>
-        <Drawn drawn={drawn} session={session} />
+        <Drawn drawn={drawn} now={now} session={session} />
         {drawn.kind === 'blank' || drawn.kind === 'ringing' ? (
           <span className="phone-home-bar" aria-hidden="true">
             <span className="phone-home-indicator" />
@@ -103,9 +108,11 @@ export function PhoneDevice({
 
 function Drawn({
   drawn,
+  now,
   session,
 }: {
   readonly drawn: OnScreen;
+  readonly now: number;
   readonly session: PhoneSession;
 }) {
   switch (drawn.kind) {
@@ -117,6 +124,8 @@ function Drawn({
       return <Home apps={drawn.apps} session={session} />;
     case 'view':
       return <AppView view={drawn} session={session} />;
+    case 'thread':
+      return <ThreadView thread={drawn} now={now} session={session} />;
   }
 }
 
@@ -208,6 +217,95 @@ function AppView({
         </nav>
       ) : null}
     </>
+  );
+}
+
+/**
+ * An app messages come in, as the design draws it: a way back to her home
+ * screen and the person at its head, with the app's name under theirs but
+ * in Messages; what went through it, laid out as the chat lays out the
+ * conversation and mirrored, since it is her phone: hers at the end of the
+ * line in the app's colour, the person's at its start on a card; and a
+ * message box, which is only drawn. It follows its newest message as the
+ * chat does.
+ */
+function ThreadView({
+  thread,
+  now,
+  session,
+}: {
+  readonly thread: Thread;
+  readonly now: number;
+  readonly session: PhoneSession;
+}) {
+  const {app, messages, person, message} = thread;
+  const {locale, timeZone} = Intl.DateTimeFormat().resolvedOptions();
+  const laid = laidOut(
+    {messages, between: false, pending: []},
+    {now, locale, timeZone},
+    onHerPhone(app.id),
+  );
+  const following = useFollowing(thread.page);
+  const label = labelOf(app.id);
+
+  return (
+    <div className="phone-thread">
+      <header className="phone-thread-head">
+        <button
+          type="button"
+          className="phone-thread-back"
+          aria-label="Back"
+          onClick={session.goHome}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="22"
+            height="22"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2.2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M15 5l-7 7 7 7" />
+          </svg>
+        </button>
+        {person === undefined ? null : (
+          <>
+            <span className="phone-thread-face" aria-hidden="true">
+              {initialOf(person)}
+            </span>
+            <h2 className="phone-thread-name">{person}</h2>
+          </>
+        )}
+        {label === undefined ? null : (
+          <span className="phone-thread-app">{label}</span>
+        )}
+      </header>
+      <div className="phone-thread-messages" ref={following.scroller}>
+        <div className="lines" ref={following.lines}>
+          {message === undefined ? (
+            laid.messages.map(placed => (
+              <Bubble
+                key={placed.message.messageId}
+                own={placed.own}
+                speaker={placed.message.speakerName}
+                text={placed.message.text}
+                placement={placed}
+              />
+            ))
+          ) : (
+            <p className="phone-thread-quiet">{message}</p>
+          )}
+        </div>
+        <div className="slack" ref={following.slack} aria-hidden="true" />
+      </div>
+      <div className="phone-thread-foot" aria-hidden="true">
+        <span className="phone-thread-plus">+</span>
+        <span className="phone-thread-field">Message</span>
+      </div>
+    </div>
   );
 }
 

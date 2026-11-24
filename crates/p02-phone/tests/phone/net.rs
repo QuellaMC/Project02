@@ -9,7 +9,7 @@ use p02_phone::{
 };
 use serde_json::{Value, json};
 
-use crate::support::{Files, actions, app, input, manifest, now, text};
+use crate::support::{Files, actions, app, input, manifest, now, quiet, text};
 
 /// The address of Open-Meteo's forecast, at a host that is no account's.
 const FORECAST: &str = "https://api.open-meteo.com/v1/forecast";
@@ -48,7 +48,15 @@ fn run(
     given: &Value,
     exchanges: &[Exchange],
 ) -> Result<Acting, PhoneError> {
-    phone.act(files, "lookup", action, &input(given), exchanges, &now())
+    phone.act(
+        files,
+        &quiet(),
+        "lookup",
+        action,
+        &input(given),
+        exchanges,
+        &now(),
+    )
 }
 
 fn asked(acting: Result<Acting, PhoneError>) -> Ask {
@@ -375,12 +383,18 @@ fn only_an_action_asks_its_host_never_a_screen_a_ring_or_the_making_of_an_app() 
     let mut files = Files::default();
 
     assert_eq!(
-        serde_json::to_value(phone.look(&files, "lookup", "all", &now()).unwrap()).unwrap(),
+        serde_json::to_value(
+            phone
+                .look(&files, &quiet(), "lookup", "all", &now())
+                .unwrap()
+        )
+        .unwrap(),
         json!({"items": [{"kind": "text", "text": offline}, {"kind": "text", "text": unasked}]})
     );
 
     acted(phone.act(
         &mut files,
+        &quiet(),
         "lookup",
         "remind",
         &input(&json!({"id": "tea", "at": 0, "title": "Tea"})),

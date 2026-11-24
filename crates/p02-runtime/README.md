@@ -5,9 +5,11 @@ takes, or each moment of her own, and the session's continuation once it
 outgrows the model's window. It reaches the disk only through the store,
 on tokio's blocking pool.
 
-Her actor asks `Conversation::exists` whether the thread was ever made,
-which makes nothing, opens it with `Conversation::open`, hands it each
-line with `deliver`, starts a moment of hers with `moment`, giving it what
+`Conversation::find` finds the thread's record and makes nothing: her
+actor asks it whether the thread was ever made, and the daemon which
+thread her phone shows. Her actor opens the thread with
+`Conversation::open`, hands it each line with `deliver`, starts a moment
+of hers with `moment`, giving it what
 rang on her phone when its ringing began it, and closes it when she stops
 or restarts. A `Submission` is the line, its client's two stamps and when
 it was sent, a `Mind` answers the turn as her settings and the apps she

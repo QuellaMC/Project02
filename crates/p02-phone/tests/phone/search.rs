@@ -5,7 +5,7 @@
 use p02_phone::{Account, Acting, Ask, Exchange, Fetch, Fetched, Method, Phone, Source};
 use serde_json::{Value, json};
 
-use crate::support::{Files, at, input, millis};
+use crate::support::{Files, at, input, millis, quiet};
 
 /// Web Search as the catalog serves it.
 const SEARCH: &str = include_str!("../../catalog/search.js");
@@ -25,7 +25,7 @@ fn installed() -> Files {
     let mut files = Files::default();
 
     phone()
-        .install(&mut files, SEARCH, Source::Catalog)
+        .install(&mut files, &quiet(), SEARCH, Source::Catalog)
         .unwrap();
     files
 }
@@ -45,6 +45,7 @@ fn search(
     let came = loop {
         match phone().act(
             files,
+            &quiet(),
             "search",
             "search",
             &input(given),
@@ -74,7 +75,12 @@ fn search(
 
 /// What Web Search shows.
 fn look(files: &Files) -> Value {
-    serde_json::to_value(phone().look(files, "search", "search", &at(NOON)).unwrap()).unwrap()
+    serde_json::to_value(
+        phone()
+            .look(files, &quiet(), "search", "search", &at(NOON))
+            .unwrap(),
+    )
+    .unwrap()
 }
 
 /// An answer of Tavily's of `status` and `body`.

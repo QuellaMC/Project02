@@ -5,7 +5,7 @@ use p02_phone::Phone;
 use p02_wire::Screen;
 use serde_json::{Value, json};
 
-use crate::support::{Files, app, now, view};
+use crate::support::{Files, app, now, quiet, view};
 
 /// An app whose view `name` shows what `screens` holds under that name.
 fn showing(screens: &Value) -> Phone {
@@ -59,7 +59,7 @@ fn a_screen_reads_into_the_pieces_the_phone_knows_and_back() {
     ]});
     let phone = showing(&json!({"everything": everything}));
     let screen = phone
-        .look(&Files::default(), "notes", "everything", &now())
+        .look(&Files::default(), &quiet(), "notes", "everything", &now())
         .unwrap();
 
     assert_eq!(serde_json::to_value(&screen).unwrap(), everything);
@@ -110,7 +110,7 @@ fn a_screen_with_what_the_phone_does_not_know_is_refused_by_name() {
     ] {
         assert_eq!(
             phone
-                .look(&Files::default(), "notes", view, &now())
+                .look(&Files::default(), &quiet(), "notes", view, &now())
                 .unwrap_err()
                 .to_string(),
             refusal
@@ -185,7 +185,7 @@ fn a_screen_whose_piece_breaks_its_rule_is_refused_by_the_rule() {
     ] {
         assert_eq!(
             phone
-                .look(&Files::default(), "notes", view, &now())
+                .look(&Files::default(), &quiet(), "notes", view, &now())
                 .err()
                 .map(|refusal| refusal.to_string()),
             rule.map(|rule| format!("Notes showed a screen the phone does not take: {rule}")),
@@ -217,7 +217,7 @@ fn a_screen_only_reads() {
         }",
     )]);
     let screen = phone
-        .look(&Files::default(), "notes", "all", &now())
+        .look(&Files::default(), &quiet(), "notes", "all", &now())
         .unwrap();
     let refused = |function: &str| {
         json!({

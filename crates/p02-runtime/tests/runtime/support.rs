@@ -17,7 +17,7 @@ use p02_contracts::{
     ToolInputContract, WrittenCall,
 };
 use p02_core::{AppNames, ClientStamp, ConversationId, SpeakerName, Timestamp};
-use p02_phone::Account;
+use p02_phone::{Account, Chats};
 use p02_plugins::{
     AppCatalog, AppInternet, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
     Connections, FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError,
@@ -26,7 +26,7 @@ use p02_plugins::{
 use p02_runtime::{Character, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{BaseUrl, DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, LogRecord, RecordKind};
-use p02_wire::{ActivationStatus, AppConnection};
+use p02_wire::{ActivationStatus, AppConnection, HistoryMessage};
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
 
@@ -123,6 +123,7 @@ impl World {
                         BaseUrl::parse("http://127.0.0.1:9").unwrap(),
                     ))),
                     Arc::new(Unconnected),
+                    Arc::new(Quiet),
                 ),
                 |builder, toy| {
                     let plugin: Arc<dyn RuntimePlugin> = Arc::clone(toy) as _;
@@ -620,6 +621,20 @@ impl Connections for Unconnected {
         _model: Option<&str>,
         _request: &TextCompletionRequest,
     ) -> Result<String, Unanswered> {
+        unreachable!("the thread's tests run no phone")
+    }
+}
+
+/// Her conversation as the thread's tests have it: they run no phone.
+#[derive(Debug)]
+struct Quiet;
+
+impl Chats for Quiet {
+    fn apps(&self) -> AppNames {
+        AppNames::new([])
+    }
+
+    fn newest(&self, _app: &str, _count: usize) -> Result<Vec<HistoryMessage>, String> {
         unreachable!("the thread's tests run no phone")
     }
 }

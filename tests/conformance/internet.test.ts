@@ -208,7 +208,7 @@ it("internet.no-key: health says the person's Tavily account, its key not set an
     app: lookupUsing(false),
   });
   expect(await wire.phone('mira')).toMatchObject({
-    apps: [{id: 'clock'}, lookupUsing(false), {id: 'store'}],
+    apps: [{id: 'messages'}, {id: 'clock'}, lookupUsing(false), {id: 'store'}],
   });
 
   const say = await converse(wire, 'mira');
@@ -259,7 +259,7 @@ it("internet.no-key: health says the person's Tavily account, its key not set an
   const phone = await wire.phone('mira');
 
   expect(phone).toMatchObject({
-    apps: [{id: 'clock'}, lookupUsing(true), {id: 'store'}],
+    apps: [{id: 'messages'}, {id: 'clock'}, lookupUsing(true), {id: 'store'}],
   });
   expect(JSON.stringify([events.frames, phone])).not.toContain(key);
 });

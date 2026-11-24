@@ -1,12 +1,14 @@
 //! A conversation as one scrollback: its character keeps it in segments,
 //! a page is filled backward across them, newest first, and its cursor
-//! names where the next page ends. Only committed messages are read, from
-//! the store, so a stopped character's thread reads as a running one's.
+//! names where the next page ends; and the newest messages of one app, as
+//! her phone shows them. Only committed messages are read, from the store,
+//! so a stopped character's thread reads as a running one's.
 
 use std::num::NonZeroU64;
 use std::ops::Range;
 
 use p02_core::{Conversation, ConversationId, MESSAGES, SessionId, VisibleMessageRole, app_of};
+use p02_shared::Identifier;
 use p02_store::{
     CharacterData, Home, LogRecord, RecordBody, SessionEntry, SettingsDocument, StorageError,
 };
@@ -114,6 +116,47 @@ pub(crate) fn read(home: &Home, conversation: &str, asked: &HistoryPage) -> Hist
         Ok(None) => refused(HistoryRefusal::InvalidPage, INVALID_PAGE.to_owned()),
         Err(error) => HistoryOutcome::Failed(storage_failure(&error)),
     }
+}
+
+/// The newest messages of the conversation between `character` and the
+/// person on `home` that are in `app`, `count` at most, oldest first, as
+/// the scrollback reads them, however far back they lie: none while the
+/// conversation was never made.
+pub(crate) fn newest(
+    home: &Home,
+    character: &Identifier,
+    app: &str,
+    count: usize,
+) -> Result<Vec<HistoryMessage>, StorageError> {
+    let Some(conversation) = p02_runtime::Conversation::find(home, character)? else {
+        return Ok(Vec::new());
+    };
+    let Some(data) = CharacterData::open(home, character)? else {
+        return Ok(Vec::new());
+    };
+    let mut segments = Segments::of(data, conversation)?;
+    let mut newest = Vec::new();
+
+    for segment in (0..segments.numbers.len()).rev() {
+        let wanted = count - newest.len();
+
+        newest.extend(
+            segments
+                .messages(segment)?
+                .iter()
+                .rev()
+                .filter(|message| message.app == app)
+                .take(wanted)
+                .cloned(),
+        );
+
+        if newest.len() == count {
+            break;
+        }
+    }
+
+    newest.reverse();
+    Ok(newest)
 }
 
 /// A page's messages, and the cursor of the page before it.

@@ -188,15 +188,18 @@ impl Conversation {
         })
     }
 
-    /// Whether the thread between the person and the character `id` was
-    /// ever made on `home`: found, never made.
+    /// The record of the thread between the person and the character `id`
+    /// on `home`, while it was ever made: found, never made.
     ///
     /// # Errors
     ///
     /// [`StorageError`] when the home is refused, or a thread there cannot
     /// be read.
-    pub fn exists(home: &Home, id: &Identifier) -> Result<bool, StorageError> {
-        Ok(home.find_conversation(&participants(id))?.is_some())
+    pub fn find(
+        home: &Home,
+        id: &Identifier,
+    ) -> Result<Option<p02_core::Conversation>, StorageError> {
+        home.find_conversation(&participants(id))
     }
 
     #[must_use]

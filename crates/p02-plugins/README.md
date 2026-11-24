@@ -13,8 +13,9 @@ character's host is built from the plugins her settings switch on and that
 check finds set up, each by its factory from the values her settings give
 it and checked against its manifest, but for two the host builds itself:
 its own, linked to it, and her phone, handed the App Store's catalog, the
-internet her apps reach and the person's connections they ask a model
-through. When her settings change, she gets a host built anew.
+internet her apps reach, the person's connections they ask a model
+through and her conversation with the person. When her settings change,
+she gets a host built anew.
 
 The host's rules:
 
@@ -38,9 +39,10 @@ package switch it on; session history; mem0, whose account is the home's
 to set up; character state, how she feels, told to her in a sentence for
 each of its five readings; character memory; her phone, which she is told
 is hers, a gift from the person while her settings' A Gift from You is on,
-as it is unless they or her package switch it off, and whose apps, those
-it comes with and those installed on it, the App Store last, she is told
-of before each call as her phone's store lists them, each the person said
+as it is unless they or her package switch it off, that she and the person
+write to each other on, and whose apps, the apps messages come in first,
+then those it comes with and those installed on it, the App Store last,
+she is told of before each call as her phone lists them, each the person said
 may not wake her saying so beside its name, with the person's name as her
 notes say it; she opens and acts in them through two tools, asks the
 person to sign an app in with a connection of theirs through a third, and,
@@ -112,3 +114,9 @@ connection still connected, and one with none of the person's
 connections connected are refused unasked. The
 phone's budget, 4 minutes, holds a call that asks its two questions and
 makes its requests.
+
+Her conversation with the person reaches her phone through `Chats`,
+p02-phone's seam, which the daemon implements for each host it builds
+her, as it hands the catalog's reader and the internet: which apps carry
+her messages now, and the newest messages that went through one, read
+under her phone's lease as its store is.

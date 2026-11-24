@@ -179,6 +179,7 @@ test("page.apps-give: her page shows the Clock among her apps and not the App St
   await row('Reminders').getByRole('button', {name: 'Get Reminders'}).click();
   await expect(row('Reminders')).toContainText('Installed');
   expect(appsOf(await wireOf(daemon).phone('mira'))).toEqual([
+    'messages built_in',
     'clock built_in',
     'reminders catalog',
     'store built_in',
@@ -222,7 +223,12 @@ test("page.apps-page: on her app's page, Can Wake Her Up off is what the daemon 
   await wake.click();
   await expect(wake).not.toBeChecked();
   expect(await wire.phone('mira')).toMatchObject({
-    apps: [{id: 'clock'}, {id: 'reminders', mayWake: false}, {id: 'store'}],
+    apps: [
+      {id: 'messages'},
+      {id: 'clock'},
+      {id: 'reminders', mayWake: false},
+      {id: 'store'},
+    ],
   });
 
   await expect(update).toContainText('Version 1.1.0');
@@ -232,7 +238,12 @@ test("page.apps-page: on her app's page, Can Wake Her Up off is what the daemon 
   ).toBeVisible();
   await expect(update).toHaveCount(0);
   expect(await wire.phone('mira')).toMatchObject({
-    apps: [{id: 'clock'}, {id: 'reminders', version: '1.1.0'}, {id: 'store'}],
+    apps: [
+      {id: 'messages'},
+      {id: 'clock'},
+      {id: 'reminders', version: '1.1.0'},
+      {id: 'store'},
+    ],
   });
 
   await page.getByRole('button', {name: /^Remove App/u}).click();
@@ -246,6 +257,7 @@ test("page.apps-page: on her app's page, Can Wake Her Up off is what the daemon 
   await expect(page.getByRole('switch', {name: 'Mira is on'})).toBeVisible();
   await expect(strip(page)).toHaveText(['Clock']);
   expect(appsOf(await wire.phone('mira'))).toEqual([
+    'messages built_in',
     'clock built_in',
     'store built_in',
   ]);
@@ -416,6 +428,7 @@ test("page.apps-from-file: an app from a file shows what it is and may do and th
     ),
   ).toBeVisible();
   expect(appsOf(await wire.phone('mira'))).toEqual([
+    'messages built_in',
     'clock built_in',
     'store built_in',
   ]);
@@ -425,6 +438,7 @@ test("page.apps-from-file: an app from a file shows what it is and may do and th
     page.getByText("On Mira's phone. Version 1.0.0, from a file."),
   ).toBeVisible();
   expect(appsOf(await wire.phone('mira'))).toEqual([
+    'messages built_in',
     'clock built_in',
     'notes file',
     'store built_in',

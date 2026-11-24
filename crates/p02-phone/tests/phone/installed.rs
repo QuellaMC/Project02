@@ -4,7 +4,7 @@
 use p02_phone::{Phone, Source};
 use serde_json::{Value, json};
 
-use crate::support::{Files, actions, manifest, millis, now, text, took};
+use crate::support::{Files, actions, manifest, millis, now, quiet, text, took};
 
 const SCREEN: &str = "export function screen() { return { items: [] }; }";
 
@@ -47,7 +47,7 @@ fn milk() -> Value {
 /// and where it came from.
 fn on_phone(files: &Files) -> Vec<String> {
     phone()
-        .apps(files)
+        .apps(files, &quiet())
         .unwrap()
         .apps
         .iter()
@@ -64,16 +64,17 @@ fn an_app_installed_is_on_her_phone_by_name_opens_and_is_updated_keeping_what_it
     let mut files = Files::default();
 
     phone()
-        .install(&mut files, &notes("1.0.0"), Source::File)
+        .install(&mut files, &quiet(), &notes("1.0.0"), Source::File)
         .unwrap();
     phone()
-        .install(&mut files, &lists(), Source::Catalog)
+        .install(&mut files, &quiet(), &lists(), Source::Catalog)
         .unwrap();
     act(&mut files, "add", &json!({"text": "milk"}));
 
     assert_eq!(
         on_phone(&files),
         [
+            "messages 1.0.0 None",
             "clock 1.0.0 None",
             "lists 1.0.0 Some(Catalog)",
             "notes 1.0.0 Some(File)",
@@ -92,14 +93,17 @@ fn an_app_installed_is_on_her_phone_by_name_opens_and_is_updated_keeping_what_it
     );
 
     phone()
-        .install(&mut files, &notes("1.1.0"), Source::Catalog)
+        .install(&mut files, &quiet(), &notes("1.1.0"), Source::Catalog)
         .unwrap();
 
-    let opened = phone().open(&mut files, "notes", None, &now()).unwrap();
+    let opened = phone()
+        .open(&mut files, &quiet(), "notes", None, &now())
+        .unwrap();
 
     assert_eq!(
         on_phone(&files),
         [
+            "messages 1.0.0 None",
             "clock 1.0.0 None",
             "lists 1.0.0 Some(Catalog)",
             "notes 1.1.0 Some(Catalog)",
@@ -136,10 +140,17 @@ fn an_app_that_cannot_be_installed_is_refused_and_nothing_is_written() {
             ),
             "the phone comes with an app of the same id, App Store",
         ),
+        (
+            text(
+                &manifest(&json!({"id": "messages", "name": "My Messages"})),
+                SCREEN,
+            ),
+            "the phone comes with an app of the same id, Messages",
+        ),
     ] {
         assert_eq!(
             phone()
-                .install(&mut files, &file, Source::File)
+                .install(&mut files, &quiet(), &file, Source::File)
                 .unwrap_err()
                 .to_string(),
             refusal
@@ -154,16 +165,23 @@ fn an_app_removed_takes_its_file_its_place_what_it_keeps_and_its_rings_from_in_f
     let mut files = Files::default();
 
     phone()
-        .install(&mut files, &notes("1.0.0"), Source::File)
+        .install(&mut files, &quiet(), &notes("1.0.0"), Source::File)
         .unwrap();
     act(&mut files, "remind", &milk());
 
     assert_eq!(phone().rings(&files).unwrap().len(), 1);
     assert_eq!(files.documents["phone.json"]["front"]["app"], "notes");
 
-    phone().remove(&mut files, "notes").unwrap();
+    phone().remove(&mut files, &quiet(), "notes").unwrap();
 
-    assert_eq!(on_phone(&files), ["clock 1.0.0 None", "store 1.0.0 None"]);
+    assert_eq!(
+        on_phone(&files),
+        [
+            "messages 1.0.0 None",
+            "clock 1.0.0 None",
+            "store 1.0.0 None"
+        ]
+    );
     assert!(files.texts.is_empty());
     assert_eq!(
         files.documents.keys().collect::<Vec<_>>(),
@@ -178,10 +196,17 @@ fn an_app_removed_takes_its_file_its_place_what_it_keeps_and_its_rings_from_in_f
             "store",
             "App Store comes with the phone and cannot be removed",
         ),
+        (
+            "messages",
+            "Messages comes with the phone and cannot be removed",
+        ),
         ("notes", "there is no app \"notes\" on the phone"),
     ] {
         assert_eq!(
-            phone().remove(&mut files, id).unwrap_err().to_string(),
+            phone()
+                .remove(&mut files, &quiet(), id)
+                .unwrap_err()
+                .to_string(),
             refusal
         );
     }
@@ -192,14 +217,21 @@ fn her_phone_is_hers_and_an_app_whose_file_is_gone_cannot_run_while_the_rest_of_
     let (mut hers, mut another) = (Files::default(), Files::default());
 
     phone()
-        .install(&mut hers, &notes("1.0.0"), Source::File)
+        .install(&mut hers, &quiet(), &notes("1.0.0"), Source::File)
         .unwrap();
     act(&mut hers, "remind", &milk());
 
-    assert_eq!(on_phone(&another), ["clock 1.0.0 None", "store 1.0.0 None"]);
+    assert_eq!(
+        on_phone(&another),
+        [
+            "messages 1.0.0 None",
+            "clock 1.0.0 None",
+            "store 1.0.0 None"
+        ]
+    );
     assert_eq!(
         phone()
-            .open(&mut another, "notes", None, &now())
+            .open(&mut another, &quiet(), "notes", None, &now())
             .unwrap_err()
             .to_string(),
         "there is no app \"notes\" on the phone"
@@ -212,6 +244,7 @@ fn her_phone_is_hers_and_an_app_whose_file_is_gone_cannot_run_while_the_rest_of_
     assert_eq!(
         on_phone(&hers),
         [
+            "messages 1.0.0 None",
             "clock 1.0.0 None",
             "notes 1.0.0 Some(File)",
             "store 1.0.0 None"
@@ -219,12 +252,16 @@ fn her_phone_is_hers_and_an_app_whose_file_is_gone_cannot_run_while_the_rest_of_
     );
     assert_eq!(
         phone()
-            .open(&mut hers, "notes", None, &now())
+            .open(&mut hers, &quiet(), "notes", None, &now())
             .unwrap_err()
             .to_string(),
         "Notes cannot run: its file is gone"
     );
-    assert!(phone().open(&mut hers, "clock", None, &now()).is_ok());
+    assert!(
+        phone()
+            .open(&mut hers, &quiet(), "clock", None, &now())
+            .is_ok()
+    );
     assert_eq!(
         phone()
             .told(&mut hers, &told, &now())

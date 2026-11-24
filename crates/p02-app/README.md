@@ -38,8 +38,10 @@ with an outcome of p02-wire, never an error.
   or her next start, so a ring is never lost and a model out of reach is
   not asked again and again.
 - **Her phone** is read from her data whether she runs or not, under a
-  lease of its store: her apps, those it comes with and those installed
-  on it, the App Store last, each with what it may do and the person's
+  lease of its store: her apps, the apps that carry her messages now
+  first, then those it comes with and those installed on it, the App Store
+  last, each with whether she and the person write to each other in it,
+  what it may do and the person's
   account it uses by a key, with whether the home's settings hold that
   key, or, for an app that asks a model, the connections of theirs it can
   sign in with now and how it is signed in; what
@@ -51,7 +53,12 @@ with an outcome of p02-wire, never an error.
   rings went to their apps. The daemon makes the one reader of the App
   Store's catalog, from the base the binary gives it, and the one seam
   that makes her apps' requests, at a stand-in the binary names under its
-  test switch, and hands both to every host it builds her.
+  test switch, and hands both to every host it builds her. It hands her
+  phone, there and as it reads her phone itself, her conversation as her
+  phone's own apps show it: the apps that carry her messages now, by the
+  one rule her messages go by, and the newest messages that went through
+  one, read back through the whole scrollback, by the rule the scrollback
+  gives each message its app.
 - **The person's connections** her apps ask a model through are the
   person's AI services of OpenAI's, in the AI Model page's order: the
   ChatGPT plan while the home is signed in, and the OpenAI API while the

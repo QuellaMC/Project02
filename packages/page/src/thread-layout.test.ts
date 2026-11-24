@@ -2,7 +2,9 @@ import {describe, expect, it} from 'vitest';
 
 import type {Message} from './store.ts';
 import {
+  labelOf,
   laidOut,
+  onHerPhone,
   type Clock,
   type Pending,
   type Shown,
@@ -235,8 +237,47 @@ describe('thread layout', () => {
         },
         joined: false,
         when: 'Today 6:50 PM',
+        own: true,
         colour: 'var(--link)',
       },
+    ]);
+  });
+
+  it("draws her phone's thread as the mirror of the chat: hers at the end of the line in the app's colour, the person's at its start, a time where time has passed and no app's name, one app being on screen; and its head names the app but Messages", () => {
+    const inTelegram = [
+      mine(nyc('2026-11-24T14:10'), 'telegram'),
+      hers(nyc('2026-11-24T14:11'), 'telegram'),
+      // More than 15 minutes on.
+      hers(nyc('2026-11-24T14:30'), 'telegram'),
+    ];
+    const {messages} = laidOut(
+      thread(...inTelegram),
+      newYork,
+      onHerPhone('telegram'),
+    );
+
+    expect(
+      messages.map(({own, colour, divider}) => ({
+        own,
+        colour,
+        app: divider?.app,
+        time: divider?.time,
+      })),
+    ).toEqual([
+      {own: false, colour: undefined, app: undefined, time: '2:10 PM'},
+      {own: true, colour: 'var(--telegram)', app: undefined, time: undefined},
+      {own: true, colour: 'var(--telegram)', app: undefined, time: '2:30 PM'},
+    ]);
+    expect(
+      laidOut(
+        thread(hers(nyc('2026-11-24T14:11'))),
+        newYork,
+        onHerPhone('messages'),
+      ).messages[0]?.colour,
+    ).toBe('var(--link)');
+    expect([labelOf('telegram'), labelOf('messages')]).toEqual([
+      'Telegram',
+      undefined,
     ]);
   });
 });

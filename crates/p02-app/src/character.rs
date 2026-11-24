@@ -40,6 +40,7 @@ use crate::confirmation::Broker;
 use crate::connections::PersonConnections;
 use crate::daemon::{Daemon, WeakDaemon, World, blocking};
 use crate::outcome::{duplicate, running_turn, storage_failure, told};
+use crate::phone::HerChats;
 use crate::reconcile::settings_now;
 use crate::rings::{Rings, rang, ringing};
 
@@ -1054,8 +1055,8 @@ impl Her {
         let id = character.profile.id.clone();
 
         matches!(
-            blocking(move || Conversation::exists(&home, &id)).await,
-            Ok(true)
+            blocking(move || Conversation::find(&home, &id)).await,
+            Ok(Some(_))
         )
     }
 
@@ -1126,12 +1127,8 @@ impl Mind for Current<'_> {
         &self.her.world.apps
     }
 
-    /// Messages alone once the daemon is gone.
     fn apps_now(&self) -> AppNames {
-        self.her
-            .daemon
-            .upgrade()
-            .map_or_else(|| AppNames::new([]), |daemon| daemon.apps_of(&self.her.id))
+        self.her.daemon.apps_of(&self.her.id)
     }
 
     fn adapter(&self) -> &dyn RoleModelAdapter {
@@ -1265,8 +1262,9 @@ async fn take_turn(
 /// settings merged into her overlay, her model, or what she needs for one,
 /// and her host built with `broker` to ask the person, her settings for
 /// its own plugin to read and change, through `daemon`, the App Store's
-/// catalog for her phone to read, the internet her apps reach, and the
-/// person's connections they ask a model through, until `stop`.
+/// catalog for her phone to read, the internet her apps reach, the
+/// person's connections they ask a model through, until `stop`, and her
+/// conversation with the person as her phone's own apps show it.
 fn assemble(
     world: &Arc<World>,
     id: &Identifier,
@@ -1305,6 +1303,7 @@ fn assemble(
     let model = model(world, &daemon, settings.host(), signed_in.as_ref());
     let cautions: Vec<&str> = resolution.cautions().map(Diagnostic::message).collect();
     let connections = PersonConnections::new(Arc::clone(world), daemon.clone(), stop);
+    let chats = HerChats::new(world.home.clone(), daemon.clone(), id.clone());
     let host = settings
         .plugins()
         .filter_map(|(plugin_id, values)| Some((world.plugin(plugin_id)?, values)))
@@ -1316,6 +1315,7 @@ fn assemble(
                 Arc::clone(&world.catalog),
                 Arc::clone(&world.internet),
                 Arc::new(connections),
+                Arc::new(chats),
             ),
             |builder, (plugin, values)| {
                 builder.plugin(plugin.manifest().clone(), values.clone(), plugin.factory())

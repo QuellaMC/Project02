@@ -295,6 +295,14 @@ impl WeakDaemon {
     pub(crate) fn upgrade(&self) -> Option<Daemon> {
         self.0.upgrade().map(|inner| Daemon { inner })
     }
+
+    /// The apps that carry `character`'s messages now, as
+    /// [`Daemon::apps_of`] says while the daemon lasts: Messages alone once
+    /// it is gone.
+    pub(crate) fn apps_of(&self, character: &Identifier) -> AppNames {
+        self.upgrade()
+            .map_or_else(|| AppNames::new([]), |daemon| daemon.apps_of(character))
+    }
 }
 
 /// The actors the daemon built, and whether it stopped, which ends every

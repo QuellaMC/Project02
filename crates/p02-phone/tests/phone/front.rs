@@ -8,7 +8,7 @@ use p02_phone::{Did, Front, Phone, PhoneState};
 use p02_shared::Identifier;
 use serde_json::json;
 
-use crate::support::{Files, app, at, took, view};
+use crate::support::{Files, app, at, quiet, took, view};
 
 /// When she opened Notes.
 const OPENED: &str = "2026-03-07T17:00:00.000Z";
@@ -43,7 +43,7 @@ fn notes() -> Phone {
 }
 
 fn state(phone: &Phone, files: &Files) -> PhoneState {
-    phone.state(files).unwrap()
+    phone.state(files, &quiet()).unwrap()
 }
 
 /// Notes in front of her on `view`, and what she last did in it.
@@ -71,7 +71,9 @@ fn her_open_and_her_action_say_what_she_has_in_front_and_did_and_nothing_else_do
 
     assert_eq!(state(&phone, &files), PhoneState::default());
 
-    phone.open(&mut files, "notes", None, &at(OPENED)).unwrap();
+    phone
+        .open(&mut files, &quiet(), "notes", None, &at(OPENED))
+        .unwrap();
 
     assert_eq!(
         state(&phone, &files),
@@ -90,9 +92,11 @@ fn her_open_and_her_action_say_what_she_has_in_front_and_did_and_nothing_else_do
 
     let written = files.writes;
 
-    phone.look(&files, "notes", "all", &later).unwrap();
     phone
-        .open(&mut files, "notes", Some("trash"), &later)
+        .look(&files, &quiet(), "notes", "all", &later)
+        .unwrap();
+    phone
+        .open(&mut files, &quiet(), "notes", Some("trash"), &later)
         .unwrap_err();
     took(&phone, &mut files, "notes", "tear", &json!({}), &later).unwrap_err();
 
@@ -120,7 +124,9 @@ fn a_call_stands_when_what_she_has_in_front_cannot_be_kept() {
         unwritable: Some("phone.json"),
         ..Files::default()
     };
-    let opened = phone.open(&mut files, "notes", None, &at(OPENED)).unwrap();
+    let opened = phone
+        .open(&mut files, &quiet(), "notes", None, &at(OPENED))
+        .unwrap();
 
     assert!(opened.unkept.is_some());
 

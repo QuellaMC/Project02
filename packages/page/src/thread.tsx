@@ -145,7 +145,7 @@ export function ThreadPane({
           {laid.messages.map(placed => (
             <Bubble
               key={placed.message.messageId}
-              own={placed.message.role === 'user'}
+              own={placed.own}
               speaker={placed.message.speakerName}
               text={placed.message.text}
               placement={placed}
@@ -262,9 +262,10 @@ function HerPhoneButton({
  * A bubble, with what stands above it where the thread's layout puts
  * anything there; a draft of hers has no place of its own yet. Whose it
  * is, `speaker`, is said to a reader of the screen and not drawn: the
- * side and the colour say it to the eye.
+ * side and the colour say it to the eye. Her phone draws its threads with
+ * it too.
  */
-function Bubble({
+export function Bubble({
   own = false,
   draft = false,
   pending = false,

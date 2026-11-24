@@ -1194,12 +1194,17 @@ data: {…}</code></pre>
       <p>
         <code>GET /api/characters/:id/phone</code> reads her phone from her
         data, whether she runs or not. Her <code>apps</code> come in her
-        phone's order, those it comes with, then those installed on it by
-        name, and last the App Store, each with its <code>id</code>,
-        <code>name</code>, the <code>summary</code> she knows it by, its
-        <code>version</code>, where it came from as its
+        phone's order: the apps messages come in, <code>messages</code>
+        first, and a connector's app, as <code>telegram</code>, while it
+        carries her messages; then those it comes with, then those
+        installed on it by name, and last the App Store, each with its
+        <code>id</code>, <code>name</code>, the <code>summary</code> she
+        knows it by, its <code>version</code>, where it came from as its
         <code>source</code> (<code>built_in</code>, <code>catalog</code>,
-        <code>file</code>), the <code>icon</code> and the
+        <code>file</code>), whether she and the person write to each other
+        in it, <code>messaging</code>, which a client draws as their
+        conversation, what went through that app of the scrollback and the
+        stream, the <code>icon</code> and the
         <code>tint</code> of its tile — names of the page's own set, which
         falls back for one it does not know — whether it says it
         <code>wakes</code> her and whether the person lets it,
@@ -1230,7 +1235,12 @@ data: {…}</code></pre>
         home screen. <code>did</code> is what she last did on it: the
         <code>appId</code>, a few <code>words</code> in the past tense —
         <code>Opened Clock</code>, or an action's own, such as
-        <code>Set an alarm</code> — and the moment <code>at</code>.
+        <code>Set an alarm</code> — and the moment <code>at</code>. An app
+        messages come in shows her, on its one view,
+        <code>conversation</code>, the newest twenty messages that went
+        through it as bubbles, a <code>note</code> of the day and the time
+        where time has passed, and has no action: a message is sent one
+        way, as she sends any.
         <code>ringing</code> is empty but while a moment of hers that a ring
         began runs, and then holds each ring it tells: its
         <code>appName</code>, <code>title</code>, <code>body</code> when it

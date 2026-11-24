@@ -3,20 +3,30 @@
  * in it, which is look around her phone and change nothing of hers; and
  * what they do with the window itself. Every read passes through the
  * window's reducers in phone.ts, and the window reads the value, never the
- * client. From its start it tells the chat whose phone it shows.
- * Browser-only like the chat's session: the browser suite is its cover.
+ * client. From its start it tells the chat whose phone it shows. An app
+ * messages come in is drawn from her conversation, which the window opens
+ * as the chat does once one is on screen, reads its newest page, and
+ * follows on the stream. Browser-only like the chat's session: the
+ * browser suite is its cover.
  */
 import {tellTheChat} from './phone-link.ts';
 import {
   askRaised,
   askSettled,
+  conversationOpened,
+  conversationProgressed,
+  conversationRead,
+  conversationUnopened,
+  conversationUnread,
   framed,
   healthSaid,
   initialPhoneState,
+  isMessaging,
   looked,
   phoneRead,
   phoneReady,
   phoneRefused,
+  screenOf,
   screenRead,
   type PhoneState,
   type ViewLook,
@@ -74,6 +84,68 @@ export function createPhoneSession(
     };
   }
 
+  /** Only the latest read of her conversation's newest page applies. */
+  let conversationReads = 0;
+  const readConversation = async (): Promise<void> => {
+    const conversationId = getState().thread?.conversationId;
+
+    if (conversationId === undefined) {
+      return;
+    }
+
+    const mine = (conversationReads += 1);
+
+    try {
+      const outcome = await client.history(conversationId, {});
+
+      if (mine === conversationReads) {
+        apply(current => conversationRead(current, conversationId, outcome));
+      }
+    } catch (error: unknown) {
+      if (mine === conversationReads) {
+        apply(current =>
+          conversationUnread(current, conversationId, problem(error)),
+        );
+      }
+    }
+  };
+  /**
+   * Her conversation, opened as the chat opens it once an app messages
+   * come in is on screen and the window holds none, one open at a time;
+   * one that could not be opened is asked for again the next time.
+   */
+  let opening = false;
+  const needConversation = (): void => {
+    const state = getState();
+
+    if (
+      opening ||
+      state.thread !== undefined ||
+      screenOf(state).kind !== 'thread'
+    ) {
+      return;
+    }
+
+    opening = true;
+    void client
+      .openDirectConversation(characterId)
+      .then(
+        outcome => {
+          if (outcome.status === 'opened') {
+            apply(current => conversationOpened(current, outcome));
+            void readConversation();
+          } else {
+            apply(current => conversationUnopened(current, outcome.message));
+          }
+        },
+        (error: unknown) => {
+          apply(current => conversationUnopened(current, problem(error)));
+        },
+      )
+      .finally(() => {
+        opening = false;
+      });
+  };
   /** Only the latest read of her phone applies; an earlier one that settles later is let go. */
   let reads = 0;
   const read = async (): Promise<void> => {
@@ -85,6 +157,7 @@ export function createPhoneSession(
 
     if (mine === reads) {
       apply(current => phoneRead(current, outcome));
+      needConversation();
     }
   };
   /** And only the latest read of a view the person opened; the store lets go of one no longer shown. */
@@ -108,13 +181,14 @@ export function createPhoneSession(
    * itself and hers with her phone, until the address is refused.
    */
   const everyMinute = (): void => {
-    const {connection, shows, phone} = getState();
+    const state = getState();
+    const {connection, shows, phone} = state;
 
     if (connection.status === 'refused') {
       return;
     }
 
-    if (shows.kind === 'view') {
+    if (shows.kind === 'view' && !isMessaging(state, shows.appId)) {
       void readLook(shows);
     } else if (shows.kind === 'hers' && phone?.front !== undefined) {
       void read();
@@ -126,7 +200,8 @@ export function createPhoneSession(
   follow(client, {
     event: event => {
       // Her settings say whether she has a phone, and health moves with
-      // them: her phone is read again.
+      // them, as it does with the apps that carry her messages: her phone
+      // is read again.
       if (event.kind === 'health_changed') {
         apply(current => healthSaid(current, event.health));
         void read();
@@ -134,6 +209,11 @@ export function createPhoneSession(
 
       if (event.kind === 'phone_changed' && event.characterId === characterId) {
         void read();
+      }
+
+      // A message committed to her conversation joins what her phone shows.
+      if (event.kind === 'turn_progress') {
+        apply(current => conversationProgressed(current, event));
       }
 
       // Her ask to install an app stands over that app in the store while
@@ -149,6 +229,7 @@ export function createPhoneSession(
     ready: snapshot => {
       apply(current => phoneReady(current, snapshot));
       void read();
+      void readConversation();
     },
     lost: () => {
       apply(streamLost);
@@ -172,7 +253,15 @@ export function createPhoneSession(
 
       apply(current => looked(current, look));
 
-      if (getState() !== before) {
+      if (getState() === before) {
+        return;
+      }
+
+      // An app messages come in is drawn from her conversation, not read
+      // as a view.
+      if (isMessaging(getState(), appId)) {
+        needConversation();
+      } else {
         void readLook(look);
       }
     },

@@ -1,17 +1,20 @@
 //! The phone package: her phone in her hands. Before each model call she
 //! is told it is hers, a gift from the person while her settings say so,
-//! and the apps on it, and her tools let her open an app, to see its screen
-//! and what she can do in it, act in one, ask the person to sign an app in
-//! with a connection of theirs, and, unless her settings say otherwise, ask
-//! the person to install an app of the App Store. Her phone
-//! is the apps it comes with, the App Store among them, and those
+//! that the two of them write to each other on it, and the apps on it, and
+//! her tools let her open an app, to see its screen and what she can do in
+//! it, act in one, ask the person to sign an app in with a connection of
+//! theirs, and, unless her settings say otherwise, ask the person to
+//! install an app of the App Store. Her phone is the apps it comes with,
+//! the apps messages come in and the App Store among them, and those
 //! installed on it, which this plugin's store keeps with what each app
-//! keeps, read and written under the lease of the hook that calls it. Her
-//! opening the App Store reads its catalog anew, before the lease, and an
-//! action that reaches the internet or asks a model has each of its
-//! requests made, and each of its questions asked through the connection
-//! its app is signed in with, between its runs, with no lease held, the
-//! person's key sent with a request for an account of theirs.
+//! keeps, read and written under the lease of the hook that calls it. Which
+//! apps carry her messages, and what came in them, the daemon's
+//! conversation says, read under the lease. Her opening the App Store reads
+//! its catalog anew, before the lease, and an action that reaches the
+//! internet or asks a model has each of its requests made, and each of its
+//! questions asked through the connection its app is signed in with,
+//! between its runs, with no lease held, the person's key sent with a
+//! request for an account of theirs.
 
 mod catalog;
 mod connections;
@@ -30,8 +33,8 @@ use p02_contracts::{
 };
 use p02_core::SpeakerName;
 use p02_phone::{
-    Account, AccountKind, Acted, Acting, Action, Ask, Catalog, Exchange, Fetch, Fetched, Listed,
-    Now, OnPhone, Opened, Phone, PhoneError, Question, STORE, SignedIn, View,
+    Account, AccountKind, Acted, Acting, Action, Ask, Catalog, Chats, Exchange, Fetch, Fetched,
+    Listed, Now, OnPhone, Opened, Phone, PhoneError, Question, STORE, SignedIn, View,
 };
 use p02_shared::{Identifier, error_chain, sentence};
 use serde::Deserialize;
@@ -68,26 +71,29 @@ const USE_DESCRIPTION: &str = "Do something in an app on your phone. You see wha
 const APP: &str = "The app's id, in quotes beside its name among your apps.";
 
 /// The list's factory of the phone, which a host builds itself, handing it
-/// the App Store's catalog, the internet her apps reach and the person's
-/// connections they ask a model through: built anywhere else, it is
-/// refused.
+/// the App Store's catalog, the internet her apps reach, the person's
+/// connections they ask a model through and her conversation with the
+/// person: built anywhere else, it is refused.
 pub(crate) fn create(_input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> {
     Err(PluginError::new(format!(
         "{PHONE_PLUGIN} is built by the plugin host, which hands it the App Store's catalog, the \
-         internet her apps reach and the person's connections they ask a model through"
+         internet her apps reach, the person's connections they ask a model through and her \
+         conversation with the person"
     )))
 }
 
 /// How a host builds the phone: the phone every character has, with the
-/// apps installed on hers, reading the App Store's catalog through
-/// `catalog`, making her apps' requests through `internet` with the keys
-/// the home's settings give, asking their questions through the person's
-/// `connections`, and offering her the tool to ask to sign an app in, and
-/// the tool to ask to install an app while her settings do.
+/// apps installed on hers and the apps `chats` says carry her messages,
+/// reading the App Store's catalog through `catalog`, making her apps'
+/// requests through `internet` with the keys the home's settings give,
+/// asking their questions through the person's `connections`, and offering
+/// her the tool to ask to sign an app in, and the tool to ask to install an
+/// app while her settings do.
 pub(crate) fn factory(
     catalog: Arc<AppCatalog>,
     internet: Arc<AppInternet>,
     connections: Arc<dyn Connections>,
+    chats: Arc<dyn Chats>,
 ) -> Box<Factory> {
     Box::new(move |input: &FactoryInput<'_>| {
         let phone = Phone::bundled().map_err(|error| PluginError::new(error_chain(error)))?;
@@ -143,6 +149,7 @@ pub(crate) fn factory(
             catalog: Arc::clone(&catalog),
             internet: Arc::clone(&internet),
             connections: Arc::clone(&connections),
+            chats: Arc::clone(&chats),
             keys,
             gift: input.config().value(GIFT) == Some(&Value::Bool(true)),
             tools,
@@ -191,6 +198,9 @@ struct PhonePlugin {
     catalog: Arc<AppCatalog>,
     internet: Arc<AppInternet>,
     connections: Arc<dyn Connections>,
+    /// Her conversation with the person: the apps that carry her messages,
+    /// and what came in them.
+    chats: Arc<dyn Chats>,
     /// The person's key for each account they gave one for.
     keys: Vec<(&'static Account, Key)>,
     /// Whether she knows her phone as a gift from the person.
@@ -251,17 +261,20 @@ impl RuntimePlugin for PhonePlugin {
     }
 
     /// Says her phone is hers, a gift from the person while her settings
-    /// say so, and names her apps, as her phone lists them without running
-    /// any, each that the person said may not wake her saying so; what of
-    /// the lists her phone keeps does not read is passed over and said in
-    /// the note's record.
+    /// say so, that the two of them write to each other on it, and names
+    /// her apps, as her phone lists them without running any, each that the
+    /// person said may not wake her saying so; what of the lists her phone
+    /// keeps does not read is passed over and said in the note's record.
     async fn before_role_model_call(
         &self,
         context: &HookContext,
     ) -> Result<BeforeRoleModelCallOutput, PluginError> {
-        let phone = self.phone;
+        let (phone, chats) = (self.phone, Arc::clone(&self.chats));
         let person = context.turn()?.person.clone();
-        let on_phone = leased(store(context)?, move |files| Ok(phone.apps(files)?)).await?;
+        let on_phone = leased(store(context)?, move |files| {
+            Ok(phone.apps(files, chats.as_ref())?)
+        })
+        .await?;
         let note = Identifier::new("apps")
             .map_err(|error| PluginError::with_source("the note of her apps needs an id", error))?;
         let apps: Vec<String> = on_phone
@@ -291,14 +304,19 @@ impl RuntimePlugin for PhonePlugin {
         } else {
             "Your phone.".to_owned()
         };
+        let both = person.as_ref().map_or_else(
+            || "The two of you".to_owned(),
+            |person| format!("You and {}", person.as_str()),
+        );
 
         Ok(BeforeRoleModelCallOutput {
             context_items: vec![ContextItem::new(
                 note,
                 ContextItemKind::RuntimeNote,
                 format!(
-                    "{yours} On it: {}. To use an app, open it first with {OPEN} and look at its \
-                     screen; then do what you want in it with {USE}.",
+                    "{yours} {both} write to each other on it. On it: {}. To use an app, open it \
+                     first with {OPEN} and look at its screen; then do what you want in it with \
+                     {USE}.",
                     apps.join("; ")
                 ),
             )],
@@ -336,17 +354,20 @@ impl RuntimePlugin for PhonePlugin {
         let mut requests = REQUESTS;
         let mut exchanges = Vec::new();
         let answered = loop {
-            let (request, read, made, now) = (
+            let (request, read, made, now, chats) = (
                 request.clone(),
                 read.clone(),
                 exchanges.clone(),
                 now.clone(),
+                Arc::clone(&self.chats),
             );
             let ran = leased(store(context)?, move |files| {
-                match request.answer(phone, files, read.as_ref(), &made, &now) {
+                let chats = chats.as_ref();
+
+                match request.answer(phone, files, chats, read.as_ref(), &made, &now) {
                     Ok(step) => Ok(Ok(step)),
                     Err(PhoneError::Store(error)) => Err(FilesError::Store(error)),
-                    Err(refusal) => Ok(Err(refused(phone, files, request.app(), &refusal))),
+                    Err(refusal) => Ok(Err(refused(phone, files, chats, request.app(), &refusal))),
                 }
             })
             .await?;
@@ -392,9 +413,25 @@ impl RuntimePlugin for PhonePlugin {
         context: &HookContext,
     ) -> Result<ToolPreparation, PluginError> {
         match call.tool_name().as_str() {
-            install::INSTALL => install::prepare(self.phone, &self.catalog, call, context).await,
+            install::INSTALL => {
+                install::prepare(
+                    self.phone,
+                    Arc::clone(&self.chats),
+                    &self.catalog,
+                    call,
+                    context,
+                )
+                .await
+            }
             sign_in::SIGN_IN => {
-                sign_in::prepare(self.phone, self.connections.as_ref(), call, context).await
+                sign_in::prepare(
+                    self.phone,
+                    Arc::clone(&self.chats),
+                    self.connections.as_ref(),
+                    call,
+                    context,
+                )
+                .await
             }
             other => Err(PluginError::new(format!(
                 "the phone prepares no tool \"{other}\""
@@ -497,16 +534,18 @@ impl Request {
         }
     }
 
-    /// What a run of the call on her phone comes to at `now`: her phone's
-    /// answer, as she reads it, with why what she has in front could not be
-    /// kept, when it could not; or, for an action, the one more thing it
-    /// asks for after `exchanges`, a question with how its app is signed in
-    /// on her phone. An open of the App Store keeps `read`, the catalog
-    /// read for it, first.
+    /// What a run of the call on her phone comes to at `now`, with the
+    /// apps `chats` says carry her messages and what came in them: her
+    /// phone's answer, as she reads it, with why what she has in front
+    /// could not be kept, when it could not; or, for an action, the one more
+    /// thing it asks for after `exchanges`, a question with how its app is
+    /// signed in on her phone. An open of the App Store keeps `read`, the
+    /// catalog read for it, first.
     fn answer(
         &self,
         phone: &Phone,
         files: &mut LeasedStore<'_>,
+        chats: &dyn Chats,
         read: Option<&Catalog>,
         exchanges: &[Exchange],
         now: &Now,
@@ -519,15 +558,17 @@ impl Request {
                     phone.keep_catalog(files, catalog)?;
                 }
 
-                phone.open(files, app, view.as_deref(), now).map(|opened| {
-                    Step::Answered(Answered {
-                        output: shown(&opened),
-                        unkept: unkept(opened.unkept),
+                phone
+                    .open(files, chats, app, view.as_deref(), now)
+                    .map(|opened| {
+                        Step::Answered(Answered {
+                            output: shown(&opened),
+                            unkept: unkept(opened.unkept),
+                        })
                     })
-                })
             }
             Self::Use(Using { app, action, input }) => Ok(
-                match phone.act(files, app, action, input, exchanges, now)? {
+                match phone.act(files, chats, app, action, input, exchanges, now)? {
                     Acting::Acted(mut acted) => {
                         let unkept = unkept(acted.unkept.take());
 
@@ -538,7 +579,7 @@ impl Request {
                     }
                     Acting::Asks(Ask::Fetch(fetch)) => Step::Asks(Asked::Fetch(fetch)),
                     Acting::Asks(Ask::Question(question)) => {
-                        let on_phone = phone.apps(files)?;
+                        let on_phone = phone.apps(files, chats)?;
 
                         Step::Asks(Asked::Question {
                             question,
@@ -642,20 +683,22 @@ fn used(acted: Acted) -> Value {
     json!({"answer": acted.answer, "view": acted.view, "screen": screen})
 }
 
-/// A call her phone, as `files` keep it, refused, said in its own sentence
-/// and then, where it helps her next step, what there is instead: her
-/// apps, or the app's views or actions.
+/// A call her phone, as `files` keep it and `chats` says which apps carry
+/// her messages, refused, said in its own sentence and then, where it
+/// helps her next step, what there is instead: her apps, or the app's
+/// views or actions.
 fn refused(
     phone: &Phone,
     files: &dyn LeasedFiles,
+    chats: &dyn Chats,
     app: &str,
     refusal: &PhoneError,
 ) -> ToolCallOutcome {
-    let found = || phone.app(files, app).ok();
+    let found = || phone.app(files, chats, app).ok();
     let (reason, instead) = match refusal {
         PhoneError::NoApp(_) => (
             "app_not_found",
-            phone.apps(files).ok().map(|on_phone| {
+            phone.apps(files, chats).ok().map(|on_phone| {
                 listed(
                     "Your apps",
                     on_phone.apps.iter().map(|app| named(&app.name, &app.id)),

@@ -160,8 +160,8 @@ character a model.
 
 While her settings give her a phone, her page has her phone, over the
 daemon's verbs for her apps: A Gift from You, a field of her phone's; an
-icon for each app on her phone but the App Store, which has nothing to
-set, each opening the app's page; Get More Apps; and, among her
+icon for each app on her phone but the App Store and the apps messages
+come in, which have nothing to set, each opening the app's page; Get More Apps; and, among her
 permissions, Ask to Install Apps, her phone's other field. Each field is
 saved as any field is. A page about her
 apps reads her phone when the window comes to it and again on every
@@ -226,6 +226,21 @@ app's id say so in place of their status: "Waiting", and "Waiting for
 you", since the window does not know the person's name. The window learns
 of her asks from what the stream says of confirmations, those waiting
 when it connects and each one raised and settled; the daemon keeps none.
+An app her phone says messages come in, Messages or a connector's, is
+drawn as its thread, never read as a view: once one is on screen the
+window opens her conversation as the chat does and reads its newest page
+by the chat's rules, `store.ts`'s, and a message the stream commits joins
+it as it joins the chat; no earlier page is read. It shows what went
+through that app alone, laid out by `thread-layout.ts` as the chat is and
+mirrored, since it is her phone: hers at the line's end in the app's
+colour and the person's at its start on a card, a time where time has
+passed and no app's name, one app being on screen; her drafts are not
+there. At its head stand a way back to her home screen and the person,
+by the name their newest message goes by, with the app's name under
+theirs but in Messages; at its foot a message box that is only drawn. It
+follows its newest message as the chat does, and a conversation that
+cannot be opened or read is said in the daemon's sentence where her
+messages would be.
 A character the daemon does not know, or whose settings give her no phone,
 is said in the daemon's sentence where her phone would be.
 `phone-window.tsx` and `phone-device.tsx` draw it as the design draws an
