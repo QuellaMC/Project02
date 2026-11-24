@@ -58,6 +58,8 @@
   --ask-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 2px 12px rgba(0, 0, 0, 0.08);
   --edge-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06);
   --green-ink: #248a3d;
+  /* Telegram's own colour, the same in light and dark. */
+  --telegram: #0f7fb0;
   /*
    * The dock's motion, as the approved prototype times it: it opens easing
    * out, and closes a little quicker, easing in and out. The chat's lines
@@ -787,9 +789,28 @@ code {
   font-size: 13px;
 }
 
+/*
+ * Where time has passed or the app changed: the app's name where it
+ * changed, on a line of its own, then the day and the time.
+ */
+.divider {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 0 2px;
+  font-size: 11.5px;
+  color: var(--secondary);
+}
+
+.divider-app,
+.divider-day {
+  font-weight: 600;
+}
+
 .bubble {
-  max-width: min(72ch, 85%);
-  padding: 8px 13px;
+  max-width: min(72ch, 72%);
+  padding: 8px 14px;
   border-radius: 18px;
   background: var(--card);
   box-shadow: var(--card-shadow);
@@ -797,15 +818,20 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* The person's, in their app's colour, which the thread's layout gives each. */
 .bubble-own {
   align-self: flex-end;
-  background: var(--link);
   color: #ffffff;
   box-shadow: none;
 }
 
 .bubble-theirs {
   align-self: flex-start;
+}
+
+/* Under a message of the same sender's with nothing between, 2px apart where the thread's lines are 8px. */
+.bubble-joined {
+  margin-top: -6px;
 }
 
 .bubble-draft {
@@ -819,13 +845,6 @@ code {
 
 .bubble-pending {
   opacity: 0.6;
-}
-
-.bubble-name {
-  display: block;
-  font-size: 12px;
-  color: var(--secondary);
-  margin-bottom: 2px;
 }
 
 /* What she is doing before her reply begins: writing it, or using her phone. */

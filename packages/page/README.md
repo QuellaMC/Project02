@@ -53,10 +53,20 @@ away from it, and only their scroll says so (`thread-scroll.ts`): it
 follows the dock frame by frame, and what is new at its end eases in by
 the dock's closing, so a line that arrives as the dock closes settles
 with it in one motion; a chat scrolled up does not move. A person who
-asked for less motion gets none. Each turn in progress is the daemon's
-own word on it, replaced whole by each `turn_running` frame and installed
-from every `ready`; a stream the daemon resumed is live again with nothing
-installed.
+asked for less motion gets none. The thread reads as a messaging app's,
+by the rules of `thread-layout.ts`, pure and tested in Node: a time stands
+above a message that is the first shown or was sent on another day, more
+than 15 minutes after, or in another app than the one before it, with the
+app's name above the time where the app changed; the day is in the page's
+words and the time as the viewer's system writes one, where they are, and
+each bubble says its own on hover; the person's bubbles take their app's
+colour, Telegram's or the page's blue; one sender's messages in a row sit
+close; and the head of the chat names her, while a bubble says whose it is
+only to a reader of the screen. A line of the
+person's not yet committed is drawn as theirs sent now in Messages. Each
+turn in progress is the daemon's own word on it, replaced whole by each
+`turn_running` frame and installed from every `ready`; a stream the daemon
+resumed is live again with nothing installed.
 A turn of her own, which no line began, shows nothing until she drafts,
 and its end raises no notice. A reply of hers committed to a chat that
 is not on screen, whatever began her turn, puts a dot after her name in

@@ -45,7 +45,7 @@ const mira: CharacterSummary = {
   state: 'ready',
 };
 const conversationId = 'conv-1';
-/** When every message of these tests was sent: the page draws no time. */
+/** When every message of these tests was sent: the store keeps it as the daemon says it. */
 const sentAt = '2026-09-11T00:00:00.000Z';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
@@ -366,7 +366,7 @@ describe('web store', () => {
     expect(nova.thread?.stale).toEqual([]);
   });
 
-  it('shows a line once the daemon says so: the pending bubble becomes the message, and a frame seen twice shows once', () => {
+  it('shows a line once the daemon says so: the pending bubble becomes the message, with when it was sent and its app, and a frame seen twice shows once', () => {
     let state = sent(opened(), 'hello there', 'line-1');
 
     expect(composerText(state)).toBe('');
@@ -391,6 +391,8 @@ describe('web store', () => {
         role: 'user',
         speakerName: 'You',
         text: 'hello there',
+        sentAt,
+        app: 'messages',
         clientMessageId: 'line-1',
       },
     ]);

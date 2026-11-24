@@ -229,6 +229,67 @@ test("page.chat-drafts-and-second-tab: the printed address opens the page and th
   ]);
 });
 
+test("page.chat-apps: a line from the page and her answer, then a line from Telegram and hers, read as a messaging app's: Telegram's name stands above the time where the conversation moved there, the person's Telegram bubble is in Telegram's colour, and her name stands above none of her bubbles", async ({
+  page,
+}) => {
+  const {model, daemon, wire} = await miraHome();
+  const fromTelegram = await sender(wire);
+
+  model.answer(reply('Hello to you.'), reply('Hello from here too.'));
+  await page.goto(daemon.url);
+  await send(page, 'Hello.');
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Hello to you.',
+  ]);
+
+  const {conversationId} = await conversationOf(wire, 'mira');
+
+  await fromTelegram({
+    conversationId,
+    text: 'Now from Telegram.',
+    source: 'telegram:mira_bot',
+    clientMessageId: 'telegram-1',
+  });
+  await expect(page.locator('.bubble-text')).toHaveText([
+    'Hello.',
+    'Hello to you.',
+    'Now from Telegram.',
+    'Hello from here too.',
+  ]);
+
+  const {messages} = (await wire.history(conversationId)) as {
+    readonly messages: readonly unknown[];
+  };
+  const named = page.locator('.divider-app');
+  const time = page.locator('.divider', {has: named}).locator('time');
+
+  await expect(named).toHaveText(['Telegram']);
+  // The time is the Telegram line's, as the daemon keeps it.
+  expect(messages).toContainEqual(
+    expect.objectContaining({
+      clientMessageId: 'telegram-1',
+      sentAt: await time.getAttribute('datetime'),
+    }),
+  );
+
+  const [name, when] = await Promise.all([
+    named.boundingBox(),
+    time.boundingBox(),
+  ]);
+
+  expect(
+    name !== null && when !== null && name.y + name.height <= when.y + near,
+  ).toBe(true);
+  await expect(
+    page.locator('.bubble-own').filter({hasText: 'Now from Telegram.'}),
+  ).toHaveCSS('background-color', 'rgb(15, 127, 176)');
+  // Her name is said to a reader of the screen, and not drawn.
+  await expect(page.locator('.bubble-theirs .visually-hidden')).toHaveText([
+    'Mira:',
+    'Mira:',
+  ]);
+});
+
 test("page.own-turn: a moment of hers in which she says nothing shows nothing, one whose model fails raises no notice, and her message in a moment of her own appears in the open thread with no 'is writing' line before her first draft", async ({
   context,
   page,

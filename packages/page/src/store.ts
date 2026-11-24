@@ -53,12 +53,17 @@ export type Connection =
 /** A surface's value, the chat's or her phone's window's: how its connection stands moves the same way for each. */
 type Connected = {readonly connection: Connection};
 
-/** A committed message as the page shows it; a person's own is told by its role. */
+/**
+ * A committed message as the page shows it, with when it was sent and the
+ * id of the app it is in; a person's own is told by its role.
+ */
 export type Message = {
   readonly messageId: string;
   readonly role: VisibleMessageRole;
   readonly speakerName: string;
   readonly text: string;
+  readonly sentAt: string;
+  readonly app: string;
   readonly clientMessageId?: string;
 };
 
@@ -1316,6 +1321,8 @@ function messageOf(source: {
   readonly role: VisibleMessageRole;
   readonly speakerName: string;
   readonly text: string;
+  readonly sentAt: string;
+  readonly app: string;
   readonly clientMessageId?: string;
 }): Message {
   return {
@@ -1323,6 +1330,8 @@ function messageOf(source: {
     role: source.role,
     speakerName: source.speakerName,
     text: source.text,
+    sentAt: source.sentAt,
+    app: source.app,
     ...(source.clientMessageId === undefined
       ? {}
       : {clientMessageId: source.clientMessageId}),
