@@ -1,10 +1,11 @@
 //! A turn's model rounds: one after another until a round calls no plugin
-//! tool or the rounds run out, each made with what the character runs on
-//! when it starts. Every round is judged once, by what began the turn, and
-//! handed to the turn as soon as it is judged, before anything it decided
-//! happens. The turn hears a round begin as its request goes out, and end
-//! once its answer is judged and what it said is committed, before the
-//! calls it made run.
+//! tool or leaves the message for later, or the rounds run out, each made
+//! with what the character runs on when it starts. Every round is judged
+//! once, by what began the turn and whether she has sent a message in it,
+//! and handed to the turn as soon as it is judged, before anything it
+//! decided happens. The turn hears a round begin as its request goes out,
+//! and end once its answer is judged and what it said is committed, before
+//! the calls it made run.
 
 use std::num::NonZeroU32;
 
@@ -147,8 +148,9 @@ pub trait TurnSink: Send + Sync {
 /// How a turn's rounds ended.
 #[derive(Clone, Debug, PartialEq)]
 pub enum TurnOutcome {
-    /// A round called no plugin tool: what it said, if it said anything,
-    /// was committed.
+    /// A round called no plugin tool, or left the message for later and
+    /// its calls were done: what it said, if it said anything, was
+    /// committed.
     Completed {
         round: NonZeroU32,
         decision: CharacterDecision,
@@ -163,7 +165,8 @@ pub enum TurnOutcome {
 
 /// What a round comes to once its answer is judged and what it said is
 /// committed: the turn's end, a refusal the model is told of in the next
-/// round, or the calls it made, to run before the next.
+/// round, or the calls it made, to run before the next round, or before the
+/// turn's end when it left the message for later.
 enum Said {
     Ended(TurnOutcome),
     Refused,
@@ -171,6 +174,9 @@ enum Said {
         calls: Vec<RoutedToolCall>,
         text: Option<String>,
         interim_replies: Vec<VisibleMessage>,
+        /// How the turn ends once the calls are done, when the round left
+        /// the message for later.
+        then: Option<TurnOutcome>,
     },
 }
 
@@ -244,16 +250,21 @@ impl<'a> Rounds<'a> {
 
         sink.round_ended();
 
-        let (calls, text, interim_replies) = match said? {
+        let (calls, text, interim_replies, then) = match said? {
             Said::Ended(outcome) => return Ok(Some(outcome)),
             Said::Refused => return Ok(None),
             Said::Calls {
                 calls,
                 text,
                 interim_replies,
-            } => (calls, text, interim_replies),
+                then,
+            } => (calls, text, interim_replies, then),
         };
         let tool_calls = sink.run_tool_calls(round, calls).await?;
+
+        if then.is_some() {
+            return Ok(then);
+        }
 
         self.spent += 1;
         self.envelope.tool_rounds.push(ToolRound {
@@ -281,6 +292,7 @@ impl<'a> Rounds<'a> {
         let result = DecisionResult::judge(
             &answer,
             self.envelope.opening.occasion(),
+            self.sent(),
             self.envelope.decision_context.apps_now(),
         );
         let recorded = ModelRound {
@@ -310,12 +322,16 @@ impl<'a> Rounds<'a> {
                 return Ok(Said::Ended(TurnOutcome::Refused { round, rejection }));
             }
         };
+        let later = decision
+            .tool_calls()
+            .iter()
+            .any(|call| matches!(call, ModelToolCall::AnswerLater));
         let calls: Vec<(&Identifier, &Map<String, Value>)> = decision
             .tool_calls()
             .iter()
             .filter_map(|call| match call {
                 ModelToolCall::Plugin { name, input } => Some((name, input)),
-                ModelToolCall::VisibleReply { .. } => None,
+                ModelToolCall::VisibleReply { .. } | ModelToolCall::AnswerLater => None,
             })
             .collect();
 
@@ -337,16 +353,27 @@ impl<'a> Rounds<'a> {
         }
 
         let interim_replies = commit_replies(sink, round, &decision, &self.envelope).await?;
+        let calls = calls
+            .into_iter()
+            .enumerate()
+            .map(|(at, (name, input))| self.route(round, at + 1, name, input))
+            .collect();
 
         Ok(Said::Calls {
-            calls: calls
-                .into_iter()
-                .enumerate()
-                .map(|(at, (name, input))| self.route(round, at + 1, name, input))
-                .collect(),
+            calls,
             text: decision.text().map(str::to_owned),
             interim_replies,
+            then: later.then(|| TurnOutcome::Completed { round, decision }),
         })
+    }
+
+    /// Whether she has sent a message in the turn: every round that did
+    /// not end it keeps what she said in it.
+    fn sent(&self) -> bool {
+        self.envelope
+            .tool_rounds
+            .iter()
+            .any(|round| !round.interim_replies.is_empty())
     }
 
     fn route(
@@ -399,7 +426,7 @@ async fn commit_replies<S: TurnSink>(
 ) -> Result<Vec<VisibleMessage>, S::Error> {
     let replies = decision.tool_calls().iter().filter_map(|call| match call {
         ModelToolCall::VisibleReply { text, app } => Some((text, app.as_deref())),
-        ModelToolCall::Plugin { .. } => None,
+        ModelToolCall::AnswerLater | ModelToolCall::Plugin { .. } => None,
     });
     let mut committed = Vec::new();
 

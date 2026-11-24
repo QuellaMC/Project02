@@ -21,10 +21,14 @@ turn ended.
 - **One path, two occasions.** A moment runs the turn a line does, but it
   commits no line and may end without a word: plain text with no call is
   a thought she keeps, never shown, and an answer of nothing ends it. In
-  a turn the person began she always answers. A moment may carry what
-  rang, which its event keeps and her replay of it tells again. She
-  replays a moment later only when she said something in it or a call of
-  hers came back.
+  a turn the person began, plain text is her message, and an answer of
+  nothing ends the turn only once she has sent one; or she leaves the line
+  for later, and the turn completes with no message of hers. A moment
+  tells her how long since the person last wrote and, while no message of
+  hers stands after that line, that she has not answered. A moment may
+  carry what rang, which its event keeps and her replay of it tells
+  again. She replays a moment later only when she said something in it or
+  a call of hers came back.
 - **In the order it happens.** The event, the person's line when one
   began the turn, each model round before anything it decided, each reply
   and tool call, then the turn's ending, before the plugins' work after

@@ -5,8 +5,9 @@ use serde::{Deserialize, Serialize};
 use crate::output::{PluginContextItem, PluginCuratedSection};
 use crate::role_model::tools::ModelToolCall;
 
-/// What a turn began from: the person's line, which the character answers,
-/// or a moment of her own, which nobody began and in which nothing is owed.
+/// What a turn began from: the person's line, which the character answers
+/// or leaves for later, or a moment of her own, which nobody began and in
+/// which nothing is owed.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Occasion {
@@ -28,7 +29,8 @@ pub struct CharacterDecision {
 
 impl CharacterDecision {
     /// A decision of calls the judge read, none only in a moment of her
-    /// own, and the text it kept only when it said something.
+    /// own or once she has sent a message in the person's turn, and the
+    /// text it kept only when it said something.
     pub(crate) fn judged(tool_calls: Vec<ModelToolCall>, text: Option<String>) -> Self {
         Self { tool_calls, text }
     }

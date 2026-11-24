@@ -735,6 +735,35 @@ test("page.line-status: under the person's newest message one line says how far 
   ).toHaveText('Tea, always.');
 });
 
+test('page.line-left: a line she leaves for later says Read under it, and nothing else: no message of hers comes for it and the page raises no notice', async ({
+  page,
+}) => {
+  const {model, daemon, wire} = await miraHome();
+  const fromTelegram = await sender(wire);
+
+  model.answer(calling(['answer_later', {}]), reply('Hello from here.'));
+  await page.goto(daemon.url);
+  await send(page, 'Busy?');
+  await expect(page.locator('.bubble-status b')).toHaveText('Read');
+
+  // A line from her other app after it, and her answer: once the page
+  // shows them, it has heard how her turn on the first one ended.
+  const {conversationId} = await conversationOf(wire, 'mira');
+
+  await fromTelegram({
+    conversationId,
+    text: 'Hello?',
+    source: 'telegram:mira_bot',
+    clientMessageId: 'telegram-1',
+  });
+  await expect(page.locator('.bubble-text')).toHaveText([
+    'Busy?',
+    'Hello?',
+    'Hello from here.',
+  ]);
+  await expect(page.locator('main > .notice')).toHaveCount(0);
+});
+
 test('page.rejected-line-kept: a line whose turn the daemon rejected stays on the thread with a notice saying why, and the composer is empty', async ({
   page,
 }) => {

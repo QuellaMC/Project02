@@ -147,7 +147,8 @@ pub(crate) fn tool_protocol(person: Person<'_>, inventory: Inventory) -> String 
             "When {name} {} written to you, {name} {} waiting for your answer. If you look \
              something up or do something first, {name} {sees} none of that, only the messages \
              you send. So when you have what you wanted, send what you actually mean to say. If \
-             you simply speak and do nothing else, that is taken as your message.",
+             you simply speak and do nothing else, that is taken as your message. You can also \
+             leave it for now: {name} {sees} that you have read it, and nothing more.",
             person.has(),
             person.is()
         ),
@@ -167,36 +168,39 @@ pub(crate) fn tool_protocol(person: Person<'_>, inventory: Inventory) -> String 
 
 /// The runtime's note of a moment of the character's own, which rides
 /// where the person's line would be: that nobody wrote, the time it is
-/// `at`, where the person is, how long since they last wrote, when her
-/// history can say, and what the moment is hers for. It says where her
-/// words go again, at the point she writes them: the protocol's sentence
-/// on it is a long way up.
+/// `at`, where the person is, how long since they last wrote and, unless
+/// she `answered`, that she has not, when her history can say, and what the
+/// moment is hers for. It says where her words go again, at the point she
+/// writes them: the protocol's sentence on it is a long way up.
 pub(crate) fn moment_note(
     person: Person<'_>,
     at: &Zoned,
     since_last_line: Option<Duration>,
+    answered: bool,
 ) -> String {
     format!(
         "Nobody has written to you. {}\n\
          Nobody is waiting for an answer, and this time is yours. If there is something you want \
          {} to read, send a message. Anything else stays your own thought.",
-        it_is(person, at, since_last_line),
+        it_is(person, at, since_last_line, answered),
         person.them()
     )
 }
 
 /// The runtime's note of a moment of the character's own that her phone's
 /// ringing began, in place of the heartbeat's: that it rings and nobody
-/// wrote, the time it is `at` where the person is and how long since they
-/// last wrote, what rang, a line each, and that what she does about it is
-/// hers, with where her words go, as the heartbeat's note says it. It does
-/// not say that nobody waits, as the heartbeat's does: she set the ring,
-/// and whether somebody waits on it is hers to know. `rang` is what the
-/// apps wrote, set apart already as text inside a fence.
+/// wrote, the time it is `at` where the person is, how long since they
+/// last wrote and, unless she `answered`, that she has not, what rang, a
+/// line each, and that what she does about it is hers, with where her
+/// words go, as the heartbeat's note says it. It does not say that nobody waits, as the
+/// heartbeat's does: she set the ring, and whether somebody waits on it is
+/// hers to know. `rang` is what the apps wrote, set apart already as text
+/// inside a fence.
 pub(crate) fn ringing_note(
     person: Person<'_>,
     at: &Zoned,
     since_last_line: Option<Duration>,
+    answered: bool,
     rang: &[Rang],
 ) -> String {
     format!(
@@ -205,20 +209,31 @@ pub(crate) fn ringing_note(
          {}\n\
          What you do about it is yours. If there is something you want {} to read, send a \
          message. Anything else stays your own thought.",
-        it_is(person, at, since_last_line),
+        it_is(person, at, since_last_line, answered),
         rang_lines(rang, at),
         person.them()
     )
 }
 
-/// The time it is `at`, where the person is, and how long since they last
-/// wrote, when her history can say.
-fn it_is(person: Person<'_>, at: &Zoned, since_last_line: Option<Duration>) -> String {
+/// The time it is `at`, where the person is, and, when her history can say,
+/// how long since they last wrote and, unless she `answered`, that she has
+/// not.
+fn it_is(
+    person: Person<'_>,
+    at: &Zoned,
+    since_last_line: Option<Duration>,
+    answered: bool,
+) -> String {
     let now = format!("It is {}", at.strftime("%A, %B %-d, %Y, %H:%M"));
+    let unanswered = if answered {
+        ""
+    } else {
+        ", and you have not answered"
+    };
 
     match since_last_line {
         Some(elapsed) => format!(
-            "{now}; {} last wrote to you {}.",
+            "{now}; {} last wrote to you {}{unanswered}.",
             person.name(),
             ago(elapsed)
         ),

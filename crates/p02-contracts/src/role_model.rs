@@ -19,6 +19,6 @@ pub use decision::{
 pub use history::{ConversationToolCall, ConversationTurn, Rang, ToolCallResult, ToolRound};
 pub use reasoning::scrub_reasoning_blocks;
 pub use tools::{
-    DuplicateToolError, ModelToolCall, ModelToolDefinition, PLUGIN_LIST_TOOL,
+    ANSWER_LATER, DuplicateToolError, ModelToolCall, ModelToolDefinition, PLUGIN_LIST_TOOL,
     ParseModelToolCallError, PluginToolDefinition, PluginToolDefinitions, SEND_MESSAGE,
 };

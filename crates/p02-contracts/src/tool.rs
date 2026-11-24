@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 use crate::context::HookContext;
 use crate::evidence::EvidenceNote;
 use crate::plugin::PluginError;
-use crate::role_model::SEND_MESSAGE;
+use crate::role_model::{ANSWER_LATER, SEND_MESSAGE};
 use crate::schema::{ToolInputContract, ToolInputRejection};
 use crate::vocabulary::ToolConcurrency;
 
@@ -56,7 +56,7 @@ impl ProvidedTool {
     ) -> Result<Self, ToolDefinitionError> {
         let description = description.into();
 
-        if name.as_str() == SEND_MESSAGE {
+        if [SEND_MESSAGE, ANSWER_LATER].contains(&name.as_str()) {
             return Err(ToolDefinitionError::BuiltInName { name });
         }
 
@@ -272,10 +272,14 @@ mod tests {
         };
 
         assert!(named("sessions.search", "Search past conversations.").is_ok());
-        assert!(matches!(
-            named("send_message", "Send a message."),
-            Err(ToolDefinitionError::BuiltInName { .. })
-        ));
+
+        for built_in in ["send_message", "answer_later"] {
+            assert!(matches!(
+                named(built_in, "A tool of the runtime's own."),
+                Err(ToolDefinitionError::BuiltInName { .. })
+            ));
+        }
+
         assert!(matches!(
             named("sessions.search", " "),
             Err(ToolDefinitionError::BlankDescription { .. })

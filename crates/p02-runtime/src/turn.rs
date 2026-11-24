@@ -16,7 +16,7 @@ use p02_contracts::{
 };
 use p02_core::{
     BlankTextError, ClientStamp, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
-    UserLine, VisibleMessage, app_of,
+    UserLine, VisibleMessage, VisibleMessageRole, app_of,
 };
 use p02_plugins::{
     BeforeCallOutcome, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall, ToolCallReport,
@@ -214,18 +214,22 @@ pub(crate) async fn run(
             )
         }
         Opened::Moment(rang) => {
-            let last = begun
-                .history
-                .turns
+            let turns = &begun.history.turns;
+            let last = turns.iter().rev().find(|turn| turn.user_message.is_some());
+            // Every message after the person's last line is hers: she
+            // answered it once the newest message is hers.
+            let newest = turns
                 .iter()
-                .rev()
-                .find(|turn| turn.user_message.is_some());
+                .flat_map(ConversationTurn::visible_messages)
+                .last();
 
             (
                 Opening::Moment {
                     since_last_line: last
                         .and_then(|turn| turn.user_message.as_ref())
                         .map(|line| since_sent(line, identity.created_at())),
+                    answered: newest
+                        .is_some_and(|message| message.role == VisibleMessageRole::Character),
                     last_app: last.map(|turn| app_of(turn.source.as_ref()).to_owned()),
                     rang,
                 },
@@ -669,7 +673,7 @@ impl OpenTurn<'_> {
             .rev()
             .find_map(|call| match call {
                 ModelToolCall::VisibleReply { text, .. } => Some(text.clone()),
-                ModelToolCall::Plugin { .. } => None,
+                ModelToolCall::AnswerLater | ModelToolCall::Plugin { .. } => None,
             });
         let evidence = self.recorded().await;
         let (messages, finished) = {

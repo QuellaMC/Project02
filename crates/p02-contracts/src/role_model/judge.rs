@@ -6,23 +6,26 @@ use crate::role_model::answer::{ModelOutput, ProviderAnswer, WrittenCall};
 use crate::role_model::decision::{
     CharacterDecision, DecisionRejection, DecisionRejectionReason, DecisionResult, Occasion,
 };
-use crate::role_model::tools::{ModelToolCall, SEND_MESSAGE};
+use crate::role_model::tools::{ANSWER_LATER, ModelToolCall, SEND_MESSAGE};
 
 impl DecisionResult {
-    /// The one verdict on a model round of a turn begun from `occasion`,
-    /// for her with `apps`, the apps she has now. A provider that failed is
-    /// `provider_error`. Text beside the model's calls is its note. With no
-    /// call, its text alone is its reply in a turn the person began, and a
-    /// thought the character keeps in a moment of her own, where an answer
-    /// of nothing at all stands too. Anything else, from no answer in a
-    /// person's turn to a call the runtime cannot make or a message in an
-    /// app she does not have, is `malformed_output`, and the details say
-    /// what to fix, since the model is told them in its next round. A
-    /// call's input keeps its credential-named values, to run the call.
+    /// The one verdict on a model round of a turn begun from `occasion`, in
+    /// which she has `sent` a message already or not, for her with `apps`,
+    /// the apps she has now. A provider that failed is `provider_error`.
+    /// Text beside the model's calls is its note. With no call, its text
+    /// alone is its reply in a turn the person began, and a thought the
+    /// character keeps in a moment of her own; an answer of nothing at all
+    /// stands in a moment, and in a person's turn once she has sent a
+    /// message in it. A call to leave the message for later stands in any
+    /// turn. Anything else, from no answer in a person's turn before she
+    /// sent one to a call the runtime cannot make or a message in an app
+    /// she does not have, is `malformed_output`, and the details say what
+    /// to fix, since the model is told them in its next round. A call's
+    /// input keeps its credential-named values, to run the call.
     #[must_use]
-    pub fn judge(answer: &ProviderAnswer, occasion: Occasion, apps: &AppNames) -> Self {
+    pub fn judge(answer: &ProviderAnswer, occasion: Occasion, sent: bool, apps: &AppNames) -> Self {
         let (reason, details) = match answer {
-            ProviderAnswer::Answered { output, .. } => match decide(output, occasion, apps) {
+            ProviderAnswer::Answered { output, .. } => match decide(output, occasion, sent, apps) {
                 Ok(decision) => return Self::Accepted { decision },
                 Err(details) => (DecisionRejectionReason::MalformedOutput, details),
             },
@@ -44,6 +47,7 @@ impl DecisionResult {
 fn decide(
     output: &ModelOutput,
     occasion: Occasion,
+    sent: bool,
     apps: &AppNames,
 ) -> Result<CharacterDecision, String> {
     // A thinking model leaves a newline where its reasoning was: blank text
@@ -54,16 +58,18 @@ fn decide(
         .filter(|text| !text.trim().is_empty());
 
     if output.tool_calls.is_empty() {
-        return match occasion {
-            Occasion::Line => {
-                let text =
-                    text.ok_or("Nothing was sent. Send a message, or do something first.")?;
+        return match (occasion, text) {
+            (Occasion::Line, Some(text)) => {
                 let reply =
                     ModelToolCall::reply(text, None).map_err(|error| format!("{error}."))?;
 
                 Ok(CharacterDecision::judged(vec![reply], None))
             }
-            Occasion::Moment => Ok(CharacterDecision::judged(
+            (Occasion::Line, None) if !sent => Err(
+                "Nothing was sent. Send a message, do something first, or leave it for later."
+                    .to_owned(),
+            ),
+            (Occasion::Line, None) | (Occasion::Moment, _) => Ok(CharacterDecision::judged(
                 Vec::new(),
                 text.map(str::to_owned),
             )),
@@ -87,13 +93,14 @@ fn judge_call(call: &WrittenCall, apps: &AppNames) -> Result<ModelToolCall, Stri
         return Err(format!("The arguments of {name} must be a JSON object."));
     };
 
-    if name.as_str() == SEND_MESSAGE {
-        return judge_reply(input, apps);
+    match name.as_str() {
+        SEND_MESSAGE => judge_reply(input, apps),
+        // It takes nothing, so nothing that came with it is kept.
+        ANSWER_LATER => Ok(ModelToolCall::AnswerLater),
+        // The tool's own contract is the host's to judge; here the input
+        // only has to cross the JSON boundary.
+        _ => ModelToolCall::plugin(name, input.clone()).map_err(|error| format!("{error}.")),
     }
-
-    // The tool's own contract is the host's to judge; here the input only
-    // has to cross the JSON boundary.
-    ModelToolCall::plugin(name, input.clone()).map_err(|error| format!("{error}."))
 }
 
 /// A message: its text, and the app it goes in when she names one, which
@@ -160,8 +167,10 @@ mod tests {
         AppNames::new([("telegram", "Telegram")])
     }
 
+    /// What `answer` comes to, accepted, in a turn begun from `occasion`
+    /// before she sent a message in it, as a record keeps it.
     fn accepted(answer: &ProviderAnswer, occasion: Occasion) -> Value {
-        match DecisionResult::judge(answer, occasion, &apps()) {
+        match DecisionResult::judge(answer, occasion, false, &apps()) {
             DecisionResult::Accepted { decision } => serde_json::to_value(decision).unwrap(),
             DecisionResult::Rejected { rejection } => panic!("{answer:?}: {rejection:?}"),
         }
@@ -210,6 +219,7 @@ mod tests {
             DecisionResult::judge(
                 &answered(&[sent_in("hi", "messages")], None),
                 Occasion::Line,
+                false,
                 &AppNames::new([])
             ),
             DecisionResult::Accepted { .. }
@@ -255,6 +265,53 @@ mod tests {
         }
     }
 
+    /// Once she has sent a message in a turn the person began, an answer of
+    /// nothing at all ends it, while text alone is still a message of hers.
+    #[test]
+    fn once_she_has_sent_a_message_nothing_at_all_ends_the_person_s_turn() {
+        let after_a_message = |answer: &ProviderAnswer| {
+            serde_json::to_value(DecisionResult::judge(answer, Occasion::Line, true, &apps()))
+                .unwrap()
+        };
+
+        for nothing in [answered(&[], None), answered(&[], Some(" \n"))] {
+            assert_eq!(
+                after_a_message(&nothing),
+                json!({"status": "accepted", "decision": {"toolCalls": []}})
+            );
+        }
+
+        assert_eq!(
+            after_a_message(&answered(&[], Some("One more thing."))),
+            json!({"status": "accepted", "decision": {"toolCalls": [kept("One more thing.")]}})
+        );
+    }
+
+    /// Leaving the message for later stands in any turn: alone, beside a
+    /// message, or beside a plugin's tool. The decision keeps the call under
+    /// its own name, and nothing that came with it.
+    #[test]
+    fn answering_later_stands_alone_beside_a_message_or_beside_a_tool() {
+        let later = || json!({"name": "answer_later", "input": {"why": "busy"}});
+        let kept_later = json!({"name": "answer_later", "input": {}});
+        let patch = json!({"name": "character_state.patch", "input": {"mood": "busy"}});
+
+        for occasion in [Occasion::Line, Occasion::Moment] {
+            assert_eq!(
+                accepted(&answered(&[later()], None), occasion),
+                json!({"toolCalls": [kept_later]})
+            );
+            assert_eq!(
+                accepted(&answered(&[sent("Back soon."), later()], None), occasion),
+                json!({"toolCalls": [kept("Back soon."), kept_later]})
+            );
+            assert_eq!(
+                accepted(&answered(&[later(), patch.clone()], None), occasion),
+                json!({"toolCalls": [kept_later, patch]})
+            );
+        }
+    }
+
     #[test]
     fn what_cannot_be_acted_on_is_malformed_with_what_to_fix() {
         let many_fields: Map<String, Value> = (0..257)
@@ -265,12 +322,12 @@ mod tests {
         let cases = [
             (
                 answered(&[], None),
-                "Nothing was sent. Send a message, or do something first.",
+                "Nothing was sent. Send a message, do something first, or leave it for later.",
                 line,
             ),
             (
                 answered(&[], Some(" \n")),
-                "Nothing was sent. Send a message, or do something first.",
+                "Nothing was sent. Send a message, do something first, or leave it for later.",
                 line,
             ),
             (
@@ -328,7 +385,7 @@ mod tests {
         for (answer, details, occasions) in cases {
             for &occasion in occasions {
                 assert_eq!(
-                    DecisionResult::judge(&answer, occasion, &apps()),
+                    DecisionResult::judge(&answer, occasion, false, &apps()),
                     DecisionResult::Rejected {
                         rejection: DecisionRejection {
                             reason: DecisionRejectionReason::MalformedOutput,

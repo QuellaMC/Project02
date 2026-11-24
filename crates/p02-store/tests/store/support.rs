@@ -382,7 +382,10 @@ impl TurnScript<'_> {
             Some(_) => Occasion::Line,
             None => Occasion::Moment,
         };
-        let result = DecisionResult::judge(&answer, occasion, &AppNames::new([]));
+        // A line's turn commits the person's line first, and every message
+        // after it is hers.
+        let sent = self.messages.len() > usize::from(self.line.is_some());
+        let result = DecisionResult::judge(&answer, occasion, sent, &AppNames::new([]));
 
         self.rounds.push(result.clone());
         self.push(RecordBody::ModelRound(RoundRecord::new(
@@ -500,7 +503,8 @@ impl TurnScript<'_> {
                 .rev()
                 .find_map(|call| match call {
                     p02_contracts::ModelToolCall::VisibleReply { text, .. } => Some(text.clone()),
-                    p02_contracts::ModelToolCall::Plugin { .. } => None,
+                    p02_contracts::ModelToolCall::AnswerLater
+                    | p02_contracts::ModelToolCall::Plugin { .. } => None,
                 }),
         };
         let body = RecordBody::TurnCompleted(TurnCompleted {
