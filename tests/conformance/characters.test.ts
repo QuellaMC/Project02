@@ -177,11 +177,6 @@ it('characters.add-from-file: a file previews as who she is and what she comes w
     version: '1.0.0',
     about: 'A quiet one, who notices things.',
     comesWith: [
-      {
-        kind: 'plugin',
-        id: 'runtime.plugin',
-        displayName: 'Ask to Change Settings',
-      },
       {kind: 'plugin', id: 'character-memory', displayName: 'Notebook'},
       {kind: 'plugin', id: 'phone', displayName: 'Phone'},
       {kind: 'plugin', id: 'reply-style', displayName: 'Reply Style'},

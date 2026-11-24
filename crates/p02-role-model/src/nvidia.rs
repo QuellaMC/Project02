@@ -204,7 +204,7 @@ struct TurnBody<'a> {
     reasoning: Reasoning,
 }
 
-/// The tools, always offered: `visible_reply` is among them whatever the
+/// The tools, always offered: `send_message` is among them whatever the
 /// plugins provide.
 #[derive(Serialize)]
 struct Offered<'a> {

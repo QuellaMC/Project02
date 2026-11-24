@@ -1,5 +1,5 @@
 //! What an adapter speaks while the model writes, whatever protocol it
-//! streams: each native `visible_reply` call's text, decoded from its
+//! streams: each native `send_message` call's text, decoded from its
 //! arguments as they stream, behind the reasoning filter the judge will
 //! scrub the whole with. Content is never spoken: alone it is the reply,
 //! which arrives whole at the commit, or in a moment of the character's
@@ -7,7 +7,7 @@
 //! to itself; the prompt promises the person never hears either, and which
 //! it is cannot be known while it arrives.
 
-use p02_contracts::{Invocation, ReasoningFilter, ReplyDelta, VISIBLE_REPLY};
+use p02_contracts::{Invocation, ReasoningFilter, ReplyDelta, SEND_MESSAGE};
 
 use crate::prompt::{ToolNameMapping, runtime_name};
 
@@ -240,7 +240,7 @@ struct Draft {
     scanner: FieldScanner,
 }
 
-/// The drafts of one round's replies: the n-th `visible_reply` call to
+/// The drafts of one round's replies: the n-th `send_message` call to
 /// begin is reply n, counted again from zero once the calls before are let
 /// go, each behind its own filter. Silent when no one listens, since the
 /// invocation hears for no one then.
@@ -261,7 +261,7 @@ impl<'a> ReplyDrafts<'a> {
     }
 
     pub(crate) fn hear(&mut self, fragment: Fragment<'_>) {
-        if runtime_name(fragment.name, self.mappings) != VISIBLE_REPLY {
+        if runtime_name(fragment.name, self.mappings) != SEND_MESSAGE {
             return;
         }
 

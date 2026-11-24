@@ -33,20 +33,29 @@ The host's rules:
 
 The plugins: `runtime.plugin`, which lists the plugins she runs, shows one
 plugin's settings and, on the person's yes, changes a field the model may
-change in her own settings; session history; mem0, whose account is the
-home's to set up; character state; character memory; her phone, whose
-apps, those it comes with and those installed on it, the App Store last,
-she is told of before each call as her phone's store lists them, each the
-person said may not wake her saying so beside its name, with the person's
-name as her notes say it; she opens and acts in them through two tools,
-asks the person to sign an app in with a connection of theirs through a
-third, and, while her settings' Ask to Install Apps is on, asks the person
-to install from the App Store through a fourth, which is prepared reading
-the catalog and fetching and judging the app, its preview saying whether
-the app wakes her, whether it reaches the internet, and the name of the
-person's account it uses there by a key or of the connection it asks a
-model through, and installs the text judged on their yes; and
-reply-style, the tone she writes in and a signoff, each character's own.
+change in her own settings, and which runs only where her settings or her
+package switch it on; session history; mem0, whose account is the home's
+to set up; character state, how she feels, told to her in a sentence for
+each of its five readings; character memory; her phone, which she is told
+is hers, a gift from the person while her settings' A Gift from You is on,
+as it is unless they or her package switch it off, and whose apps, those
+it comes with and those installed on it, the App Store last, she is told
+of before each call as her phone's store lists them, each the person said
+may not wake her saying so beside its name, with the person's name as her
+notes say it; she opens and acts in them through two tools, asks the
+person to sign an app in with a connection of theirs through a third, and,
+while her settings' Ask to Install Apps is on, asks the person to install
+from the App Store through a fourth, which is prepared reading the catalog
+and fetching and judging the app, its preview saying whether the app wakes
+her, whether it reaches the internet, and the name of the person's account
+it uses there by a key or of the connection it asks a model through, and
+installs the text judged on their yes; and reply-style, the tone she
+writes in and a signoff, each character's own.
+
+What a plugin says to her, in its tools, its notes and its answers, it
+says about her own situation, in the second person, and keeps beside its
+code. Only `runtime.plugin` and reply-style, which are for a plain
+assistant, speak of plugins and settings.
 
 `AppCatalog` is the one reader of the App Store's catalog, which the daemon
 makes from the base the binary resolved: `catalog.json`, and one entry's

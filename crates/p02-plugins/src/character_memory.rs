@@ -34,13 +34,12 @@ const OPERATIONS: u64 = 8;
 /// against its capacity.
 const SEPARATOR: &str = "\n§\n";
 
-const DESCRIPTION: &str = "Update your notes — what you carry from one conversation to the next \
-     (you see them at the start of every conversation as 'What you carry between \
-     conversations'). Save stable facts worth keeping: what they like and correct you on, facts \
-     about their world, conventions, how they work. Skip passing task details and anything easily \
-     found again. add appends an entry; replace and remove pick exactly one existing entry by a \
-     unique old_text substring. New notes appear from your next conversation on; a full notebook \
-     rejects the batch, so tighten or drop stale entries first.";
+const DESCRIPTION: &str = "Write in your notebook what you want to keep: about the one you write \
+     with, about the two of you, and about your own days, so that what you said last week is \
+     still true. You see your notebook every time, so keep it short. add writes a new entry; \
+     replace and remove pick one entry by old_text, words that are in it and in no other. What \
+     you write shows from your next conversation on. If it does not fit, nothing is written: \
+     shorten or take out entries first.";
 
 /// The package's factory: it reads no config.
 pub(crate) fn create(_input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>, PluginError> {
@@ -52,20 +51,20 @@ pub(crate) fn create(_input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>
         "type": "string",
         "minLength": 1,
         "maxLength": longest,
-        "description": "Full entry text to store.",
+        "description": "The entry, as you want it written.",
     });
     let target = json!({
         "type": "string",
         "enum": Target::ALL.map(Target::name),
-        "description": "notes holds what you want to remember; user_profile holds what you know \
-                        about them.",
+        "description": "The part of your notebook: notes for your own days and the two of you, \
+                        user_profile for what you know about the one you write with.",
     });
     let old_text = json!({
         "type": "string",
         "minLength": 1,
         "maxLength": longest,
-        "description": "Substring selecting exactly one existing entry; ambiguity rejects the \
-                        batch.",
+        "description": "Words that are in the entry you mean and in no other. If they are in \
+                        more than one, nothing is written.",
     });
 
     // The tool runs alone, so a round's batches land in the order the model
@@ -81,7 +80,8 @@ pub(crate) fn create(_input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>
                         "type": "array",
                         "minItems": 1,
                         "maxItems": OPERATIONS,
-                        "description": "Atomic batch: every operation commits or none do.",
+                        "description": "What to write, in order: all of it is written, or \
+                                        none of it.",
                         "items": {
                             "oneOf": [
                                 {
@@ -356,7 +356,7 @@ impl Target {
     fn section(self) -> (&'static str, &'static str) {
         match self {
             Self::Notes => ("notes", "Notes to yourself"),
-            Self::UserProfile => ("user-profile", "What you know about them"),
+            Self::UserProfile => ("user-profile", "What you know about the one you write with"),
         }
     }
 }
@@ -490,7 +490,8 @@ impl Memory {
                 return Err(Refusal {
                     reason: "memory_capacity_exceeded",
                     message: format!(
-                        "{} would hold {used}/{capacity} chars; compress or remove entries first.",
+                        "Nothing was written: {} would hold {used} characters of its \
+                         {capacity}. Shorten or take out entries first.",
                         target.name()
                     ),
                 });
@@ -506,7 +507,7 @@ fn entry(target: Target, text: &str) -> Result<&str, Refusal> {
     entry_text(text).ok_or_else(|| Refusal {
         reason: "memory_entry_invalid",
         message: format!(
-            "{} entry text must be non-empty and free of control characters.",
+            "Nothing was written: an entry of {} needs words, and no control characters.",
             target.name()
         ),
     })
@@ -526,12 +527,16 @@ fn selected(entries: &[String], target: Target, old_text: &str) -> Result<usize,
         [at] => Ok(*at),
         [] => Err(Refusal {
             reason: "memory_old_text_not_found",
-            message: format!("No {} entry contains the given old_text.", target.name()),
+            message: format!(
+                "Nothing was written: no entry of {} has that old_text.",
+                target.name()
+            ),
         }),
         several => Err(Refusal {
             reason: "memory_old_text_ambiguous",
             message: format!(
-                "old_text selects {} {} entries; use a longer unique substring.",
+                "Nothing was written: that old_text is in {} entries of {}. Give words that are \
+                 in one only.",
                 several.len(),
                 target.name()
             ),

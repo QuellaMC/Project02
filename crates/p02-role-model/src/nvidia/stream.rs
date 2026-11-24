@@ -212,7 +212,7 @@ mod tests {
         ": ping\r\n\r\n",
         "data: {\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"reasoning_content\":\"hmm\"},\"finish_reason\":null}]}\r\n\r\n",
         "data: {\"id\":\"c1\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ダーリン、\"},\"finish_reason\":null}]}\r\n\r\n",
-        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"visible_reply\",\"arguments\":\"\"}}]}}]}\n\n",
+        "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"call_a\",\"type\":\"function\",\"function\":{\"name\":\"send_message\",\"arguments\":\"\"}}]}}]}\n\n",
         "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":0,\"function\":{\"arguments\":\"{\\\"text\\\":\\\"ゼロ\"}}]}}]}\n\n",
         "data: {\"choices\":[{\"index\":0,\"delta\":{\"tool_calls\":[{\"index\":1,\"id\":\"call_b\",\"function\":{\"arguments\":\"{\\\"q\\\":\"}}]}}]}\n\n",
         "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"一緒に\"}}]}\n\n",
@@ -267,7 +267,7 @@ mod tests {
                     content: Some("ダーリン、一緒に".to_owned()),
                     finish_reason: Some("tool_calls".to_owned()),
                     calls: vec![
-                        call("visible_reply", "{\"text\":\"ゼロツー💖\"}"),
+                        call("send_message", "{\"text\":\"ゼロツー💖\"}"),
                         call("memory_search", "{\"q\":\"sky\"}"),
                     ],
                     usage: Some(TokenUsage {
@@ -276,10 +276,10 @@ mod tests {
                     }),
                 }),
                 vec![
-                    (0, "visible_reply".to_owned(), String::new()),
-                    (0, "visible_reply".to_owned(), "{\"text\":\"ゼロ".to_owned()),
+                    (0, "send_message".to_owned(), String::new()),
+                    (0, "send_message".to_owned(), "{\"text\":\"ゼロ".to_owned()),
                     (1, "memory_search".to_owned(), "{\"q\":".to_owned()),
-                    (0, "visible_reply".to_owned(), "ツー💖\"}".to_owned()),
+                    (0, "send_message".to_owned(), "ツー💖\"}".to_owned()),
                     (1, "memory_search".to_owned(), "\"sky\"}".to_owned()),
                 ]
             )

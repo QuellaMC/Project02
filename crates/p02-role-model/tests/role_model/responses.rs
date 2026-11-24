@@ -97,7 +97,7 @@ fn failure(answer: &ProviderAnswer) -> (String, String, Option<u16>) {
 
 /// A round of the loop with only her reply offered.
 async fn invoke(adapter: &Adapter) -> ProviderAnswer {
-    let (messages, tools) = wire(&["visible_reply"]);
+    let (messages, tools) = wire(&["send_message"]);
 
     adapter.invoke(&Invocation::new(&messages, &tools)).await
 }
@@ -168,11 +168,11 @@ fn offered(name: &str) -> Value {
 #[tokio::test]
 async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as_written() {
     let stub = Stub::start().await;
-    let (mut messages, tools) = wire(&["visible_reply", "memory.search"]);
+    let (mut messages, tools) = wire(&["send_message", "memory.search"]);
 
     messages.extend(two_searches());
 
-    let (reply, replied) = call(0, "visible_reply", &["{\"text\":\"Hel", "lo.\"}"]);
+    let (reply, replied) = call(0, "send_message", &["{\"text\":\"Hel", "lo.\"}"]);
     let (search, searched) = call(1, "memory_search", &["{\"q\":", "\"sky\"}"]);
     let response = json!({
         "status": "completed",
@@ -213,7 +213,7 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
                 second,
                 second_result,
             ],
-            "tools": [offered("visible_reply"), offered("memory_search")],
+            "tools": [offered("send_message"), offered("memory_search")],
             "tool_choice": "auto",
             "stream": true,
             "store": false,
@@ -240,7 +240,7 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
         (
             json!({
                 "toolCalls": [
-                    {"name": "visible_reply", "input": {"text": "Hello."}},
+                    {"name": "send_message", "input": {"text": "Hello."}},
                     {"name": "memory.search", "input": {"q": "sky"}},
                 ],
                 "text": "A note.",
@@ -255,8 +255,8 @@ async fn a_round_goes_out_in_the_protocol_s_terms_and_its_answer_is_read_back_as
 async fn every_end_of_a_round_short_of_an_answer_is_said_as_the_service_s_without_the_key() {
     let stub = Stub::start().await;
     let adapter = adapter(&stub);
-    let (reply, _) = call(0, "visible_reply", &["{\"text\":\"Half a th"]);
-    let (whole, written) = call(0, "visible_reply", &["{\"text\":\"After a 429.\"}"]);
+    let (reply, _) = call(0, "send_message", &["{\"text\":\"Half a th"]);
+    let (whole, written) = call(0, "send_message", &["{\"text\":\"After a 429.\"}"]);
     let refused = |status: u16, message: String| Answer::Whole {
         status,
         body: json!({"error": {"message": message, "type": "invalid_request_error"}}).to_string(),
@@ -484,7 +484,7 @@ fn part(kind: &str, text: &str) -> Value {
 #[tokio::test]
 async fn a_round_on_a_plan_goes_out_as_codex_sends_it_and_its_answer_is_read_from_its_items() {
     let stub = Stub::start().await;
-    let (mut messages, tools) = wire(&["visible_reply", "memory.search"]);
+    let (mut messages, tools) = wire(&["send_message", "memory.search"]);
 
     messages.insert(
         1,
@@ -494,7 +494,7 @@ async fn a_round_on_a_plan_goes_out_as_codex_sends_it_and_its_answer_is_read_fro
     );
     messages.extend(two_searches());
 
-    let (reply, replied) = call(0, "visible_reply", &["{\"text\":\"Hel", "lo.\"}"]);
+    let (reply, replied) = call(0, "send_message", &["{\"text\":\"Hel", "lo.\"}"]);
     let (search, searched) = call(1, "memory_search", &["{\"q\":", "\"sky\"}"]);
 
     // Each item whole only as it is done: the end, as the plan's service
@@ -558,7 +558,7 @@ async fn a_round_on_a_plan_goes_out_as_codex_sends_it_and_its_answer_is_read_fro
                 second,
                 second_result,
             ],
-            "tools": [offered("visible_reply"), offered("memory_search")],
+            "tools": [offered("send_message"), offered("memory_search")],
             "tool_choice": "auto",
             "stream": true,
             "store": false,
@@ -583,7 +583,7 @@ async fn a_round_on_a_plan_goes_out_as_codex_sends_it_and_its_answer_is_read_fro
         (
             json!({
                 "toolCalls": [
-                    {"name": "visible_reply", "input": {"text": "Hello."}},
+                    {"name": "send_message", "input": {"text": "Hello."}},
                     {"name": "memory.search", "input": {"q": "sky"}},
                 ],
                 "text": "A note.",
@@ -603,7 +603,7 @@ async fn a_401_on_a_plan_is_asked_once_more_refreshed_and_a_second_turns_the_sig
         status: 401,
         body: json!({"detail": "Unauthorized"}).to_string(),
     };
-    let (reply, replied) = call(0, "visible_reply", &["{\"text\":\"Again.\"}"]);
+    let (reply, replied) = call(0, "send_message", &["{\"text\":\"Again.\"}"]);
 
     stub.answer(unauthorized());
     stub.answer(Answer::events(

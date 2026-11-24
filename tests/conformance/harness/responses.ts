@@ -70,9 +70,9 @@ export function functionCall(
   };
 }
 
-/** The character speaking through `visible_reply`, its arguments cut at the given offsets. */
+/** The character speaking through `send_message`, its arguments cut at the given offsets. */
 export function replying(words: string, ...cuts: number[]): OutputItem {
-  return functionCall('visible_reply', JSON.stringify({text: words}), ...cuts);
+  return functionCall('send_message', JSON.stringify({text: words}), ...cuts);
 }
 
 /** The model's words as a plain completion answers: a message holding them as its text. */

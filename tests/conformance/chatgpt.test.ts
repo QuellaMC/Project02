@@ -292,9 +292,9 @@ const signInNeeded = 'Sign in to your ChatGPT plan.';
 /**
  * A home whose characters think with a ChatGPT plan, beside the model
  * server as its service and the auth server as OpenAI's sign-in, signed in
- * as Sam on the Plus plan; `project02` adds to its settings.
+ * as Sam on the Plus plan; `plugins` switches plugins in its settings.
  */
-async function onPlan(project02: object = {}): Promise<{
+async function onPlan(plugins: object = {}): Promise<{
   readonly auth: AuthServer;
   readonly model: ModelServer;
   readonly wire: Wire;
@@ -304,9 +304,7 @@ async function onPlan(project02: object = {}): Promise<{
   const auth = await startAuthServer();
   const model = await startModelServer();
   const home = createHome({
-    'config.json': configJson({
-      project02: {...model.chatgpt.settings, ...project02},
-    }),
+    'config.json': configJson({project02: model.chatgpt.settings, plugins}),
   });
   const daemon = await startDaemon(home, {...auth.env, ...model.chatgpt.env});
   const wire = wireOf(daemon);
@@ -358,7 +356,7 @@ it("chatgpt.plan-turn: a home on a ChatGPT plan answers a turn through the plan'
     reasoning: {effort: 'low'},
     include: ['reasoning.encrypted_content'],
     tools: expect.arrayContaining([
-      expect.objectContaining({type: 'function', name: 'visible_reply'}),
+      expect.objectContaining({type: 'function', name: 'send_message'}),
     ]) as unknown,
   });
   expect(body).not.toHaveProperty('max_output_tokens');
@@ -404,7 +402,7 @@ it('chatgpt.plan-drafts: her reply through a ChatGPT plan is drafted as the mode
 });
 
 it('chatgpt.plan-tool-round: a tool her model calls through a ChatGPT plan goes out as a function call, and the next request carries the call and its result, tied to it by one call id', async () => {
-  const {model, wire} = await onPlan();
+  const {model, wire} = await onPlan({'runtime.plugin': {enabled: true}});
   const say = await converse(wire, 'mira');
 
   model.answer(

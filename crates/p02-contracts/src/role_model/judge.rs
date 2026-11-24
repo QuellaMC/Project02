@@ -5,7 +5,7 @@ use crate::role_model::answer::{ModelOutput, ProviderAnswer, WrittenCall};
 use crate::role_model::decision::{
     CharacterDecision, DecisionRejection, DecisionRejectionReason, DecisionResult, Occasion,
 };
-use crate::role_model::tools::{ModelToolCall, VISIBLE_REPLY};
+use crate::role_model::tools::{ModelToolCall, SEND_MESSAGE};
 
 impl DecisionResult {
     /// The one verdict on a model round of a turn begun from `occasion`. A
@@ -50,7 +50,8 @@ fn decide(output: &ModelOutput, occasion: Occasion) -> Result<CharacterDecision,
     if output.tool_calls.is_empty() {
         return match occasion {
             Occasion::Line => {
-                let text = text.ok_or("Reply with visible_reply or call a tool.")?;
+                let text =
+                    text.ok_or("Nothing was sent. Send a message, or do something first.")?;
                 let reply = ModelToolCall::reply(text).map_err(|error| format!("{error}."))?;
 
                 Ok(CharacterDecision::judged(vec![reply], None))
@@ -79,7 +80,7 @@ fn judge_call(call: &WrittenCall) -> Result<ModelToolCall, String> {
         return Err(format!("The arguments of {name} must be a JSON object."));
     };
 
-    if name.as_str() == VISIBLE_REPLY {
+    if name.as_str() == SEND_MESSAGE {
         return judge_reply(input);
     }
 
@@ -90,7 +91,7 @@ fn judge_call(call: &WrittenCall) -> Result<ModelToolCall, String> {
 
 fn judge_reply(input: &Map<String, Value>) -> Result<ModelToolCall, String> {
     let Some(Value::String(text)) = input.get("text") else {
-        return Err("visible_reply needs its text as a string.".to_owned());
+        return Err("Nothing was sent. A message needs its text as a string.".to_owned());
     };
     let others: Vec<&str> = input
         .keys()
@@ -100,7 +101,7 @@ fn judge_reply(input: &Map<String, Value>) -> Result<ModelToolCall, String> {
 
     if !others.is_empty() {
         return Err(format!(
-            "visible_reply takes only text, not {}.",
+            "Nothing was sent. A message takes only its text, not {}.",
             others.join(", ")
         ));
     }
@@ -138,15 +139,21 @@ mod tests {
         }
     }
 
-    fn reply(text: &str) -> Value {
+    /// A message as the model sends it.
+    fn sent(text: &str) -> Value {
+        json!({"name": "send_message", "input": {"text": text}})
+    }
+
+    /// A message as the decision keeps it on the record.
+    fn kept(text: &str) -> Value {
         json!({"name": "visible_reply", "input": {"text": text}})
     }
 
     #[test]
     fn calls_are_the_decision_text_beside_them_its_note_and_text_alone_the_reply() {
         let calls = [
-            reply("<think>plan it</think> first\r\n"),
-            reply("second"),
+            sent("<think>plan it</think> first\r\n"),
+            sent("second"),
             json!({"name": "character_state.patch", "input": {"mood": "angry"}}),
         ];
 
@@ -157,23 +164,23 @@ mod tests {
             ),
             json!({
                 "toolCalls": [
-                    reply("first"),
-                    reply("second"),
+                    kept("first"),
+                    kept("second"),
                     {"name": "character_state.patch", "input": {"mood": "angry"}},
                 ],
                 "text": "Let me check what I remember.",
             })
         );
         assert_eq!(
-            accepted(&answered(&[reply("hi")], Some(" \n\t ")), Occasion::Line),
-            json!({"toolCalls": [reply("hi")]})
+            accepted(&answered(&[sent("hi")], Some(" \n\t ")), Occasion::Line),
+            json!({"toolCalls": [kept("hi")]})
         );
         assert_eq!(
             accepted(
                 &answered(&[], Some("<reasoning>hm</reasoning>Plain hello.")),
                 Occasion::Line
             ),
-            json!({"toolCalls": [reply("Plain hello.")]})
+            json!({"toolCalls": [kept("Plain hello.")]})
         );
     }
 
@@ -184,10 +191,10 @@ mod tests {
     fn in_a_moment_text_alone_is_a_thought_and_nothing_at_all_ends_it() {
         assert_eq!(
             accepted(
-                &answered(&[reply("Thinking of you.")], Some("I miss them.")),
+                &answered(&[sent("Thinking of you.")], Some("I miss them.")),
                 Occasion::Moment
             ),
-            json!({"toolCalls": [reply("Thinking of you.")], "text": "I miss them."})
+            json!({"toolCalls": [kept("Thinking of you.")], "text": "I miss them."})
         );
         assert_eq!(
             accepted(
@@ -215,12 +222,12 @@ mod tests {
         let cases = [
             (
                 answered(&[], None),
-                "Reply with visible_reply or call a tool.",
+                "Nothing was sent. Send a message, or do something first.",
                 line,
             ),
             (
                 answered(&[], Some(" \n")),
-                "Reply with visible_reply or call a tool.",
+                "Nothing was sent. Send a message, or do something first.",
                 line,
             ),
             (
@@ -231,7 +238,7 @@ mod tests {
             (
                 answered(
                     &[
-                        reply("hi"),
+                        sent("hi"),
                         json!({"name": "memory.search", "input": "{\"query\": nope"}),
                     ],
                     None,
@@ -241,23 +248,23 @@ mod tests {
             ),
             (
                 answered(
-                    &[json!({"name": "visible_reply", "input": {"text": 1}})],
+                    &[json!({"name": "send_message", "input": {"text": 1}})],
                     None,
                 ),
-                "visible_reply needs its text as a string.",
+                "Nothing was sent. A message needs its text as a string.",
                 any,
             ),
             (
                 answered(
-                    &[json!({"name": "visible_reply", "input": {"text": "hi", "mood": "x"}})],
+                    &[json!({"name": "send_message", "input": {"text": "hi", "mood": "x"}})],
                     None,
                 ),
-                "visible_reply takes only text, not mood.",
+                "Nothing was sent. A message takes only its text, not mood.",
                 any,
             ),
             (
-                answered(&[reply("<think>still thinking")], None),
-                "visible_reply text must not be empty.",
+                answered(&[sent("<think>still thinking")], None),
+                "Nothing was sent. The message was empty.",
                 any,
             ),
             (

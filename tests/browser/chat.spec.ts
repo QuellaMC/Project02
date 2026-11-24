@@ -36,6 +36,15 @@ const mira = {scope: 'character', characterId: 'mira'} as const;
 const alice = {id: '381940562', label: 'Alice (@alice)'};
 const bob = {id: '987654321', label: 'Bob (@bob)'};
 
+/** Mira's own settings switching Ask to Change Settings on, for a test of her asking to change one. */
+const asking = {
+  'character-data': {
+    mira: {
+      'config.json': configJson({plugins: {'runtime.plugin': {enabled: true}}}),
+    },
+  },
+};
+
 /** Mira on the model server. */
 async function miraHome(
   seed: Parameters<typeof createHome>[0] = {},
@@ -368,7 +377,7 @@ test('page.reconnect-same-address: once the daemon stops the page says Connectin
 test("page.confirmation-card: her ask to change one of her settings waits on a card above the message box that says it in her settings page's words; Allow lets her turn finish, and one her stop cancels goes and is said once, naming her", async ({
   page,
 }) => {
-  const {model, daemon, wire} = await miraHome();
+  const {model, daemon, wire} = await miraHome(asking);
   const card = page.getByRole('group', {
     name: 'Mira wants to change her Reply Style',
   });
@@ -458,7 +467,7 @@ test("page.pairing-card: someone new asking on a connector waits on a card that 
 test('page.ask-place: what she asks waits on a card under her last line and above the message box, whole inside the window, its answer under its words in a narrow one; her row among the characters says she is asking until it is answered', async ({
   page,
 }) => {
-  const {model, daemon, wire} = await miraHome();
+  const {model, daemon, wire} = await miraHome(asking);
   const card = page.getByRole('group', {
     name: 'Mira wants to change her Reply Style',
   });
@@ -503,7 +512,7 @@ test('page.ask-place: what she asks waits on a card under her last line and abov
 test('page.asks-one-spot: what waits is answered one at a time in one spot above the message box, another behind it as an edge; once the first is answered it says Allowed, and the next takes its place', async ({
   page,
 }) => {
-  const {model, daemon, wire} = await miraHome();
+  const {model, daemon, wire} = await miraHome(asking);
   const dock = page.locator('.dock');
   const hers = page.getByRole('group', {
     name: 'Mira wants to change her Reply Style',
@@ -535,7 +544,7 @@ test('page.asks-one-spot: what waits is answered one at a time in one spot above
 test('page.ask-while-reading: in a chat scrolled up to read, the line at the top stays where it is while a card opens above the message box and while it closes as her reply arrives', async ({
   page,
 }) => {
-  const {model, daemon, wire} = await miraHome();
+  const {model, daemon, wire} = await miraHome(asking);
   const say = await converse(wire, 'mira');
   const messages = page.locator('.messages');
   const card = page.getByRole('group', {

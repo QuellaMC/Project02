@@ -45,7 +45,7 @@ fn say(text: &str) -> ProviderAnswer {
 }
 
 fn reply(text: &str) -> Value {
-    json!({"name": "visible_reply", "input": {"text": text}})
+    json!({"name": "send_message", "input": {"text": text}})
 }
 
 fn search(query: &str) -> Value {

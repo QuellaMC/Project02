@@ -412,13 +412,13 @@ export function toolCall(
   }));
 }
 
-/** The character speaking through `visible_reply`, its arguments cut at the given offsets. */
+/** The character speaking through `send_message`, its arguments cut at the given offsets. */
 export function visibleReply(words: string, ...cuts: number[]): unknown[] {
   return toolCall(
     {
       index: 0,
       id: 'call_reply',
-      name: 'visible_reply',
+      name: 'send_message',
       arguments: JSON.stringify({text: words}),
     },
     ...cuts,

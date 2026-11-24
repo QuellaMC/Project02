@@ -157,7 +157,7 @@ it('memory.character-state-store: a state she patches is still hers after a rest
 
   model.answer(reply('Still curious.'));
   await again('How are you?', 'after');
-  expect(runtimeNotesOf(model.requests.at(-1))).toContain('mood=curious');
+  expect(runtimeNotesOf(model.requests.at(-1))).toContain('You feel curious.');
 });
 
 it("memory.session-history-search: sessions.search finds the person's lines in her earlier sessions, by a CJK query too, and sessions.read reads back a session it found", async () => {

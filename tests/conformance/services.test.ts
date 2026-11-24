@@ -31,6 +31,9 @@ import {
 } from './harness/responses.ts';
 import {converse, saveConfig, wireOf} from './harness/wire.ts';
 
+/** Ask to Change Settings switched on, for a test whose model calls its listing. */
+const listing = {'runtime.plugin': {enabled: true}};
+
 /** Where a request went, under which key, for which model: a bearer, or the Claude API's own header. */
 function asked(request: ModelRequest): object {
   return {
@@ -110,7 +113,7 @@ it("services.openai-turn: a home on the OpenAI API answers through its Responses
   ).toEqual(
     expect.objectContaining({
       type: 'function',
-      name: 'visible_reply',
+      name: 'send_message',
       strict: false,
     }),
   );
@@ -155,7 +158,10 @@ it('services.openai-tool-round: a tool her model calls through the OpenAI API go
     wireOf(
       await startDaemon(
         createHome({
-          'config.json': configJson({project02: model.openai.settings}),
+          'config.json': configJson({
+            project02: model.openai.settings,
+            plugins: listing,
+          }),
         }),
         model.openai.env,
       ),
@@ -264,11 +270,11 @@ it("services.claude-turn: a home on the Claude API answers through Anthropic's M
   expect(body).toMatchObject({
     max_tokens: 32768,
     stream: true,
-    system: expect.stringContaining('visible_reply') as string,
+    system: expect.stringContaining('send a message') as string,
   });
   expect(turnsOf(first)).toEqual([{role: 'user', content: 'Hello?'}]);
   expect((body['tools'] as readonly unknown[] | undefined)?.[0]).toEqual({
-    name: 'visible_reply',
+    name: 'send_message',
     description: expect.any(String) as string,
     input_schema: expect.objectContaining({type: 'object'}) as object,
     eager_input_streaming: true,
@@ -317,7 +323,10 @@ it("services.claude-tool-round: a tool her model calls through the Claude API go
     wireOf(
       await startDaemon(
         createHome({
-          'config.json': configJson({project02: model.anthropic.settings}),
+          'config.json': configJson({
+            project02: model.anthropic.settings,
+            plugins: listing,
+          }),
         }),
         model.anthropic.env,
       ),

@@ -39,10 +39,7 @@ pub(crate) fn create(input: &FactoryInput<'_>) -> Result<Arc<dyn RuntimePlugin>,
         .unwrap_or_default();
 
     Ok(Arc::new(ReplyStylePlugin {
-        style: format!(
-            "Your speaking style right now (adjustable through the runtime.plugin.config tools): \
-             speak in a {tone} tone.{signoff}"
-        ),
+        style: format!("Your speaking style right now: speak in a {tone} tone.{signoff}"),
     }))
 }
 

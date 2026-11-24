@@ -17,14 +17,19 @@ import {converse, wireOf, type Wire} from './harness/wire.ts';
 
 const mira = {scope: 'character', characterId: 'mira'} as const;
 
-/** Mira on the model server, her reply style on: the plugin whose fields the model may ask to change. */
+/** Mira on the model server, her reply style on, the plugin whose fields the model may ask to change, and Ask to Change Settings, through which it asks. */
 async function replyStyleHome(env: Readonly<Record<string, string>> = {}) {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({project02: model.settings}),
     'character-data': {
       mira: {
-        'config.json': configJson({plugins: {'reply-style': {enabled: true}}}),
+        'config.json': configJson({
+          plugins: {
+            'reply-style': {enabled: true},
+            'runtime.plugin': {enabled: true},
+          },
+        }),
       },
     },
   });

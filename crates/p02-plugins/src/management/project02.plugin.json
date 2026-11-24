@@ -28,7 +28,7 @@
       }
     },
     "activation": {
-      "defaultEnabled": true,
+      "defaultEnabled": false,
       "reasons": ["host_provided_plugin_management"]
     },
     "requestedAccess": {

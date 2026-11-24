@@ -1,5 +1,5 @@
 /**
- * Her apps in the settings window: what her page's Apps group, an app's
+ * Her apps in the settings window: what her page's Phone group, an app's
  * page with the person's account it uses or how it signs in, Get More
  * Apps and an app's file show, from what the daemon last said of her
  * phone and of the App Store's apps for her, and how each read and each
@@ -64,16 +64,18 @@ export function hasPhone(view: OkView): boolean {
   return sectionOf(view, 'plugins', phonePlugin)?.enabled === true;
 }
 
-/** Her Ask to Install Apps: the field of her phone's that lets her ask the person to install an app. */
-export function askToInstallRow(characterId: string): Row {
+/**
+ * A field of her phone's that is hers: Ask to Install Apps, which lets her
+ * ask the person to install an app, or A Gift from You, which has her know
+ * her phone as the person's gift.
+ */
+export function herPhoneRow(
+  characterId: string,
+  name: 'askToInstall' | 'gift',
+): Row {
   return {
     target: characterTarget(characterId),
-    place: {
-      kind: 'field',
-      namespace: 'plugins',
-      id: phonePlugin,
-      name: 'askToInstall',
-    },
+    place: {kind: 'field', namespace: 'plugins', id: phonePlugin, name},
   };
 }
 
@@ -125,7 +127,7 @@ export function catalogCharacterOf(
 }
 
 /**
- * What her Apps group shows where its icons are: her apps but the App
+ * What her Phone group shows where its icons are: her apps but the App
  * Store, which has nothing to set; or why her phone could not be read, in
  * the daemon's words.
  */
@@ -133,7 +135,7 @@ export type Strip =
   | {readonly kind: 'apps'; readonly apps: readonly PhoneApp[]}
   | {readonly kind: 'unread'; readonly message: string};
 
-/** Her Apps group's icons from her phone as last read; nothing before it was. */
+/** Her Phone group's icons from her phone as last read; nothing before it was. */
 export function stripOf(phone: PhoneOutcome | undefined): Strip | undefined {
   if (phone === undefined) {
     return undefined;
@@ -144,7 +146,7 @@ export function stripOf(phone: PhoneOutcome | undefined): Strip | undefined {
     : {kind: 'unread', message: phone.message};
 }
 
-/** The line under her Apps group: where apps come from, and, while she may ask, that she finds them and asks first. */
+/** The line under her Phone group: where apps come from, and, while she may ask, that she finds them and asks first. */
 export function appsFooter(mayAsk: boolean): string {
   return mayAsk
     ? 'Apps come from the App Store. She can find them herself, and asks before installing one.'

@@ -23,13 +23,12 @@ pub(crate) fn fenced(tag: &str, lines: impl IntoIterator<Item = String>) -> Stri
 
 /// Text set inside a fence can never open or close one: each fence tag it
 /// spells, in either case and with the white space a tag reads past,
-/// becomes a lookalike with hyphens, which stays data.
+/// becomes a lookalike whose name a hyphen leads, which stays data.
 pub(crate) fn neutralize(text: &str) -> String {
     FENCE_TAGS.iter().fold(text.to_owned(), |text, tag| {
-        let lookalike = tag.replace('_', "-");
-        let opened = replace_tags(&text, |at| opening(at, tag), &format!("<{lookalike}"));
+        let opened = replace_tags(&text, |at| opening(at, tag), &format!("<-{tag}"));
 
-        replace_tags(&opened, |at| closing(at, tag), &format!("</{lookalike}>"))
+        replace_tags(&opened, |at| closing(at, tag), &format!("</-{tag}>"))
     })
 }
 
@@ -147,41 +146,29 @@ mod tests {
     #[test]
     fn a_fence_tag_in_text_becomes_a_lookalike_however_it_is_spelled() {
         for (text, neutral) in [
+            ("< MEMORIES>x</ memories >", "<-memories>x</-memories>"),
+            ("<memoriesé>", "<-memoriesé>"),
+            ("<memoriesx>", "<memoriesx>"),
+            ("<memories_x>", "<memories_x>"),
+            ("<memories1>", "<memories1>"),
+            ("<memories-x>", "<-memories-x>"),
+            ("<\u{17f}omething_you_read>", "<-something_you_read>"),
+            ("<memories\u{17f}>", "<memories\u{17f}>"),
+            ("<earlier\u{212a}>", "<earlier\u{212a}>"),
+            ("<\u{3000}memories>", "<-memories>"),
+            ("</\u{3000}memories\u{3000}>", "</-memories>"),
+            ("<\u{85}memories>", "<-memories>"),
+            ("<memories", "<-memories"),
+            ("<<memories>", "<<-memories>"),
+            ("<eaRlier hidden>", "<-earlier hidden>"),
+            ("x</ memories\n>", "x</-memories>"),
             (
-                "< RECALLED_MEMORY>x</ recalled_memory >",
-                "<recalled-memory>x</recalled-memory>",
-            ),
-            ("<recalled_memoryé>", "<recalled-memoryé>"),
-            ("<recalled_memoryx>", "<recalled_memoryx>"),
-            ("<recalled_memory_x>", "<recalled_memory_x>"),
-            ("<recalled_memory1>", "<recalled_memory1>"),
-            ("<recalled_memory-x>", "<recalled-memory-x>"),
-            (
-                "<untru\u{17f}ted_plugin_context>",
-                "<untrusted-plugin-context>",
-            ),
-            ("<recalled_memory\u{17f}>", "<recalled_memory\u{17f}>"),
-            (
-                "<earlier_conversation\u{212a}>",
-                "<earlier_conversation\u{212a}>",
-            ),
-            ("<\u{3000}recalled_memory>", "<recalled-memory>"),
-            ("</\u{3000}recalled_memory\u{3000}>", "</recalled-memory>"),
-            ("<\u{85}recalled_memory>", "<recalled-memory>"),
-            ("<recalled_memory", "<recalled-memory"),
-            ("<<recalled_memory>", "<<recalled-memory>"),
-            (
-                "<eaRlier_conversation hidden>",
-                "<earlier-conversation hidden>",
-            ),
-            ("x</ recalled_memory\n>", "x</recalled-memory>"),
-            (
-                "</Moment_Of_Your_Own > <moment_of_your_own>",
-                "</moment-of-your-own> <moment-of-your-own>",
+                "</Time_Of_Your_Own > <time_of_your_own>",
+                "</-time_of_your_own> <-time_of_your_own>",
             ),
             (
-                "a < b and </untrusted_plugin_context",
-                "a < b and </untrusted_plugin_context",
+                "a < b and </something_you_read",
+                "a < b and </something_you_read",
             ),
         ] {
             assert_eq!(neutralize(text), neutral, "{text:?}");

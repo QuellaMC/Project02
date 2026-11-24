@@ -57,9 +57,9 @@ export function toolUse(
   );
 }
 
-/** The character speaking through `visible_reply`, its arguments cut at the given offsets. */
+/** The character speaking through `send_message`, its arguments cut at the given offsets. */
 export function replyUse(words: string, ...cuts: number[]): ContentBlock {
-  return toolUse('visible_reply', JSON.stringify({text: words}), ...cuts);
+  return toolUse('send_message', JSON.stringify({text: words}), ...cuts);
 }
 
 /** The model's words as text of the message. */

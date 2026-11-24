@@ -26,8 +26,8 @@ pub(super) const SIGN_IN: &str = "phone.sign_in";
 
 /// What her model reads of the tool, and what the person's card falls back
 /// on where a surface has no words of its own for it.
-const DESCRIPTION: &str = "Sign in to an app on your phone with one of the person's AI \
-                           connections.";
+const DESCRIPTION: &str = "Sign an app on your phone in with an account of the one you write with. \
+                           They are asked first.";
 
 /// What a client shown the person the preparation reads it as.
 const PREVIEW_KIND: &str = "phone_app_sign_in";
@@ -90,7 +90,7 @@ pub(super) async fn prepare(
 
     let Some(connection) = connected.into_iter().next() else {
         let message = format!(
-            "This needs {} ChatGPT plan or OpenAI API key, connected under AI Model in Settings.",
+            "This needs {} ChatGPT plan or OpenAI API key, connected in Settings.",
             whose(person.as_ref())
         );
 

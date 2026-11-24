@@ -312,7 +312,7 @@ mod tests {
         "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"ダーリン、\"}}\n\n",
         "data: {\"type\":\"content_block_delta\",\"index\":1,\"delta\":{\"type\":\"text_delta\",\"text\":\"一緒に\"}}\n\n",
         "data: {\"type\":\"content_block_stop\",\"index\":1}\n\n",
-        "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_a\",\"name\":\"visible_reply\",\"input\":{}}}\n\n",
+        "data: {\"type\":\"content_block_start\",\"index\":2,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_a\",\"name\":\"send_message\",\"input\":{}}}\n\n",
         "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"text\\\":\\\"ゼロ\"}}\n\n",
         "data: {\"type\":\"content_block_delta\",\"index\":2,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"ツー💖\\\"}\"}}\n\n",
         "data: {\"type\":\"content_block_stop\",\"index\":2}\n\n",
@@ -368,7 +368,7 @@ mod tests {
                     stop_reason: Some("tool_use".to_owned()),
                     category: None,
                     calls: vec![
-                        call("visible_reply", "{\"text\":\"ゼロツー💖\"}"),
+                        call("send_message", "{\"text\":\"ゼロツー💖\"}"),
                         call("runtime_plugin_list", "{}"),
                     ],
                     text: "ダーリン、一緒に".to_owned(),
@@ -378,9 +378,9 @@ mod tests {
                     }),
                 })),
                 vec![
-                    (2, "visible_reply".to_owned(), String::new()),
-                    (2, "visible_reply".to_owned(), "{\"text\":\"ゼロ".to_owned()),
-                    (2, "visible_reply".to_owned(), "ツー💖\"}".to_owned()),
+                    (2, "send_message".to_owned(), String::new()),
+                    (2, "send_message".to_owned(), "{\"text\":\"ゼロ".to_owned()),
+                    (2, "send_message".to_owned(), "ツー💖\"}".to_owned()),
                     (3, "runtime_plugin_list".to_owned(), String::new()),
                 ]
             )

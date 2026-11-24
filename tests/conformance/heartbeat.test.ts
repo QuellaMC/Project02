@@ -84,14 +84,14 @@ function conversationIn(
 /** A moment's note as the model reads it where a line would be, telling `when` after "It is", then what the moment is hers for. */
 function momentNote(when: string): RegExp {
   return new RegExp(
-    `^<moment_of_your_own>\\nA moment of your own — nobody has written to you, and nothing here is something Sam said\\.\\nIt is ${when}\\nNobody is waiting for a reply\\. This time is yours: think, use your tools, or let it pass\\. If there is something you want Sam to read, send it with visible_reply; anything else you write stays your own thought\\.\\n</moment_of_your_own>$`,
+    `^<time_of_your_own>\\nNobody has written to you\\. It is ${when}\\nNobody is waiting for an answer, and this time is yours\\. If there is something you want Sam to read, send a message\\. Anything else stays your own thought\\.\\n</time_of_your_own>$`,
     'u',
   );
 }
 
-/** An earlier moment's note as a later prompt replays it: that it was one, and when. */
+/** An earlier moment's note as a later prompt replays it: when it was, and that the time was hers. */
 const pastMoment =
-  /^<moment_of_your_own>\nA moment of your own, on [^\n]+, at \d\d:\d\d — nobody had written to you\.\n<\/moment_of_your_own>$/u;
+  /^<time_of_your_own>\nOn [^\n]+, at \d\d:\d\d, nobody had written to you, and the time was yours\.\n<\/time_of_your_own>$/u;
 
 /** A host field as the target's view shows it, if the view has it. */
 async function hostField(
@@ -239,7 +239,7 @@ it('heartbeat.quiet: a moment answered with plain text or with nothing commits n
   });
 });
 
-it("heartbeat.writes-first: a moment that calls visible_reply commits her message, told as the reply of a turn with no line's stamps, in the scrollback with no line before it, and replayed in the next prompt after the moment's note", async () => {
+it("heartbeat.writes-first: a moment that calls send_message commits her message, told as the reply of a turn with no line's stamps, in the scrollback with no line before it, and replayed in the next prompt after the moment's note", async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(heartbeatHome(model), shortened);
   const wire = wireOf(daemon);
@@ -332,7 +332,7 @@ it("heartbeat.tools: a moment in which she uses a tool and says nothing ends wit
     messagesOf(prompt).some(
       message =>
         message.role === 'system' &&
-        message.content?.includes('mood=curious') === true,
+        message.content?.includes('You feel curious.') === true,
     ),
   ).toBe(true);
   expect(conversationIn(prompt)).toMatchObject([

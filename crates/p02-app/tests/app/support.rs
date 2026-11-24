@@ -281,7 +281,7 @@ impl Round {
             calls: replies
                 .iter()
                 .map(|text| WrittenCall {
-                    name: "visible_reply".to_owned(),
+                    name: "send_message".to_owned(),
                     input: json!({"text": text}),
                 })
                 .collect(),

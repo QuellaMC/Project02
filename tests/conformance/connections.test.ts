@@ -260,7 +260,7 @@ it("connections.ask-to-sign-in: she installs an app that asks a model, its card 
       pluginId: 'phone',
       toolName: 'phone.sign_in',
       summary:
-        "Sign in to an app on your phone with one of the person's AI connections.",
+        'Sign an app on your phone in with an account of the one you write with. They are asked first.',
       preview: {
         kind: 'phone_app_sign_in',
         app: {id: 'asker', name: 'Asker', icon: 'bulb', tint: 'indigo'},
@@ -378,7 +378,7 @@ it("connections.unasked: her ask to sign in is refused before anyone is asked, e
   expect(toolResults(model.requests.at(-1))).toEqual([
     refused(
       'not_connected',
-      "This needs Sam's ChatGPT plan or OpenAI API key, connected under AI Model in Settings.",
+      "This needs Sam's ChatGPT plan or OpenAI API key, connected in Settings.",
     ),
     refused('signs_in_to_nothing', 'Clock signs in to nothing.'),
     refused(
@@ -545,7 +545,7 @@ it("connections.gone: her app signed in with a connection that is no longer conn
     toolName: 'phone.sign_in',
     reason: 'not_connected',
     message:
-      "This needs Sam's ChatGPT plan or OpenAI API key, connected under AI Model in Settings.",
+      "This needs Sam's ChatGPT plan or OpenAI API key, connected in Settings.",
   });
 });
 

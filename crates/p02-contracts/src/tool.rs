@@ -8,7 +8,7 @@ use serde_json::{Map, Value};
 use crate::context::HookContext;
 use crate::evidence::EvidenceNote;
 use crate::plugin::PluginError;
-use crate::role_model::VISIBLE_REPLY;
+use crate::role_model::SEND_MESSAGE;
 use crate::schema::{ToolInputContract, ToolInputRejection};
 use crate::vocabulary::ToolConcurrency;
 
@@ -56,7 +56,7 @@ impl ProvidedTool {
     ) -> Result<Self, ToolDefinitionError> {
         let description = description.into();
 
-        if name.as_str() == VISIBLE_REPLY {
+        if name.as_str() == SEND_MESSAGE {
             return Err(ToolDefinitionError::BuiltInName { name });
         }
 
@@ -273,7 +273,7 @@ mod tests {
 
         assert!(named("sessions.search", "Search past conversations.").is_ok());
         assert!(matches!(
-            named("visible_reply", "Speak for the character."),
+            named("send_message", "Send a message."),
             Err(ToolDefinitionError::BuiltInName { .. })
         ));
         assert!(matches!(

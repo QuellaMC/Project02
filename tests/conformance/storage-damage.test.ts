@@ -176,7 +176,12 @@ it('storage.crash-open-turn-readable: a log a crash left in the middle of a turn
     'config.json': configJson({project02: model.settings}),
     'character-data': {
       mira: {
-        'config.json': configJson({plugins: {'reply-style': {enabled: true}}}),
+        'config.json': configJson({
+          plugins: {
+            'reply-style': {enabled: true},
+            'runtime.plugin': {enabled: true},
+          },
+        }),
       },
     },
   });
@@ -595,7 +600,9 @@ it("storage.plugin-store-damage: a plugin's damaged state is passed over and sai
     expect(
       messagesOf(model.requests.at(-1)).some(
         message =>
-          message.content?.includes('mood=curious; energy=high') === true,
+          message.content?.includes(
+            'You feel curious. You have plenty of energy.',
+          ) === true,
       ),
       damage,
     ).toBe(true);

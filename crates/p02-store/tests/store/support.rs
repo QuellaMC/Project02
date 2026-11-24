@@ -299,7 +299,7 @@ impl Script {
 pub(crate) fn answer(replies: &[&str], moods: &[&str], note: Option<&str>) -> ModelOutput {
     let calls = replies
         .iter()
-        .map(|text| ("visible_reply", json!({"text": text})))
+        .map(|text| ("send_message", json!({"text": text})))
         .chain(
             moods
                 .iter()

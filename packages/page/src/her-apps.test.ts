@@ -20,11 +20,11 @@ import {
   appShownOf,
   appsCharacterOf,
   appsFooter,
-  askToInstallRow,
   catalogCharacterOf,
   catalogRead,
   hasPhone,
   herPhoneRead,
+  herPhoneRow,
   replacesLine,
   storeRows,
   stripOf,
@@ -135,7 +135,7 @@ const herPage: SettingsPage = {kind: 'character', characterId: 'mira'};
 const mira = {characterId: 'mira', name: 'Mira'};
 
 describe('her apps in the settings window', () => {
-  it("draws her Apps group: an icon for each app on her phone but the App Store, in her phone's order, why her phone could not be read in the daemon's words, nothing before it was read, and where apps come from, saying that she asks first only while she may", () => {
+  it("draws her Phone group: an icon for each app on her phone but the App Store, in her phone's order, why her phone could not be read in the daemon's words, nothing before it was read, and where apps come from, saying that she asks first only while she may", () => {
     expect(stripOf(phone)).toEqual({
       kind: 'apps',
       apps: [clock, reminders, notes],
@@ -150,7 +150,7 @@ describe('her apps in the settings window', () => {
     expect(appsFooter(false)).toBe('Apps come from the App Store.');
   });
 
-  it("knows from her view whether her settings give her a phone, and her Ask to Install Apps is a field of her phone's", () => {
+  it("knows from her view whether her settings give her a phone, and her Ask to Install Apps and A Gift from You are fields of her phone's", () => {
     const phoneSection = (
       enabled: boolean,
     ): RuntimeConfigSectionInspectShape => ({
@@ -185,15 +185,12 @@ describe('her apps in the settings window', () => {
     expect(hasPhone(view([phoneSection(true)]))).toBe(true);
     expect(hasPhone(view([phoneSection(false)]))).toBe(false);
     expect(hasPhone(view([]))).toBe(false);
-    expect(askToInstallRow('mira')).toEqual({
-      target: characterTarget('mira'),
-      place: {
-        kind: 'field',
-        namespace: 'plugins',
-        id: 'phone',
-        name: 'askToInstall',
-      },
-    });
+    for (const name of ['askToInstall', 'gift'] as const) {
+      expect(herPhoneRow('mira', name)).toEqual({
+        target: characterTarget('mira'),
+        place: {kind: 'field', namespace: 'plugins', id: 'phone', name},
+      });
+    }
   });
 
   it("draws an app's page: whose phone it is on, its version and where it came from, for an app she came with, one from the App Store and one from a file; what letting it wake her does, for the Clock and for another app that wakes her; an update only when the App Store says it has a newer version; Remove App for every app but one she came with; and, for an app that uses an account of the person's, Set Up until her phone has its key and the account's name once it has, either opening the account's page with its way back to the app, over the line saying what uses the account", () => {

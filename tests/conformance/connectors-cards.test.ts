@@ -37,7 +37,7 @@ type Asked = {
   readonly source: string;
 };
 
-/** A home where Mira's bot answers, her reply style, whose fields the model may ask to change, is on, and these accounts are paired. */
+/** A home where Mira's bot answers, her reply style, whose fields the model may ask to change, is on with Ask to Change Settings, through which it asks, and these accounts are paired. */
 function cardsHome(
   model: {readonly settings: object},
   paired: readonly Account[],
@@ -62,7 +62,10 @@ function cardsHome(
     'character-data': {
       mira: {
         'config.json': configJson({
-          plugins: {'reply-style': {enabled: true}},
+          plugins: {
+            'reply-style': {enabled: true},
+            'runtime.plugin': {enabled: true},
+          },
           connectors: {telegram: {config: {botToken: miraBot.token}}},
         }),
       },

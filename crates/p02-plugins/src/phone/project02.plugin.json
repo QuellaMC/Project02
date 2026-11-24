@@ -26,6 +26,17 @@
           "redactionLabels": []
         },
         {
+          "name": "gift",
+          "label": "A Gift from You",
+          "description": "She knows her phone as a gift from you.",
+          "secret": false,
+          "scope": "character_only",
+          "valueType": "boolean",
+          "defaultValue": true,
+          "agentMutable": false,
+          "redactionLabels": []
+        },
+        {
           "name": "tavilyApiKey",
           "label": "API Key",
           "description": "The key of your Tavily account, which her apps that use it send to Tavily and nowhere else.",

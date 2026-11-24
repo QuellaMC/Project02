@@ -65,12 +65,20 @@ fn reply_style(home: &MiraHome) -> Value {
     home.overlay()["plugins"]["reply-style"]["config"].clone()
 }
 
+/// `home` with its settings switching the host's own plugin on, which is
+/// off until they do, and the plugins `plugins` stanzas say beside it.
+fn managed(home: MiraHome, mut plugins: Value) -> MiraHome {
+    plugins["runtime.plugin"] = json!({"enabled": true});
+    home.settings(&json!({"plugins": plugins}));
+    home
+}
+
 #[tokio::test]
 async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_settings_decide() {
-    let home = MiraHome::new();
-
-    home.settings(&json!({"plugins": {"mem0": {"enabled": true, "config": {"backend": "cloud"}}}}));
-
+    let home = managed(
+        MiraHome::new(),
+        json!({"mem0": {"enabled": true, "config": {"backend": "cloud"}}}),
+    );
     let host = home.mira(Person::approving());
     let running = ask(&host, "runtime.plugin.list", json!({})).await;
     let everything = ask(&host, "runtime.plugin.list", json!({"scope": "all"})).await;
@@ -152,7 +160,7 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
 
 #[tokio::test]
 async fn what_needs_her_settings_fails_saying_why_while_they_do_not_load() {
-    let home = MiraHome::new();
+    let home = managed(MiraHome::new(), json!({}));
     let host = home.mira(Person::approving());
 
     rewrite(&home.path(SettingsDocument::Home), "{");
@@ -186,10 +194,7 @@ async fn what_needs_her_settings_fails_saying_why_while_they_do_not_load() {
 #[tokio::test]
 async fn an_approved_update_is_written_to_her_overlay_and_bound_to_the_fingerprint_it_was_read_under()
  {
-    let home = MiraHome::new();
-
-    home.settings(&json!({}));
-
+    let home = managed(MiraHome::new(), json!({}));
     let home_settings = read_file(&home.path(SettingsDocument::Home)).unwrap();
     let person = Person::approving();
     let host = home.mira(person.clone());
@@ -259,7 +264,7 @@ async fn an_approved_update_is_written_to_her_overlay_and_bound_to_the_fingerpri
 
 #[tokio::test]
 async fn an_unset_is_shown_as_an_unset_and_leaves_the_field_to_the_settings_beneath() {
-    let home = MiraHome::new();
+    let home = managed(MiraHome::new(), json!({}));
     let person = Person::approving();
     let host = home.mira(person.clone());
 
@@ -301,13 +306,16 @@ async fn a_secret_of_her_own_settings_is_shown_to_the_model_only_as_redacted() {
                 "redactionLabels": [],
             }));
     });
-    let home = MiraHome::judged_by(list::plugins().unwrap().iter().map(|(manifest, check, _)| {
-        if manifest.id() == keyed.id() {
-            (keyed.clone(), *check)
-        } else {
-            (manifest.clone(), *check)
-        }
-    }));
+    let home = managed(
+        MiraHome::judged_by(list::plugins().unwrap().iter().map(|(manifest, check, _)| {
+            if manifest.id() == keyed.id() {
+                (keyed.clone(), *check)
+            } else {
+                (manifest.clone(), *check)
+            }
+        })),
+        json!({}),
+    );
 
     home.change("reply-style", "apiKey", json!(secret));
 

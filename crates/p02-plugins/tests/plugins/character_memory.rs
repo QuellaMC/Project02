@@ -154,14 +154,16 @@ async fn a_batch_past_a_notebooks_rendered_capacity_is_refused() {
         refused(&over),
         (
             "memory_capacity_exceeded",
-            "notes would hold 2204/2200 chars; compress or remove entries first."
+            "Nothing was written: notes would hold 2204 characters of its 2200. Shorten or take \
+             out entries first."
         )
     );
     assert_eq!(
         refused(&profile),
         (
             "memory_capacity_exceeded",
-            "user_profile would hold 1376/1375 chars; compress or remove entries first."
+            "Nothing was written: user_profile would hold 1376 characters of its 1375. Shorten or \
+             take out entries first."
         )
     );
 }

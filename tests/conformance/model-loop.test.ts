@@ -48,11 +48,19 @@ function listing(index: number, argumentsText = '{}'): unknown[] {
   });
 }
 
+/** A home where Mira answers through `model` and has Ask to Change Settings, whose listing the rounds call. */
+function listingHome(model: {readonly settings: object}): string {
+  return createHome({
+    'config.json': configJson({
+      project02: model.settings,
+      plugins: {'runtime.plugin': {enabled: true}},
+    }),
+  });
+}
+
 it('model.decision-parse-failure-fed-back: a round of empty content, a blank reply, arguments that are no object, or a blank reply beside a call is refused whole, nothing of it dispatched, and quoted back to the model in the next round, which can recover', async () => {
   const model = await startModelServer();
-  const home = createHome({
-    'config.json': configJson({project02: model.settings}),
-  });
+  const home = listingHome(model);
   const daemon = await startDaemon(home);
   const say = await converse(wireOf(daemon), 'mira');
   const events = await openEvents(daemon);
@@ -99,9 +107,7 @@ it('model.decision-parse-failure-fed-back: a round of empty content, a blank rep
 
 it("model.note-never-shown: the model's note beside its calls never reaches the person: it is no message, no draft and no line of history", async () => {
   const model = await startModelServer();
-  const home = createHome({
-    'config.json': configJson({project02: model.settings}),
-  });
+  const home = listingHome(model);
   const daemon = await startDaemon(home);
   const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');

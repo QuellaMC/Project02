@@ -18,7 +18,7 @@ use crate::prompt::past_moment;
 /// of a moment of the character's own, telling when it was in `zone` and
 /// what rang when her phone's ringing began it; each tool round as the
 /// assistant's calls and their results; then the character's replies as
-/// plain assistant text. `visible_reply` itself is never replayed.
+/// plain assistant text. `send_message` itself is never replayed.
 pub(crate) fn turn_messages(turn: &ConversationTurn, zone: &TimeZone) -> Vec<ChatMessage> {
     let opening = match &turn.user_message {
         Some(line) => line.text.to_string(),
@@ -260,10 +260,10 @@ mod tests {
             json!([
                 {
                     "role": "user",
-                    "content": "<moment_of_your_own>\n\
-                                A moment of your own, on Friday, November 6, 2026, at 23:40 — \
-                                nobody had written to you.\n\
-                                </moment_of_your_own>",
+                    "content": "<time_of_your_own>\n\
+                                On Friday, November 6, 2026, at 23:40, nobody had written to \
+                                you, and the time was yours.\n\
+                                </time_of_your_own>",
                 },
                 {"role": "assistant", "content": "Found your keys yet?"},
             ])
@@ -305,12 +305,12 @@ mod tests {
             json!([
                 {
                     "role": "user",
-                    "content": "<moment_of_your_own>\n\
-                                Your phone rang on Friday, November 6, 2026, at 23:40 — nobody \
+                    "content": "<time_of_your_own>\n\
+                                Your phone rang on Friday, November 6, 2026, at 23:40. Nobody \
                                 had written to you.\n\
                                 Clock, Timer (set for Thursday, November 5, at 22:00).\n\
                                 Clock, Alarm: Wake Sam (set for 23:30).\n\
-                                </moment_of_your_own>",
+                                </time_of_your_own>",
                 },
                 {"role": "assistant", "content": "Up you get."},
             ])
@@ -367,7 +367,7 @@ mod tests {
         assert!(
             !serde_json::to_string(&turn_messages(&replayed, &TimeZone::UTC))
                 .unwrap()
-                .contains("visible_reply")
+                .contains("send_message")
         );
         assert_eq!(
             serde_json::to_value(round_messages(&ToolRound {

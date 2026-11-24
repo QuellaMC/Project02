@@ -182,14 +182,14 @@ mod tests {
         "event: response.output_item.added\ndata: {\"type\":\"response.output_item.added\",\"output_index\":0,\"item\":{\"type\":\"reasoning\",\"id\":\"rs_1\",\"summary\":[]}}\n\n",
         "data: {\"type\":\"response.output_item.added\",\"output_index\":1,\"item\":{\"type\":\"message\",\"role\":\"assistant\",\"content\":[]}}\n\n",
         "data: {\"type\":\"response.output_text.delta\",\"output_index\":1,\"content_index\":0,\"delta\":\"ダーリン、\"}\n\n",
-        "data: {\"type\":\"response.output_item.added\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"id\":\"fc_a\",\"call_id\":\"call_a\",\"name\":\"visible_reply\",\"arguments\":\"\"}}\n\n",
+        "data: {\"type\":\"response.output_item.added\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"id\":\"fc_a\",\"call_id\":\"call_a\",\"name\":\"send_message\",\"arguments\":\"\"}}\n\n",
         "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"item_id\":\"fc_a\",\"delta\":\"{\\\"text\\\":\\\"ゼロ\"}\n\n",
         "data: {\"type\":\"response.output_item.added\",\"output_index\":3,\"item\":{\"type\":\"function_call\",\"id\":\"fc_b\",\"call_id\":\"call_b\",\"name\":\"memory_search\",\"arguments\":\"\"}}\n\n",
         "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":3,\"item_id\":\"fc_b\",\"delta\":\"{\\\"q\\\":\"}\n\n",
         "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":2,\"item_id\":\"fc_a\",\"delta\":\"ツー💖\\\"}\"}\n\n",
         "data: {\"type\":\"response.function_call_arguments.delta\",\"output_index\":3,\"item_id\":\"fc_b\",\"delta\":\"\\\"sky\\\"}\"}\n\n",
         "data: {\"type\":\"response.output_item.done\",\"output_index\":3,\"item\":{\"type\":\"function_call\",\"name\":\"memory_search\",\"arguments\":\"{\\\"q\\\":\\\"sky\\\"}\"}}\n\n",
-        "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"name\":\"visible_reply\",\"arguments\":\"{\\\"text\\\":\\\"ゼロツー💖\\\"}\"}}\n\n",
+        "data: {\"type\":\"response.output_item.done\",\"output_index\":2,\"item\":{\"type\":\"function_call\",\"name\":\"send_message\",\"arguments\":\"{\\\"text\\\":\\\"ゼロツー💖\\\"}\"}}\n\n",
         "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"output\":[]}}\n\n",
         "data: {\"type\":\"error\",\"message\":\"never read\"}\n\n",
     );
@@ -231,7 +231,7 @@ mod tests {
                     done: vec![
                         json!({
                             "type": "function_call",
-                            "name": "visible_reply",
+                            "name": "send_message",
                             "arguments": "{\"text\":\"ゼロツー💖\"}",
                         }),
                         json!({
@@ -242,11 +242,11 @@ mod tests {
                     ],
                 })),
                 vec![
-                    (2, "visible_reply".to_owned(), String::new()),
-                    (2, "visible_reply".to_owned(), "{\"text\":\"ゼロ".to_owned()),
+                    (2, "send_message".to_owned(), String::new()),
+                    (2, "send_message".to_owned(), "{\"text\":\"ゼロ".to_owned()),
                     (3, "memory_search".to_owned(), String::new()),
                     (3, "memory_search".to_owned(), "{\"q\":".to_owned()),
-                    (2, "visible_reply".to_owned(), "ツー💖\"}".to_owned()),
+                    (2, "send_message".to_owned(), "ツー💖\"}".to_owned()),
                     (3, "memory_search".to_owned(), "\"sky\"}".to_owned()),
                 ]
             )
@@ -314,7 +314,7 @@ mod tests {
     /// ends it all the same, and the items stay as each was done.
     #[test]
     fn every_end_a_service_sends_ends_a_response_whatever_its_event_carries() {
-        let item = json!({"type": "function_call", "name": "visible_reply", "arguments": "{}"});
+        let item = json!({"type": "function_call", "name": "send_message", "arguments": "{}"});
         let done = json!({"type": "response.output_item.done", "output_index": 0, "item": item});
         let incomplete = json!({"incomplete_details": {"reason": "max_output_tokens"}});
         let failed = json!({"error": {"message": "Overloaded."}});

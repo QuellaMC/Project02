@@ -24,9 +24,8 @@ use serde_json::Value;
 use self::index::{IndexError, Scope, SessionIndex};
 use crate::package::{blocking, rejected};
 
-const GUIDANCE: &str = "When they bring up an earlier conversation, or the answer may sit \
-     further back than you can see (including earlier in this one), look it up with \
-     sessions.search before asking them to repeat themselves; read more of a past conversation \
+const GUIDANCE: &str = "Your messages go back further than what you have in front of you, even \
+     in this conversation. You can look back through them with sessions.search, and read on \
      with sessions.read.";
 
 const SEARCH_SESSION_LIMIT: u32 = 3;
@@ -340,15 +339,15 @@ fn refusal(error: IndexError) -> ToolCallOutcome {
     let (reason, message) = match error {
         IndexError::SessionNotFound(session) => (
             "session_not_found",
-            format!("Session \"{session}\" is not in this character's history."),
+            format!("You have no conversation \"{session}\"."),
         ),
         IndexError::MessageNotFound { session, message } => (
             "message_not_found",
-            format!("Message \"{message}\" is not in session \"{session}\"."),
+            format!("There is no message \"{message}\" in conversation \"{session}\"."),
         ),
         IndexError::Open(_) | IndexError::Database(_) | IndexError::History(_) => (
             "session_history_read_failed",
-            "Session history storage reported a read failure.".to_owned(),
+            "Your messages could not be read just now.".to_owned(),
         ),
     };
 
