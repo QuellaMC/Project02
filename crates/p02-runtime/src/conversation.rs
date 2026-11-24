@@ -82,15 +82,18 @@ pub enum Delivery {
 }
 
 /// What a turn is answered with: the name the person goes by, the names of
-/// the apps they write in, the character's model, her plugins, and the
-/// size of her model's window in tokens, as her settings say. Its keeper
-/// brings it up to date before her turn, and the turn before each request
-/// to the model after its first.
+/// the apps they write in, the apps her messages go in now, the
+/// character's model, her plugins, and the size of her model's window in
+/// tokens, as her settings say. Its keeper brings it up to date before her
+/// turn, and the turn before each request to the model after its first.
 #[async_trait]
 pub trait Mind: Send + Sync {
     fn person(&self) -> &SpeakerName;
 
     fn apps(&self) -> &AppNames;
+
+    /// The apps her messages go in now, read as it is asked.
+    fn apps_now(&self) -> AppNames;
 
     fn adapter(&self) -> &dyn RoleModelAdapter;
 

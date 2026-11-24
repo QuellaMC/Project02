@@ -276,12 +276,6 @@ struct EditMessageText<'a> {
 }
 
 #[derive(Serialize)]
-struct DeleteMessage {
-    chat_id: i64,
-    message_id: i64,
-}
-
-#[derive(Serialize)]
 struct AnswerCallbackQuery<'a> {
     callback_query_id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -370,19 +364,6 @@ impl BotApi {
                 chat_id: chat,
                 message_id,
                 text,
-            },
-            Duration::ZERO,
-        )
-        .await
-        .map(drop)
-    }
-
-    pub(crate) async fn delete_message(&self, chat: i64, message_id: i64) -> Result<(), Failure> {
-        self.call::<IgnoredAny>(
-            "deleteMessage",
-            &DeleteMessage {
-                chat_id: chat,
-                message_id,
             },
             Duration::ZERO,
         )

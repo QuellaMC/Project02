@@ -8,7 +8,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::future::Future;
 use std::sync::Arc;
-use std::time::Duration;
 
 use p02_shared::{Identifier, error_sentence};
 use p02_wire::{
@@ -47,7 +46,6 @@ pub(crate) enum Owner {
         id: Identifier,
         /// Her name, as health has it.
         name: String,
-        mirror: bool,
     },
 }
 
@@ -154,8 +152,6 @@ struct Values {
     #[serde(deserialize_with = "lenient")]
     management_bot_token: Option<String>,
     #[serde(deserialize_with = "lenient")]
-    mirror: Option<bool>,
-    #[serde(deserialize_with = "lenient")]
     paired_users: Option<Map<String, Value>>,
 }
 
@@ -187,7 +183,6 @@ type Answer = (u64, ConnectorConfigView);
 #[derive(Debug)]
 pub(crate) struct Table {
     telegram: Arc<Telegram>,
-    draft_edits: Duration,
     lines: Arc<dyn Lines>,
     stop: CancellationToken,
     bots: Vec<Running>,
@@ -223,7 +218,6 @@ pub(crate) struct Table {
 impl Table {
     pub(crate) fn new(
         telegram: Arc<Telegram>,
-        draft_edits: Duration,
         lines: Arc<dyn Lines>,
         stop: &CancellationToken,
     ) -> Self {
@@ -239,7 +233,6 @@ impl Table {
 
         Self {
             telegram,
-            draft_edits,
             lines,
             stop: stop.clone(),
             bots: Vec::new(),
@@ -488,7 +481,6 @@ impl Table {
                     Start {
                         telegram: Arc::clone(&self.telegram),
                         token: token.clone(),
-                        draft_edits: self.draft_edits,
                         daemon: self.daemon.subscribe(),
                         held: self.held.subscribe(),
                         latest: self.latest.subscribe(),
@@ -564,7 +556,6 @@ impl Table {
                         owner: Owner::Character {
                             id: id.clone(),
                             name: names.get(id).map_or_else(|| id.to_string(), Clone::clone),
-                            mirror: values.mirror == Some(true),
                         },
                         paired,
                     },

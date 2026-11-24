@@ -20,9 +20,12 @@ settings field.
 
 A provider is a `RoleModelAdapter`, answering with what the model wrote or
 how it failed. The character writes to the person with the built-in
-`send_message`, a name no plugin tool may take. `DecisionResult::judge` is
-the one verdict on a round, given what began its turn: the person's line,
-which the character answers, or a moment of her own, in which she owes
-nothing. What a record keeps of a round holds no credential-named value,
-and keeps each message she sent in it under the name `visible_reply`,
-whatever the model is offered the tool as.
+`send_message`, a name no plugin tool may take; while she has more than
+one app, it lets her name the app a message goes in.
+`DecisionResult::judge` is the one verdict on a round, given what began
+its turn: the person's line, which the character answers, or a moment of
+her own, in which she owes nothing; and given the apps she has now, the
+only ones a message may name. What a record keeps of a round holds no
+credential-named value, and keeps each message she sent in it under the
+name `visible_reply`, with the app she named, whatever the model is
+offered the tool as.

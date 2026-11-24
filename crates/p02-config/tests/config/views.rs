@@ -442,7 +442,7 @@ fn a_connectors_read_hands_each_entry_its_own_values_secrets_in_the_clear() {
         .package("zeta", &json!({}), "1.0.0")
         .write_home(&document(json!({"connectors": {"telegram": {
             "enabled": false,
-            "config": {"managementBotToken": "123456:home", "mirror": false, "botToken": "111111:home"},
+            "config": {"managementBotToken": "123456:home", "botToken": "111111:home"},
         }}})))
         .write_overlay(
             "mira",
@@ -483,12 +483,10 @@ fn a_connectors_read_hands_each_entry_its_own_values_secrets_in_the_clear() {
             json!(["mira", "active", {
                 "botToken": "987654:mira",
                 "managementBotToken": "123456:home",
-                "mirror": false,
                 "pairedUsers": {},
             }]),
             json!(["nova", "active", {
                 "managementBotToken": "123456:home",
-                "mirror": false,
                 "pairedUsers": {},
             }]),
             json!(["vega", "disabled", {}]),
@@ -594,13 +592,11 @@ fn inspect_reports_where_the_settings_come_from_the_host_values_and_each_connect
         json!([
             telegram["config"]["botToken"]["source"],
             telegram["config"]["managementBotToken"],
-            telegram["config"]["mirror"]["value"],
             telegram["config"]["pairedUsers"]["value"],
         ]),
         json!([
             "missing",
             {"name": "managementBotToken", "secret": true, "source": "config", "resolved": true, "value": "[redacted]"},
-            true,
             {"381940562": "Alice (@alice)"},
         ])
     );

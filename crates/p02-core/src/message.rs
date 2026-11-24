@@ -1,4 +1,3 @@
-use std::collections::BTreeMap;
 use std::fmt;
 use std::sync::LazyLock;
 
@@ -239,8 +238,9 @@ impl fmt::Display for ClientStamp {
     }
 }
 
-/// The id of the app's own chat, where the page's lines come in.
-const MESSAGES: &str = "messages";
+/// The id of the app's own chat, where the page's lines come in, and every
+/// message of hers that goes in no other app.
+pub const MESSAGES: &str = "messages";
 
 /// The app a line of the person's came in, told by the stamp of the surface
 /// it came from: the part of the stamp before its first `:`, as `telegram`
@@ -254,11 +254,12 @@ pub fn app_of(source: Option<&ClientStamp>) -> &str {
         .map_or(MESSAGES, |(app, _)| app)
 }
 
-/// The apps a line of the person's comes in, each by the name she and the
-/// person read it by: the app's own chat, Messages, and each app the daemon
-/// names. An app nothing names goes by its id.
+/// Apps, each by the name she and the person read it by: the app's own
+/// chat, Messages, first, then each the daemon names, in its order. They
+/// are every app a line of the person's comes in, or the apps her messages
+/// go in now. An app nothing names goes by its id.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct AppNames(BTreeMap<String, String>);
+pub struct AppNames(Vec<(String, String)>);
 
 impl AppNames {
     /// Messages, and each of `named`, an app's id with its name.
@@ -275,7 +276,22 @@ impl AppNames {
     /// The name the app `app` goes by.
     #[must_use]
     pub fn name<'a>(&'a self, app: &'a str) -> &'a str {
-        self.0.get(app).map_or(app, String::as_str)
+        self.find(app).map_or(app, |(_, name)| name.as_str())
+    }
+
+    /// Each app's id, in order.
+    pub fn ids(&self) -> impl Iterator<Item = &str> {
+        self.0.iter().map(|(app, _)| app.as_str())
+    }
+
+    /// Whether `app` is one of these.
+    #[must_use]
+    pub fn has(&self, app: &str) -> bool {
+        self.find(app).is_some()
+    }
+
+    fn find(&self, app: &str) -> Option<&(String, String)> {
+        self.0.iter().find(|(id, _)| id == app)
     }
 }
 

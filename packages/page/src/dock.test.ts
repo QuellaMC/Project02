@@ -119,6 +119,7 @@ const reply: GatewayEvent = {
     speakerName: 'Mira',
     text: 'Thank you.',
     sentAt: '2026-09-11T00:00:00.000Z',
+    app: 'messages',
     draftId: 'd1',
   },
 };

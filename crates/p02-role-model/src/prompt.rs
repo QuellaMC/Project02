@@ -17,7 +17,9 @@ use p02_contracts::{
     DecisionContext, ModelToolDefinition, Occasion, PLUGIN_LIST_TOOL, PluginToolDefinitions, Rang,
     ToolRound,
 };
-use p02_core::{AppNames, ClientStamp, EventIdentity, VisibleMessage, VisibleText, app_of};
+use p02_core::{
+    AppNames, ClientStamp, EventIdentity, MESSAGES, VisibleMessage, VisibleText, app_of,
+};
 
 pub(crate) use history::{json_text, round_messages};
 pub use history::{newest_turns_within, select_history_window};
@@ -38,8 +40,8 @@ use text::{
 /// What a turn opens with, where the model reads the person's line: their
 /// line as it was committed, with the stamp of the surface it came from, or
 /// a moment of the character's own, with how long since the person last
-/// wrote when her history can say, and what rang on her phone when its
-/// ringing began the moment.
+/// wrote and the app they wrote in when her history can say, and what rang
+/// on her phone when its ringing began the moment.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Opening {
     Line {
@@ -48,6 +50,7 @@ pub enum Opening {
     },
     Moment {
         since_last_line: Option<Duration>,
+        last_app: Option<String>,
         rang: Vec<Rang>,
     },
 }
@@ -68,6 +71,22 @@ impl Opening {
         match self {
             Self::Line { message, .. } => Some(&message.text),
             Self::Moment { .. } => None,
+        }
+    }
+
+    /// The app a message of hers goes in when she names none: an answer,
+    /// in the app the line it answers came in, which carried that line a
+    /// moment ago; a message of her own, in the app the person last wrote
+    /// in while it is one of `apps`, those she has now, and in Messages
+    /// otherwise.
+    #[must_use]
+    pub fn app<'a>(&'a self, apps: &AppNames) -> &'a str {
+        match self {
+            Self::Line { source, .. } => app_of(Some(source)),
+            Self::Moment { last_app, .. } => last_app
+                .as_deref()
+                .filter(|app| apps.has(app))
+                .unwrap_or(MESSAGES),
         }
     }
 }
@@ -107,17 +126,19 @@ impl InputEnvelope {
         }
     }
 
-    /// The tools the model is offered: the built-in reply first, then
-    /// every plugin tool.
+    /// The tools the model is offered: the built-in reply first, in the
+    /// apps she has now, then every plugin tool.
     fn tool_definitions(&self) -> Vec<ModelToolDefinition> {
-        std::iter::once(ModelToolDefinition::send_message())
-            .chain(
-                self.plugin_tool_definitions
-                    .definitions()
-                    .iter()
-                    .map(|definition| ModelToolDefinition::from(&definition.tool)),
-            )
-            .collect()
+        std::iter::once(ModelToolDefinition::send_message(
+            self.decision_context.apps_now(),
+        ))
+        .chain(
+            self.plugin_tool_definitions
+                .definitions()
+                .iter()
+                .map(|definition| ModelToolDefinition::from(&definition.tool)),
+        )
+        .collect()
     }
 }
 
@@ -200,6 +221,7 @@ pub(crate) fn render(
         Opening::Moment {
             since_last_line,
             rang,
+            ..
         } => moment(person, &envelope.now, *since_last_line, rang),
     };
 
@@ -493,11 +515,12 @@ pub(crate) mod tests {
     }
 
     /// A context for a person going by `person`, who writes in Messages and
-    /// in Telegram.
+    /// in Telegram, while her messages go in Messages alone.
     fn context_with(person: &str) -> DecisionContext {
         DecisionContext::new(
             SpeakerName::new(person).unwrap(),
             AppNames::new([("telegram", "Telegram")]),
+            AppNames::new([]),
         )
     }
 
@@ -644,6 +667,7 @@ pub(crate) mod tests {
         assert_eq!(
             opened(Opening::Moment {
                 since_last_line: Some(Duration::from_mins(3 * 60 + 59)),
+                last_app: Some("messages".to_owned()),
                 rang: Vec::new(),
             }),
             said.replacen(
@@ -655,10 +679,35 @@ pub(crate) mod tests {
         assert_eq!(
             opened(Opening::Moment {
                 since_last_line: None,
+                last_app: None,
                 rang: Vec::new(),
             }),
             said.replacen(&headed, &format!("{note}.\n{hers}"), 1)
         );
+    }
+
+    /// A message that names no app answers in the app its line came in,
+    /// whether or not she is said to have it yet; one of her own goes in
+    /// the app the person last wrote in while she has it, and in Messages
+    /// otherwise.
+    #[test]
+    fn a_message_naming_no_app_goes_where_its_line_came_in_or_the_person_last_wrote() {
+        let both = AppNames::new([("telegram", "Telegram")]);
+        let messages_alone = AppNames::new([]);
+        let own = |last_app: Option<&str>| Opening::Moment {
+            since_last_line: None,
+            last_app: last_app.map(str::to_owned),
+            rang: Vec::new(),
+        };
+
+        assert_eq!(
+            line_from("telegram:mira_bot", "Hello.").app(&messages_alone),
+            "telegram"
+        );
+        assert_eq!(line("Hello.").app(&both), "messages");
+        assert_eq!(own(Some("telegram")).app(&both), "telegram");
+        assert_eq!(own(Some("telegram")).app(&messages_alone), "messages");
+        assert_eq!(own(None).app(&both), "messages");
     }
 
     /// The person's line opens the turn under its heading: the app it came
@@ -707,6 +756,7 @@ pub(crate) mod tests {
             &envelope(
                 Opening::Moment {
                     since_last_line: Some(Duration::from_hours(9)),
+                    last_app: Some("messages".to_owned()),
                     rang,
                 },
                 context_with("Sam"),
@@ -747,6 +797,7 @@ pub(crate) mod tests {
         assert_eq!(
             system(Opening::Moment {
                 since_last_line: Some(Duration::from_mins(1)),
+                last_app: Some("messages".to_owned()),
                 rang: Vec::new(),
             }),
             told

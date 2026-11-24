@@ -25,8 +25,8 @@ use p02_plugins::{AppCatalog, AppInternet};
 use p02_shared::{BaseUrl, Identifier, error_sentence};
 use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
 use p02_wire::{
-    Answer, ChangeOutcome, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
-    ConfirmationAnswer, ConnectorBot, ConnectorBotsOutcome, ConnectorBotsRefusal,
+    Answer, BotState, ChangeOutcome, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget,
+    ConfigView, ConfirmationAnswer, ConnectorBot, ConnectorBotsOutcome, ConnectorBotsRefusal,
     ConnectorConfigView, ConnectorPresence, Event, Health, HistoryOutcome, OpenOutcome,
     OpenRefusal, PackagesHealth, PendingConfirmation, ProtocolVersion, StartOutcome, StartRefusal,
     SubmitOutcome, TurnRefusal,
@@ -828,6 +828,31 @@ impl Daemon {
         }
 
         ConnectorBotsOutcome::Kept
+    }
+
+    /// The apps that carry `character`'s messages now: Messages, always,
+    /// then each connector that holds a bot of hers that is on, by its id
+    /// and its declared name. Whether an account is paired with the bot is
+    /// not asked.
+    pub(crate) fn apps_of(&self, character: &Identifier) -> AppNames {
+        let presence = self.inner.presence();
+        let hers = ConfigTarget::Character {
+            character_id: character.to_string(),
+        };
+
+        AppNames::new(
+            connectors()
+                .iter()
+                .filter(|connector| {
+                    presence.get(connector.id()).is_some_and(|connected| {
+                        connected
+                            .bots
+                            .iter()
+                            .any(|bot| bot.target == hers && bot.state == BotState::On)
+                    })
+                })
+                .map(|connector| (connector.id().as_str(), connector.display_name())),
+        )
     }
 
     /// Stops every character, for good: no start follows. A boot or a

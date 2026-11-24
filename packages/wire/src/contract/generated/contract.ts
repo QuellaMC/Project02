@@ -455,16 +455,16 @@ export type GatewayReady = { protocolVersion: 17, health: GatewayHealth, confirm
 export type GatewayRefusalReason = "unknown_conversation" | "character_unavailable" | "duplicate_submission";
 
 /**
- * A committed message as the scrollback shows it: when it was sent, and
- * for the person's line the app it came in, by its id, and the stamps its
- * client put on it.
+ * A committed message as the scrollback shows it: when it was sent, the
+ * app it is in, by its id, and for the person's line the stamps its client
+ * put on it.
  */
 export type HistoryMessage = { messageId: MessageId, role: VisibleMessageRole, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, sentAt: Timestamp, 
 /**
- * The id of the app the person's line came in, as `messages` or
- * `telegram`; absent for hers.
+ * The id of the app the person's line came in, or hers went in, as
+ * `messages` or `telegram`.
  */
-app?: string, source?: ClientStamp, clientMessageId?: ClientStamp, };
+app: string, source?: ClientStamp, clientMessageId?: ClientStamp, };
 
 /**
  * One page of a conversation's scrollback, chronological within the page;
@@ -1109,6 +1109,10 @@ export type TurnProgress = { "kind": "user_message", messageId: MessageId, speak
  * The id of the app the line came in, as `messages` or `telegram`.
  */
 app: string, source: ClientStamp, clientMessageId: ClientStamp, } | { "kind": "visible_reply", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, sentAt: Timestamp, 
+/**
+ * The id of the app it went in, as `messages` or `telegram`.
+ */
+app: string, 
 /**
  * The draft this message replaces.
  */

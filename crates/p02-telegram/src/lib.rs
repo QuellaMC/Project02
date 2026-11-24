@@ -41,8 +41,6 @@ pub struct Options {
     pub home: PathBuf,
     /// The Bot API: Telegram's own, unless a test harness names another.
     pub telegram: BaseUrl,
-    /// The shortest wait between two edits of a reply's draft in a chat.
-    pub draft_edits: Duration,
 }
 
 impl Options {
@@ -56,7 +54,6 @@ impl Options {
         Self {
             home,
             telegram: BaseUrl::parse(TELEGRAM).expect("Telegram's address is a base URL"),
-            draft_edits: Duration::from_millis(1_500),
         }
     }
 }
@@ -84,7 +81,7 @@ pub async fn run(options: Options, lines: Arc<dyn Lines>, stop: CancellationToke
             return Ended::Failed;
         }
     };
-    let mut table = Table::new(telegram, options.draft_edits, Arc::clone(&lines), &stop);
+    let mut table = Table::new(telegram, Arc::clone(&lines), &stop);
     let ended = daemon::follow_home(&options.home, &mut table, &lines, &stop).await;
 
     table.stop_all().await;

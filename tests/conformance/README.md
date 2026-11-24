@@ -73,9 +73,8 @@ arguments, and the switches of `crates/project02/README.md` it needs:
 `PROJECT02_TEST_OPENAI_API` for the model server as the OpenAI API,
 `PROJECT02_TEST_CHATGPT_API` for it as a ChatGPT plan's service,
 `PROJECT02_TEST_ANTHROPIC_API` for it as the Claude API and
-`PROJECT02_TEST_OPENAI_AUTH` for the auth server as OpenAI's sign-in. The connector takes two:
-`PROJECT02_TEST_TELEGRAM_API`, naming the test's Bot API, and `edit` in
-`PROJECT02_TEST_DURATIONS` for its draft edits. A test that needs the model server or the mem0 server
+`PROJECT02_TEST_OPENAI_AUTH` for the auth server as OpenAI's sign-in. The connector takes one:
+`PROJECT02_TEST_TELEGRAM_API`, naming the test's Bot API. A test that needs the model server or the mem0 server
 writes its settings into the home's `config.json` before the start.
 
 `python3` must be on `PATH`: the consent-prompt test gives `serve` a terminal

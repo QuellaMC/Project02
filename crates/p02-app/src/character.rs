@@ -1126,6 +1126,14 @@ impl Mind for Current<'_> {
         &self.her.world.apps
     }
 
+    /// Messages alone once the daemon is gone.
+    fn apps_now(&self) -> AppNames {
+        self.her
+            .daemon
+            .upgrade()
+            .map_or_else(|| AppNames::new([]), |daemon| daemon.apps_of(&self.her.id))
+    }
+
     fn adapter(&self) -> &dyn RoleModelAdapter {
         self.adapter.as_ref()
     }

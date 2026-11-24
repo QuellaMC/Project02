@@ -709,7 +709,7 @@ fn written() -> Vec<(&'static str, Value)> {
                     speaker_name: mira,
                     text,
                     sent_at: at,
-                    app: Some("messages".to_owned()),
+                    app: "messages".to_owned(),
                     source: Some(stamp("web")),
                     client_message_id: None,
                 }],

@@ -180,7 +180,8 @@ static SAM: LazyLock<SpeakerName> = LazyLock::new(|| SpeakerName::new("Sam").unw
 static APPS: LazyLock<AppNames> = LazyLock::new(|| AppNames::new([("telegram", "Telegram")]));
 
 /// What the thread's tests answer a line with: settings never change it,
-/// and its turns never outgrow its window.
+/// her messages go in Messages alone, and its turns never outgrow its
+/// window.
 pub(crate) struct Fixed<'c> {
     pub(crate) model: &'c Model,
     pub(crate) host: &'c PluginHost,
@@ -194,6 +195,10 @@ impl Mind for Fixed<'_> {
 
     fn apps(&self) -> &AppNames {
         &APPS
+    }
+
+    fn apps_now(&self) -> AppNames {
+        AppNames::new([])
     }
 
     fn adapter(&self) -> &dyn RoleModelAdapter {
@@ -431,7 +436,7 @@ pub(crate) fn told(progress: &[Progress]) -> Vec<String> {
         .iter()
         .map(|progress| match progress {
             Progress::UserMessage { message, .. } => format!("user_message {}", message.text),
-            Progress::VisibleReply { message, draft } => {
+            Progress::VisibleReply { message, draft, .. } => {
                 format!("visible_reply {draft} {}", message.text)
             }
             Progress::ReplyDelta { draft, text } => format!("reply_delta {draft} {text}"),

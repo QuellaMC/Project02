@@ -185,7 +185,6 @@ export async function startTelegramServer(
       case 'editMessageText':
         answerMessage(bot, fields, fields['message_id'], response);
         break;
-      case 'deleteMessage':
       case 'answerCallbackQuery':
       case 'sendChatAction':
         envelope(response, 200, {ok: true, result: true});

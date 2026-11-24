@@ -574,8 +574,9 @@
               older messages remain. <code>limit</code> is held to 1..500
               (default 100); <code>before</code> is the opaque cursor from a
               previous page. Every message carries <code>sentAt</code>, when
-              it was sent, and each of the person's the <code>app</code> it
-              came in with its stamps.
+              it was sent, and the <code>app</code> it is in, and each of the
+              person's its stamps; a message of hers an earlier build kept is
+              in the app of the person's line before it.
             </td>
           </tr>
           <tr>
@@ -778,6 +779,15 @@ Content-Type: application/json
       </p>
 
       <p>
+        Each of her messages goes in an app she has: <code>messages</code>
+        always, and a connector's app while the connector holds a bot of hers
+        that is on. While she has more than one, she may name the app a
+        message goes in. A message that names none answers in the app its
+        line came in; one of her own goes in the app the person last wrote
+        in, while she has it, and else in <code>messages</code>.
+      </p>
+
+      <p>
         A character also has turns of her own, while she is ready: her
         heartbeat gives her a moment every so often while the person is
         quiet, as her own settings say, and a ring on her phone that comes
@@ -892,8 +902,9 @@ data: {…}</code></pre>
               <code>user_message</code> (with <code>sentAt</code>, its
               <code>app</code>, <code>source</code> and
               <code>clientMessageId</code>) and <code>visible_reply</code>
-              (with <code>sentAt</code>), which names the
-              <code>draftId</code> it replaces — and its rounds'
+              (with <code>sentAt</code> and the <code>app</code> it went in),
+              which names the <code>draftId</code> it replaces — and its
+              rounds'
               tool calls: <code>tool_calls_requested</code> with the
               <code>toolNames</code> a round called, then a
               <code>tool_call_completed</code> for each call as it came back,
@@ -1165,10 +1176,12 @@ data: {…}</code></pre>
         <code>clientMessageId</code>, so a message Telegram hands on again is
         the line it was. It hands each line to her inbox and asks Telegram past
         the message only once the line is queued. It answers private chats
-        only, keeps nothing between runs — each starts from the record, its
-        <code>ready</code> and its config read — and edits a draft's message in
-        each chat at most every 1.5 seconds, to her turn as the daemon last
-        said it. <code>crates/p02-telegram/README.md</code> has the rest.
+        only, and keeps nothing between runs — each starts from the record, its
+        <code>ready</code> and its config read. While a turn a line from a chat
+        began runs, that chat shows her typing; each message of hers whose
+        <code>app</code> is <code>telegram</code> is posted whole, once
+        committed, in every paired chat, and nothing else of the conversation
+        is. <code>crates/p02-telegram/README.md</code> has the rest.
       </p>
 
       <h2>Her phone</h2>

@@ -16,7 +16,7 @@ use p02_contracts::{
 };
 use p02_core::{
     BlankTextError, ClientStamp, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
-    UserLine, VisibleMessage,
+    UserLine, VisibleMessage, app_of,
 };
 use p02_plugins::{
     BeforeCallOutcome, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall, ToolCallReport,
@@ -50,10 +50,12 @@ pub enum Progress {
         source: ClientStamp,
         client_message_id: ClientStamp,
     },
-    /// A reply, committed in place of its draft.
+    /// A reply, committed in place of its draft, with the id of the app it
+    /// went in.
     VisibleReply {
         message: VisibleMessage,
         draft: DraftId,
+        app: String,
     },
     /// The next piece of a draft.
     ReplyDelta { draft: DraftId, text: String },
@@ -211,11 +213,19 @@ pub(crate) async fn run(
             )
         }
         Opened::Moment(rang) => {
-            let since_last_line = since_last_line(&begun.history.turns, identity.created_at());
+            let last = begun
+                .history
+                .turns
+                .iter()
+                .rev()
+                .find(|turn| turn.user_message.is_some());
 
             (
                 Opening::Moment {
-                    since_last_line,
+                    since_last_line: last
+                        .and_then(|turn| turn.user_message.as_ref())
+                        .map(|line| since_sent(line, identity.created_at())),
+                    last_app: last.map(|turn| app_of(turn.source.as_ref()).to_owned()),
                     rang,
                 },
                 Vec::new(),
@@ -372,18 +382,11 @@ async fn begin(
     .await
 }
 
-/// How long before `now` the person last wrote: since the newest line of
-/// `history` was sent; none when no line is in it.
-fn since_last_line(history: &[ConversationTurn], now: &Timestamp) -> Option<Duration> {
-    history
-        .iter()
-        .rev()
-        .find_map(|turn| turn.user_message.as_ref())
-        .map(|line| {
-            let elapsed = now.unix_millis() - line.sent_at.unix_millis();
+/// How long before `now` the person's `line` was sent.
+fn since_sent(line: &VisibleMessage, now: &Timestamp) -> Duration {
+    let elapsed = now.unix_millis() - line.sent_at.unix_millis();
 
-            Duration::from_millis(u64::try_from(elapsed).unwrap_or(0))
-        })
+    Duration::from_millis(u64::try_from(elapsed).unwrap_or(0))
 }
 
 /// The turn failed: its rejection is recorded if it still can be, naming
@@ -578,9 +581,10 @@ impl OpenTurn<'_> {
         let notes = std::iter::once(today_note(self.now.date()))
             .chain(runtime_notes)
             .collect();
-        let mut context = DecisionContext::new(mind.person().clone(), mind.apps().clone())
-            .with_runtime_notes(notes)
-            .with_plugin_context(context_items, curated_sections);
+        let mut context =
+            DecisionContext::new(mind.person().clone(), mind.apps().clone(), mind.apps_now())
+                .with_runtime_notes(notes)
+                .with_plugin_context(context_items, curated_sections);
 
         if let Some(summary) = self.summary {
             context = context.with_summary(summary);
@@ -663,7 +667,7 @@ impl OpenTurn<'_> {
             .iter()
             .rev()
             .find_map(|call| match call {
-                ModelToolCall::VisibleReply { text } => Some(text.clone()),
+                ModelToolCall::VisibleReply { text, .. } => Some(text.clone()),
                 ModelToolCall::Plugin { .. } => None,
             });
         let evidence = self.recorded().await;
@@ -765,6 +769,7 @@ impl TurnSink for Round<'_, '_> {
         let identity = turn.identity.clone();
         let text = reply.text.clone();
         let round = reply.draft.round();
+        let app = reply.app.to_owned();
         let mut ledger = turn.ledger.lock().await;
         let evidence = ledger.prepared.clone();
         let name = turn.character.profile.display_name.clone();
@@ -780,6 +785,7 @@ impl TurnSink for Round<'_, '_> {
                 RecordBody::MessageCommitted(MessageCommitted::character(
                     message.clone(),
                     round,
+                    app,
                     evidence,
                 )),
             )?;
@@ -792,6 +798,7 @@ impl TurnSink for Round<'_, '_> {
         (turn.listener)(Progress::VisibleReply {
             message: message.clone(),
             draft: reply.draft,
+            app: reply.app.to_owned(),
         });
         Ok(message)
     }

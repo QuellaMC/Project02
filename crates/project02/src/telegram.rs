@@ -11,17 +11,14 @@ use p02_telegram::{Ended, Lines, Options};
 
 use crate::flags::TelegramFlags;
 use crate::stop::listen_for_stop;
-use crate::switches::{self, TEST_DURATIONS, TEST_TELEGRAM_API};
+use crate::switches::{self, TEST_TELEGRAM_API};
 use crate::{Console, home_of, on_runtime};
 
-/// Runs the connector until the stop: exit code 0, or 1 when its switches
-/// refuse the start, or when it could not go on, which it says on stderr.
+/// Runs the connector until the stop: exit code 0, or 1 when its switch
+/// refuses the start, or when it could not go on, which it says on stderr.
 pub(crate) fn run(flags: TelegramFlags, console: &mut Console) -> ExitCode {
-    let switches = match switches::telegram(
-        env::var_os(TEST_DURATIONS).as_deref(),
-        env::var_os(TEST_TELEGRAM_API).as_deref(),
-    ) {
-        Ok(switches) => switches,
+    let telegram = match switches::telegram(env::var_os(TEST_TELEGRAM_API).as_deref()) {
+        Ok(telegram) => telegram,
         Err(refused) => {
             console.warn(&refused.to_string());
             return ExitCode::FAILURE;
@@ -33,12 +30,8 @@ pub(crate) fn run(flags: TelegramFlags, console: &mut Console) -> ExitCode {
     };
     let mut options = Options::new(home.root().to_path_buf());
 
-    if let Some(telegram) = switches.telegram {
+    if let Some(telegram) = telegram {
         options.telegram = telegram;
-    }
-
-    if let Some(draft_edits) = switches.draft_edits {
-        options.draft_edits = draft_edits;
     }
 
     let ended = on_runtime(async {

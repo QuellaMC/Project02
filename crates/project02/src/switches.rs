@@ -55,9 +55,6 @@ const SERVE_KEYS: [&str; 6] = [
     "minute",
 ];
 
-/// The one wait the connector reads: between two edits of a draft.
-const TELEGRAM_KEYS: [&str; 1] = ["edit"];
-
 /// What the switches make of a run: the model every character answers
 /// through, the daemon's waits, where the App Store is, the stand-in her
 /// apps' requests go to, and where the OpenAI API, OpenAI's sign-in, a
@@ -96,14 +93,6 @@ impl Default for Switches {
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 #[error("{0}")]
 pub(crate) struct SwitchError(String);
-
-/// What the switches make of the connector: the Bot API it reaches, and how
-/// long a draft waits between two edits, each its own unless set.
-#[derive(Debug)]
-pub(crate) struct TelegramSwitches {
-    pub(crate) telegram: Option<BaseUrl>,
-    pub(crate) draft_edits: Option<Duration>,
-}
 
 /// Serve's switches as the environment sets them, `variable` reading each
 /// by its name, none when unset. The durations are read first, then a test
@@ -151,21 +140,10 @@ pub(crate) fn read(variable: impl Fn(&str) -> Option<OsString>) -> Result<Switch
     Ok(switches)
 }
 
-/// The connector's switches as the environment sets them: the durations',
-/// then the Bot API's address.
-pub(crate) fn telegram(
-    durations: Option<&OsStr>,
-    api: Option<&OsStr>,
-) -> Result<TelegramSwitches, SwitchError> {
-    let draft_edits = waits(durations, &TELEGRAM_KEYS)?
-        .into_iter()
-        .map(|(_, wait)| wait)
-        .next();
-
-    Ok(TelegramSwitches {
-        telegram: base(TEST_TELEGRAM_API, api)?,
-        draft_edits,
-    })
+/// The connector's one switch as the environment sets it, `api`: the Bot
+/// API it reaches, Telegram's own when unset.
+pub(crate) fn telegram(api: Option<&OsStr>) -> Result<Option<BaseUrl>, SwitchError> {
+    base(TEST_TELEGRAM_API, api)
 }
 
 /// The address switch `name` sets to `value`, an absolute http or https one

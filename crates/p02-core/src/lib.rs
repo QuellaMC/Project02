@@ -18,7 +18,7 @@ pub use id::{
     SessionId,
 };
 pub use message::{
-    AppNames, BlankTextError, CharacterProfile, ClientStamp, ParseClientStampError,
+    AppNames, BlankTextError, CharacterProfile, ClientStamp, MESSAGES, ParseClientStampError,
     ParseSpeakerNameError, ParseVisibleTextError, SpeakerName, UserLine, VisibleMessage,
     VisibleMessageRole, VisibleText, app_of,
 };

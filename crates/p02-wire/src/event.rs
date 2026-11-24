@@ -152,6 +152,8 @@ pub enum TurnProgress {
         speaker_name: SpeakerName,
         text: VisibleText,
         sent_at: Timestamp,
+        /// The id of the app it went in, as `messages` or `telegram`.
+        app: String,
         /// The draft this message replaces.
         draft_id: String,
     },

@@ -90,7 +90,11 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
             }),
             true,
         ),
-        Progress::VisibleReply { message, draft } => {
+        Progress::VisibleReply {
+            message,
+            draft,
+            app,
+        } => {
             let draft_id = draft.to_string();
 
             turn.drafts.retain(|open| open.draft_id != draft_id);
@@ -101,6 +105,7 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
                     speaker_name: message.speaker_name,
                     text: message.text,
                     sent_at: message.sent_at,
+                    app,
                     draft_id,
                 }),
                 true,

@@ -36,9 +36,13 @@ pub(crate) fn event() -> EventIdentity {
 }
 
 /// A context for a person going by the name they have until they choose
-/// one.
+/// one, who writes to her in Messages alone.
 pub(crate) fn context() -> DecisionContext {
-    DecisionContext::new(SpeakerName::new("You").unwrap(), AppNames::new([]))
+    DecisionContext::new(
+        SpeakerName::new("You").unwrap(),
+        AppNames::new([]),
+        AppNames::new([]),
+    )
 }
 
 /// A tool `name` of `plugin`, taking anything an object holds.

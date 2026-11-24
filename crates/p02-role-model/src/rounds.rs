@@ -62,6 +62,8 @@ pub struct Reply<'a> {
     /// The draft the reply replaces, whether or not anything of it was
     /// spoken, which names the round it was said in.
     pub draft: DraftId,
+    /// The id of the app it goes in.
+    pub app: &'a str,
 }
 
 /// A call a round made, routed to the plugin that offers its tool.
@@ -244,7 +246,11 @@ impl<'a> Rounds<'a> {
             .with_history(self.history)
             .with_reply_listener(&listener);
         let answer = adapter.invoke(&invocation).await;
-        let result = DecisionResult::judge(&answer, self.envelope.opening.occasion());
+        let result = DecisionResult::judge(
+            &answer,
+            self.envelope.opening.occasion(),
+            self.envelope.decision_context.apps_now(),
+        );
         let recorded = ModelRound {
             round,
             answer,
@@ -282,7 +288,7 @@ impl<'a> Rounds<'a> {
             .collect();
 
         if calls.is_empty() {
-            commit_replies(sink, drafts, &decision).await?;
+            commit_replies(sink, drafts, &decision, &self.envelope).await?;
             return Ok(Some(TurnOutcome::Completed { round, decision }));
         }
 
@@ -298,7 +304,7 @@ impl<'a> Rounds<'a> {
             }));
         }
 
-        let interim_replies = commit_replies(sink, drafts, &decision).await?;
+        let interim_replies = commit_replies(sink, drafts, &decision, &self.envelope).await?;
         let routed = calls
             .into_iter()
             .enumerate()
@@ -355,25 +361,31 @@ fn undeclared(tool: &Identifier) -> Identifier {
         .unwrap_or_else(|_| Identifier::new("undeclared").expect("undeclared is an identifier"))
 }
 
-/// Commits the round's replies in order, each naming its draft, then
-/// withdraws what the round drafted and did not say, before anything else
-/// the round decided goes on.
+/// Commits the round's replies in order, each naming its draft and going in
+/// the app she named, or else the one `envelope`'s opening gives a message
+/// that names none, then withdraws what the round drafted and did not say,
+/// before anything else the round decided goes on.
 async fn commit_replies<S: TurnSink>(
     sink: &S,
     drafts: &Drafts<'_, S>,
     decision: &CharacterDecision,
+    envelope: &InputEnvelope,
 ) -> Result<Vec<VisibleMessage>, S::Error> {
-    let texts = decision.tool_calls().iter().filter_map(|call| match call {
-        ModelToolCall::VisibleReply { text } => Some(text),
+    let replies = decision.tool_calls().iter().filter_map(|call| match call {
+        ModelToolCall::VisibleReply { text, app } => Some((text, app.as_deref())),
         ModelToolCall::Plugin { .. } => None,
     });
     let mut committed = Vec::new();
 
-    for (reply, text) in texts.enumerate() {
+    for (reply, (text, named)) in replies.enumerate() {
+        let app =
+            named.unwrap_or_else(|| envelope.opening.app(envelope.decision_context.apps_now()));
+
         committed.push(
             sink.commit_reply(Reply {
                 text,
                 draft: drafts.id(reply),
+                app,
             })
             .await?,
         );

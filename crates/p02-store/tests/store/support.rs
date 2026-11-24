@@ -11,9 +11,9 @@ use p02_contracts::{
     WrittenCall,
 };
 use p02_core::{
-    CharacterProfile, ClientStamp, Conversation, ConversationId, EventId, EventIdentity, MessageId,
-    Participant, SessionId, SpeakerName, Timestamp, TraceId, VisibleMessage, VisibleMessageRole,
-    VisibleText,
+    AppNames, CharacterProfile, ClientStamp, Conversation, ConversationId, EventId, EventIdentity,
+    MESSAGES, MessageId, Participant, SessionId, SpeakerName, Timestamp, TraceId, VisibleMessage,
+    VisibleMessageRole, VisibleText,
 };
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{
@@ -382,7 +382,7 @@ impl TurnScript<'_> {
             Some(_) => Occasion::Line,
             None => Occasion::Moment,
         };
-        let result = DecisionResult::judge(&answer, occasion);
+        let result = DecisionResult::judge(&answer, occasion, &AppNames::new([]));
 
         self.rounds.push(result.clone());
         self.push(RecordBody::ModelRound(RoundRecord::new(
@@ -403,7 +403,7 @@ impl TurnScript<'_> {
         };
 
         for call in decision.tool_calls() {
-            if let p02_contracts::ModelToolCall::VisibleReply { text } = call {
+            if let p02_contracts::ModelToolCall::VisibleReply { text, .. } = call {
                 let message = self.script.message(
                     VisibleMessageRole::Character,
                     text,
@@ -419,6 +419,7 @@ impl TurnScript<'_> {
                 self.push(RecordBody::MessageCommitted(MessageCommitted::character(
                     message,
                     round,
+                    MESSAGES.to_owned(),
                     vec![evidence],
                 )));
             }
@@ -498,7 +499,7 @@ impl TurnScript<'_> {
                 .iter()
                 .rev()
                 .find_map(|call| match call {
-                    p02_contracts::ModelToolCall::VisibleReply { text } => Some(text.clone()),
+                    p02_contracts::ModelToolCall::VisibleReply { text, .. } => Some(text.clone()),
                     p02_contracts::ModelToolCall::Plugin { .. } => None,
                 }),
         };

@@ -194,17 +194,6 @@ fn telegram() -> Connector {
                 "redactionLabels": ["secret"],
             },
             {
-                "name": "mirror",
-                "label": "Show Other Chats",
-                "description": "Show in this chat what you and the character said on other \
-                    surfaces, like the web page.",
-                "scope": "global_only",
-                "secret": false,
-                "valueType": "boolean",
-                "defaultValue": true,
-                "redactionLabels": [],
-            },
-            {
                 "name": "pairedUsers",
                 "label": "Paired Accounts",
                 "description": "Accounts allowed to talk to your characters, each id with a \

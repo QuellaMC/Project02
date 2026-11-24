@@ -244,9 +244,8 @@ function committed(
     speakerName: clientMessageId === undefined ? 'Mira' : 'You',
     text,
     sentAt,
-    ...(clientMessageId === undefined
-      ? {}
-      : {app: 'messages', source: 'web', clientMessageId}),
+    app: 'messages',
+    ...(clientMessageId === undefined ? {} : {source: 'web', clientMessageId}),
   };
 }
 
@@ -424,6 +423,7 @@ describe('web store', () => {
         speakerName: 'Mira',
         text: 'I remember you',
         sentAt,
+        app: 'messages',
         draftId: '1.0',
       }),
     );
@@ -494,6 +494,7 @@ describe('web store', () => {
         speakerName: 'Mira',
         text: 'I remember you',
         sentAt,
+        app: 'messages',
         draftId: '1.0',
       }),
     );
@@ -527,6 +528,7 @@ describe('web store', () => {
         speakerName: 'Mira',
         text: 'Found your keys yet?',
         sentAt,
+        app: 'messages',
         draftId: '1.0',
       }),
     );
@@ -572,6 +574,7 @@ describe('web store', () => {
         speakerName: 'Mira',
         text: 'Found your keys yet?',
         sentAt,
+        app: 'messages',
         draftId: '1.0',
       });
 
@@ -632,6 +635,7 @@ describe('web store', () => {
           speakerName: 'Mira',
           text: 'Set for seven.',
           sentAt,
+          app: 'messages',
           draftId: '2.0',
         }),
       ).phoning.size,
