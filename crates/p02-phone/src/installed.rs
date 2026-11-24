@@ -11,8 +11,9 @@ use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
-use crate::app::App;
+use crate::app::{App, Runs};
 use crate::asks::Asks;
+use crate::chat::{self, Chats};
 use crate::data::Kept;
 use crate::error::PhoneError;
 use crate::front::PhoneState;
@@ -35,7 +36,7 @@ pub enum Source {
 
 /// An app on her phone as her phone lists it, without running it: what
 /// its manifest says to name and draw it by, its version, what it asks of
-/// her phone, and where it came from.
+/// her phone, where it came from, and whether messages come in it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Listed {
@@ -54,12 +55,17 @@ pub struct Listed {
     pub opens_on: Identifier,
     /// Where it came from; none for an app the phone comes with.
     pub source: Option<Source>,
+    /// Whether she and the person write to each other in it, which no app
+    /// installed does.
+    #[serde(skip)]
+    pub messaging: bool,
 }
 
-/// What is on her phone: the apps it comes with, then those installed on
-/// it by name, then the App Store; which of them the person said may not
-/// wake her, and how each that asks a model is signed in; and what of the
-/// lists her phone keeps was passed over, a sentence each.
+/// What is on her phone: the apps messages come in, then those it comes
+/// with, then those installed on it by name, then the App Store; which of
+/// them the person said may not wake her, and how each that asks a model
+/// is signed in; and what of the lists her phone keeps was passed over, a
+/// sentence each.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct OnPhone {
     pub apps: Vec<Listed>,
@@ -96,6 +102,7 @@ impl Listed {
             views: app.views().to_vec(),
             opens_on: app.opens_on().clone(),
             source,
+            messaging: matches!(app.runs(), Runs::Chat),
         }
     }
 }
@@ -153,14 +160,28 @@ impl List {
 
 impl Phone {
     /// What is on her phone, as `files` keep it, without running anything:
-    /// the apps compiled into the daemon, then those installed on it by
-    /// name, then the App Store, which of them the person said may not
-    /// wake her, and how each that asks a model is signed in.
+    /// the apps that carry her messages now, as `chats` says, Messages
+    /// first, then the apps compiled into the daemon, then those installed
+    /// on it by name, then the App Store, which of them the person said may
+    /// not wake her, and how each that asks a model is signed in.
     ///
     /// # Errors
     ///
     /// The store's, when it fails.
-    pub fn apps(&self, files: &dyn LeasedFiles) -> Result<OnPhone, StoreError> {
+    pub fn apps(&self, files: &dyn LeasedFiles, chats: &dyn Chats) -> Result<OnPhone, StoreError> {
+        let mut on_phone = self.listed(files)?;
+
+        on_phone.apps.splice(
+            0..0,
+            chat::apps(chats).iter().map(|app| Listed::of(app, None)),
+        );
+        Ok(on_phone)
+    }
+
+    /// What is on her phone as `files` keep it, but the apps messages come
+    /// in, which no list keeps and which never wake her, sign in or stand
+    /// in the App Store.
+    pub(crate) fn listed(&self, files: &dyn LeasedFiles) -> Result<OnPhone, StoreError> {
         let List {
             apps: mut installed,
             mut passed_over,
@@ -218,16 +239,18 @@ impl Phone {
     ///
     /// [`PhoneError::NotAnApp`] when `text` makes no app,
     /// [`PhoneError::IdTaken`] when the phone comes with an app of its id,
-    /// or the store's. An app refused writes nothing.
+    /// as `chats` says of the apps messages come in, or the store's. An app
+    /// refused writes nothing.
     pub fn install(
         &self,
         files: &mut dyn LeasedFiles,
+        chats: &dyn Chats,
         text: &str,
         source: Source,
     ) -> Result<Installed, PhoneError> {
         let app = self.made(text).map_err(PhoneError::NotAnApp)?;
 
-        self.not_taken(&app)?;
+        self.not_taken(chats, &app)?;
 
         let mut list = List::read(files)?;
         let replaced = list
@@ -254,11 +277,12 @@ impl Phone {
     /// # Errors
     ///
     /// [`PhoneError::NotAnApp`] when `text` makes no app, and
-    /// [`PhoneError::IdTaken`] when the phone comes with an app of its id.
-    pub fn preview(&self, text: &str) -> Result<App, PhoneError> {
+    /// [`PhoneError::IdTaken`] when the phone comes with an app of its id,
+    /// as `chats` says of the apps messages come in.
+    pub fn preview(&self, chats: &dyn Chats, text: &str) -> Result<App, PhoneError> {
         let app = App::new(text).map_err(|refusal| PhoneError::NotAnApp(refusal.to_string()))?;
 
-        self.not_taken(&app)?;
+        self.not_taken(chats, &app)?;
         Ok(app)
     }
 
@@ -271,10 +295,16 @@ impl Phone {
     ///
     /// # Errors
     ///
-    /// [`PhoneError::ComesWithPhone`] for an app the phone comes with,
-    /// [`PhoneError::NoApp`] for one not installed, or the store's.
-    pub fn remove(&self, files: &mut dyn LeasedFiles, id: &str) -> Result<(), PhoneError> {
-        if let Some(kept) = self.comes_with(id) {
+    /// [`PhoneError::ComesWithPhone`] for an app the phone comes with, as
+    /// `chats` says of the apps messages come in, [`PhoneError::NoApp`] for
+    /// one not installed, or the store's.
+    pub fn remove(
+        &self,
+        files: &mut dyn LeasedFiles,
+        chats: &dyn Chats,
+        id: &str,
+    ) -> Result<(), PhoneError> {
+        if let Some(kept) = self.comes_with(chats, id) {
             return Err(PhoneError::ComesWithPhone(kept.name().to_owned()));
         }
 
@@ -295,10 +325,10 @@ impl Phone {
         Ok(())
     }
 
-    /// Refuses `app` when the phone comes with an app of its id, which
-    /// nothing installs over.
-    fn not_taken(&self, app: &App) -> Result<(), PhoneError> {
-        match self.comes_with(app.id().as_str()) {
+    /// Refuses `app` when the phone comes with an app of its id, as `chats`
+    /// says of the apps messages come in, which nothing installs over.
+    fn not_taken(&self, chats: &dyn Chats, app: &App) -> Result<(), PhoneError> {
+        match self.comes_with(chats, app.id().as_str()) {
             Some(taken) => Err(PhoneError::IdTaken(taken.name().to_owned())),
             None => Ok(()),
         }

@@ -222,15 +222,65 @@ impl LogRecord {
             .into_iter()
             .filter_map(|key| fields.remove(key).map(|value| (key.to_owned(), value)))
             .collect();
+        let created_at = identity.get("createdAt").cloned().unwrap_or_default();
         let identity =
             serde_json::from_value(Value::Object(identity)).map_err(RecordError::Identity)?;
         let kind: RecordKind = serde_json::from_value(fields.remove("kind").unwrap_or(Value::Null))
             .map_err(RecordError::Kind)?;
+
+        date_messages(kind, &mut fields, &created_at);
+
         let body = RecordBody::from_fields(kind, Value::Object(fields))
             .map_err(|source| RecordError::Fields { kind, source })?;
 
         Ok(Self::new(identity, body))
     }
+}
+
+/// A message an earlier build kept has no time of its own: it counts as
+/// sent at the moment of what holds it, its record, `created_at`, or the
+/// turn a continuation carries, whose records all shared that turn's
+/// moment.
+fn date_messages(kind: RecordKind, fields: &mut Map<String, Value>, created_at: &Value) {
+    match kind {
+        RecordKind::VisibleMessageCommitted => {
+            if let Some(message) = fields.get_mut("visibleMessage") {
+                date(message, created_at);
+            }
+        }
+        RecordKind::SessionContinued => {
+            let carried = fields
+                .get_mut("sessionContinuation")
+                .and_then(|continuation| continuation.get_mut("carriedTurns"));
+
+            for turn in each(carried) {
+                let at = turn.get("createdAt").cloned().unwrap_or_default();
+
+                if let Some(line) = turn.get_mut("userMessage") {
+                    date(line, &at);
+                }
+
+                for round in each(turn.get_mut("toolRounds")) {
+                    each(round.get_mut("interimReplies")).for_each(|reply| date(reply, &at));
+                }
+
+                each(turn.get_mut("finalReplies")).for_each(|reply| date(reply, &at));
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `message` sent at `at`, unless it says when it was sent.
+fn date(message: &mut Value, at: &Value) {
+    if let Value::Object(message) = message {
+        message.entry("sentAt").or_insert_with(|| at.clone());
+    }
+}
+
+/// The items of `list`, when it is one.
+fn each(list: Option<&mut Value>) -> impl Iterator<Item = &mut Value> {
+    list.and_then(Value::as_array_mut).into_iter().flatten()
 }
 
 impl Serialize for LogRecord {

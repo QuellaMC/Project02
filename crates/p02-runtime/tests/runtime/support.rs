@@ -16,8 +16,8 @@ use p02_contracts::{
     RoleModelAdapter, RuntimePlugin, TextCompletionRequest, ToolCall, ToolCallOutcome,
     ToolInputContract, WrittenCall,
 };
-use p02_core::{ClientStamp, ConversationId, SpeakerName};
-use p02_phone::Account;
+use p02_core::{AppNames, ClientStamp, ConversationId, SpeakerName, Timestamp};
+use p02_phone::{Account, Chats};
 use p02_plugins::{
     AppCatalog, AppInternet, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
     Connections, FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError,
@@ -26,7 +26,7 @@ use p02_plugins::{
 use p02_runtime::{Character, Conversation, Delivery, Mind, Progress, Submission};
 use p02_shared::{BaseUrl, DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, LogRecord, RecordKind};
-use p02_wire::{ActivationStatus, AppConnection};
+use p02_wire::{ActivationStatus, AppConnection, HistoryMessage};
 use serde_json::{Map, Value, json};
 use tempfile::TempDir;
 
@@ -123,6 +123,7 @@ impl World {
                         BaseUrl::parse("http://127.0.0.1:9").unwrap(),
                     ))),
                     Arc::new(Unconnected),
+                    Arc::new(Quiet),
                 ),
                 |builder, toy| {
                     let plugin: Arc<dyn RuntimePlugin> = Arc::clone(toy) as _;
@@ -176,8 +177,12 @@ impl World {
 /// The name the person goes by in the thread's tests.
 static SAM: LazyLock<SpeakerName> = LazyLock::new(|| SpeakerName::new("Sam").unwrap());
 
+/// The apps Sam writes in, by the names the daemon gives them.
+static APPS: LazyLock<AppNames> = LazyLock::new(|| AppNames::new([("telegram", "Telegram")]));
+
 /// What the thread's tests answer a line with: settings never change it,
-/// and its turns never outgrow its window.
+/// her messages go in Messages alone, and its turns never outgrow its
+/// window.
 pub(crate) struct Fixed<'c> {
     pub(crate) model: &'c Model,
     pub(crate) host: &'c PluginHost,
@@ -187,6 +192,14 @@ pub(crate) struct Fixed<'c> {
 impl Mind for Fixed<'_> {
     fn person(&self) -> &SpeakerName {
         &SAM
+    }
+
+    fn apps(&self) -> &AppNames {
+        &APPS
+    }
+
+    fn apps_now(&self) -> AppNames {
+        AppNames::new([])
     }
 
     fn adapter(&self) -> &dyn RoleModelAdapter {
@@ -255,6 +268,7 @@ impl Chat {
                     line,
                     source: stamp("web"),
                     client_message_id: stamp(client_message_id),
+                    sent_at: Timestamp::now(),
                 },
                 &mut Fixed {
                     model: &self.model,
@@ -423,7 +437,7 @@ pub(crate) fn told(progress: &[Progress]) -> Vec<String> {
         .iter()
         .map(|progress| match progress {
             Progress::UserMessage { message, .. } => format!("user_message {}", message.text),
-            Progress::VisibleReply { message, draft } => {
+            Progress::VisibleReply { message, draft, .. } => {
                 format!("visible_reply {draft} {}", message.text)
             }
             Progress::ReplyDelta { draft, text } => format!("reply_delta {draft} {text}"),
@@ -607,6 +621,20 @@ impl Connections for Unconnected {
         _model: Option<&str>,
         _request: &TextCompletionRequest,
     ) -> Result<String, Unanswered> {
+        unreachable!("the thread's tests run no phone")
+    }
+}
+
+/// Her conversation as the thread's tests have it: they run no phone.
+#[derive(Debug)]
+struct Quiet;
+
+impl Chats for Quiet {
+    fn apps(&self) -> AppNames {
+        AppNames::new([])
+    }
+
+    fn newest(&self, _app: &str, _count: usize) -> Result<Vec<HistoryMessage>, String> {
         unreachable!("the thread's tests run no phone")
     }
 }

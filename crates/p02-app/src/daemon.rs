@@ -18,13 +18,15 @@ use p02_config::{
 use p02_contracts::{
     FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin, SetupCheck,
 };
-use p02_core::{ClientStamp, Conversation, ConversationId, VisibleMessageRole};
+use p02_core::{
+    AppNames, ClientStamp, Conversation, ConversationId, Timestamp, VisibleMessageRole,
+};
 use p02_plugins::{AppCatalog, AppInternet};
 use p02_shared::{BaseUrl, Identifier, error_sentence};
 use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
 use p02_wire::{
-    Answer, ChangeOutcome, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget, ConfigView,
-    ConfirmationAnswer, ConnectorBot, ConnectorBotsOutcome, ConnectorBotsRefusal,
+    Answer, BotState, ChangeOutcome, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget,
+    ConfigView, ConfirmationAnswer, ConnectorBot, ConnectorBotsOutcome, ConnectorBotsRefusal,
     ConnectorConfigView, ConnectorPresence, Event, Health, HistoryOutcome, OpenOutcome,
     OpenRefusal, PackagesHealth, PendingConfirmation, ProtocolVersion, StartOutcome, StartRefusal,
     SubmitOutcome, TurnRefusal,
@@ -186,16 +188,19 @@ pub struct OpenDaemonError {
 }
 
 /// What every actor of the daemon reads: the home, the settings' sections,
-/// the plugins, the waits, the model that stands in for every character's,
-/// where the OpenAI API, a ChatGPT plan's service and the Claude API are
-/// when the binary names a stand-in for them, the App Store's catalog her
-/// phone reads, the internet her apps reach, the home's sign-in to a
-/// ChatGPT plan, and the events.
+/// the plugins, the names of the apps the person writes in, the waits, the
+/// model that stands in for every character's, where the OpenAI API, a
+/// ChatGPT plan's service and the Claude API are when the binary names a
+/// stand-in for them, the App Store's catalog her phone reads, the internet
+/// her apps reach, the home's sign-in to a ChatGPT plan, and the events.
 #[derive(Debug)]
 pub(crate) struct World {
     pub(crate) home: Home,
     pub(crate) sections: Sections,
     pub(crate) plugins: Vec<Plugin>,
+    /// Messages, and each connector's app by the name its declaration
+    /// gives it.
+    pub(crate) apps: AppNames,
     pub(crate) durations: Durations,
     pub(crate) test_provider: Option<Arc<dyn RoleModelAdapter>>,
     pub(crate) openai_api: Option<BaseUrl>,
@@ -289,6 +294,14 @@ pub(crate) struct WeakDaemon(Weak<Inner>);
 impl WeakDaemon {
     pub(crate) fn upgrade(&self) -> Option<Daemon> {
         self.0.upgrade().map(|inner| Daemon { inner })
+    }
+
+    /// The apps that carry `character`'s messages now, as
+    /// [`Daemon::apps_of`] says while the daemon lasts: Messages alone once
+    /// it is gone.
+    pub(crate) fn apps_of(&self, character: &Identifier) -> AppNames {
+        self.upgrade()
+            .map_or_else(|| AppNames::new([]), |daemon| daemon.apps_of(character))
     }
 }
 
@@ -392,6 +405,11 @@ impl Daemon {
                             .map(|plugin| (plugin.manifest.clone(), plugin.check)),
                     ),
                     plugins,
+                    apps: AppNames::new(
+                        connectors()
+                            .iter()
+                            .map(|connector| (connector.id().as_str(), connector.display_name())),
+                    ),
                     durations,
                     test_provider,
                     openai_api,
@@ -518,10 +536,10 @@ impl Daemon {
     }
 
     /// Queues `message` in the inbox of the character its conversation
-    /// belongs to, and answers once it is there: she takes it in its turn,
-    /// and the stream tells how that ended. A line sent again is answered
-    /// as her inbox has it, queued already or taken as the message it
-    /// became, whether or not she takes lines now. Its routing and its
+    /// belongs to, sent now, and answers once it is there: she takes it in
+    /// its turn, and the stream tells how that ended. A line sent again is
+    /// answered as her inbox has it, queued already or taken as the message
+    /// it became, whether or not she takes lines now. Its routing and its
     /// place in her inbox are one step, which lines take in the order they
     /// came, so they reach her in that order; a new line for a character
     /// that is starting, or who waits for a model, waits for her, and one
@@ -539,6 +557,7 @@ impl Daemon {
             source: message.source,
             client_message_id: message.client_message_id,
             text: message.text,
+            sent_at: Timestamp::now(),
         };
         let home = self.inner.world.home.clone();
         let id = line.client_message_id.clone();
@@ -817,6 +836,31 @@ impl Daemon {
         }
 
         ConnectorBotsOutcome::Kept
+    }
+
+    /// The apps that carry `character`'s messages now: Messages, always,
+    /// then each connector that holds a bot of hers that is on, by its id
+    /// and its declared name. Whether an account is paired with the bot is
+    /// not asked.
+    pub(crate) fn apps_of(&self, character: &Identifier) -> AppNames {
+        let presence = self.inner.presence();
+        let hers = ConfigTarget::Character {
+            character_id: character.to_string(),
+        };
+
+        AppNames::new(
+            connectors()
+                .iter()
+                .filter(|connector| {
+                    presence.get(connector.id()).is_some_and(|connected| {
+                        connected
+                            .bots
+                            .iter()
+                            .any(|bot| bot.target == hers && bot.state == BotState::On)
+                    })
+                })
+                .map(|connector| (connector.id().as_str(), connector.display_name())),
+        )
     }
 
     /// Stops every character, for good: no start follows. A boot or a

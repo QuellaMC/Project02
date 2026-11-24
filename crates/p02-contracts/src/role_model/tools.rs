@@ -1,4 +1,4 @@
-use p02_core::VisibleText;
+use p02_core::{AppNames, VisibleText};
 use p02_shared::{
     BoundJsonError, Credentials, Identifier, JsonLimits, bound_json_object,
     redact_object_credentials,
@@ -36,25 +36,51 @@ pub struct ModelToolDefinition {
 }
 
 impl ModelToolDefinition {
-    /// The definition of [`SEND_MESSAGE`].
+    /// The definition of [`SEND_MESSAGE`] for her with `apps`, the apps she
+    /// has now: with more than one, a message may name the one it goes in.
     #[must_use]
-    pub fn send_message() -> Self {
+    pub fn send_message(apps: &AppNames) -> Self {
+        let mut properties = Map::from_iter([(
+            "text".to_owned(),
+            json!({"type": "string", "description": SEND_MESSAGE_TEXT_DESCRIPTION}),
+        )]);
+        let ids: Vec<&str> = apps.ids().collect();
+
+        if ids.len() > 1 {
+            properties.insert(
+                "app".to_owned(),
+                json!({"type": "string", "enum": ids, "description": app_description(apps)}),
+            );
+        }
+
         Self {
             name: SEND_MESSAGE.to_owned(),
             description: SEND_MESSAGE_DESCRIPTION.to_owned(),
             input_contract: Map::from_iter([
                 ("type".to_owned(), json!("object")),
-                (
-                    "properties".to_owned(),
-                    json!({
-                        "text": {"type": "string", "description": SEND_MESSAGE_TEXT_DESCRIPTION},
-                    }),
-                ),
+                ("properties".to_owned(), Value::Object(properties)),
                 ("required".to_owned(), json!(["text"])),
                 ("additionalProperties".to_owned(), json!(false)),
             ]),
         }
     }
+}
+
+/// What a message's `app` is, each of `apps` by its name and its id.
+fn app_description(apps: &AppNames) -> String {
+    let named: Vec<String> = apps
+        .ids()
+        .map(|app| format!("{} (\"{app}\")", apps.name(app)))
+        .collect();
+    let listed = match named.split_last() {
+        Some((last, rest)) if !rest.is_empty() => format!("{} or {last}", rest.join(", ")),
+        _ => named.concat(),
+    };
+
+    format!(
+        "The app to send it in: {listed}. Left out, it goes in the app the last message to you \
+         came in."
+    )
 }
 
 impl From<&ProvidedTool> for ModelToolDefinition {
@@ -67,12 +93,14 @@ impl From<&ProvidedTool> for ModelToolDefinition {
     }
 }
 
-/// One call a model round made: the character speaking, or a plugin tool.
+/// One call a model round made: the character speaking, in the app she
+/// named when she named one, or a plugin tool.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(into = "WireCall", try_from = "WireCall")]
 pub enum ModelToolCall {
     VisibleReply {
         text: VisibleText,
+        app: Option<String>,
     },
     Plugin {
         name: Identifier,
@@ -102,12 +130,12 @@ pub struct ParseModelToolCallError;
 pub(crate) struct BlankReplyError;
 
 impl ModelToolCall {
-    /// The character's reply as the model wrote it: what its reasoning
-    /// blocks leave, normalized, so what the model said, what the person
-    /// sees and what the log keeps are one text.
-    pub(crate) fn reply(written: &str) -> Result<Self, BlankReplyError> {
+    /// The character's reply as the model wrote it, in `app` when she named
+    /// one: what its reasoning blocks leave, normalized, so what the model
+    /// said, what the person sees and what the log keeps are one text.
+    pub(crate) fn reply(written: &str, app: Option<String>) -> Result<Self, BlankReplyError> {
         VisibleText::normalize(&scrub_reasoning_blocks(written))
-            .map(|text| Self::VisibleReply { text })
+            .map(|text| Self::VisibleReply { text, app })
             .map_err(|_| BlankReplyError)
     }
 
@@ -148,9 +176,11 @@ impl ModelToolCall {
 impl From<ModelToolCall> for WireCall {
     fn from(call: ModelToolCall) -> Self {
         match call {
-            ModelToolCall::VisibleReply { text } => Self {
+            ModelToolCall::VisibleReply { text, app } => Self {
                 name: RECORDED_REPLY.to_owned(),
-                input: Map::from_iter([("text".to_owned(), Value::from(text.as_str()))]),
+                input: std::iter::once(("text".to_owned(), Value::from(text.as_str())))
+                    .chain(app.map(|app| ("app".to_owned(), Value::from(app))))
+                    .collect(),
             },
             ModelToolCall::Plugin { name, input } => Self {
                 name: name.to_string(),
@@ -178,7 +208,14 @@ impl TryFrom<WireCall> for ModelToolCall {
             .get("text")
             .and_then(Value::as_str)
             .and_then(|text| VisibleText::normalize(text).ok())
-            .map(|text| Self::VisibleReply { text })
+            .map(|text| Self::VisibleReply {
+                text,
+                app: call
+                    .input
+                    .get("app")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
+            })
             .ok_or(ParseModelToolCallError)
     }
 }
@@ -282,9 +319,11 @@ mod tests {
     #[test]
     fn a_model_tool_call_is_a_name_and_an_input_on_the_record() {
         let reply = json!({"name": "visible_reply", "input": {"text": "Hello."}});
+        let sent_in =
+            json!({"name": "visible_reply", "input": {"text": "Hello.", "app": "telegram"}});
         let plugin = json!({"name": "memory.search", "input": {"query": "Mira"}});
 
-        for call in [&reply, &plugin] {
+        for call in [&reply, &sent_in, &plugin] {
             let parsed: ModelToolCall = serde_json::from_value(call.clone()).unwrap();
 
             assert_eq!(&serde_json::to_value(&parsed).unwrap(), call);

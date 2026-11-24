@@ -5,7 +5,7 @@
 use p02_phone::{Now, Phone, SetRing};
 use serde_json::{Value, json};
 
-use crate::support::{Files, in_zone, millis, took};
+use crate::support::{Files, in_zone, millis, quiet, took};
 
 /// Wednesday 11 November 2026, 9:41 AM in Los Angeles.
 const MORNING: &str = "2026-11-11T17:41:00.000Z";
@@ -29,7 +29,12 @@ fn act(files: &mut Files, action: &str, given: &Value, moment: &str) -> Result<V
 
 /// What the Clock's `view` shows at `moment`.
 fn look(files: &Files, view: &str, moment: &str) -> Value {
-    serde_json::to_value(phone().look(files, "clock", view, &at(moment)).unwrap()).unwrap()
+    serde_json::to_value(
+        phone()
+            .look(files, &quiet(), "clock", view, &at(moment))
+            .unwrap(),
+    )
+    .unwrap()
 }
 
 /// The rings set on the phone, soonest first, as the Clock's file keeps
@@ -68,13 +73,13 @@ fn nothing(text: &str) -> Value {
 
 #[test]
 fn the_bundled_phone_holds_the_clock_which_opens_on_its_alarms() {
-    let on_phone = phone().apps(&Files::default()).unwrap();
-    let [listed, store] = on_phone.apps.as_slice() else {
-        panic!("the bundled phone holds the Clock and then the App Store");
+    let on_phone = phone().apps(&Files::default(), &quiet()).unwrap();
+    let [_, listed, store] = on_phone.apps.as_slice() else {
+        panic!("the bundled phone holds Messages, the Clock and then the App Store");
     };
 
     assert_eq!(store.id.as_str(), "store");
-    let clock = phone().app(&Files::default(), "clock").unwrap();
+    let clock = phone().app(&Files::default(), &quiet(), "clock").unwrap();
 
     assert_eq!(
         (
@@ -129,7 +134,7 @@ fn the_bundled_phone_holds_the_clock_which_opens_on_its_alarms() {
     );
 
     let opened = phone()
-        .open(&mut Files::default(), "clock", None, &at(MORNING))
+        .open(&mut Files::default(), &quiet(), "clock", None, &at(MORNING))
         .unwrap();
 
     assert_eq!(opened.view.as_str(), "alarms");

@@ -23,6 +23,7 @@ import {
   snapshot,
 } from './harness/home.ts';
 import {
+  headed,
   reply,
   responseStream,
   startModelServer,
@@ -369,7 +370,12 @@ it("chatgpt.plan-turn: a home on a ChatGPT plan answers a turn through the plan'
   expect(input.at(-1)).toEqual({
     type: 'message',
     role: 'user',
-    content: [{type: 'input_text', text: 'Hello?'}],
+    content: [
+      {
+        type: 'input_text',
+        text: expect.stringMatching(headed('Hello?')) as string,
+      },
+    ],
   });
 });
 

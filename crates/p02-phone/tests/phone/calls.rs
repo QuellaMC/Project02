@@ -7,7 +7,7 @@ use p02_phone::{Phone, PhoneError};
 use p02_wire::Screen;
 use serde_json::{Value, json};
 
-use crate::support::{Files, actions, app, bounded, now, took};
+use crate::support::{Files, actions, app, bounded, now, quiet, took};
 
 /// Notes, which keeps a list of what she writes down.
 fn notes() -> Phone {
@@ -69,7 +69,12 @@ fn an_action_runs_on_its_input_and_what_it_saved_is_there_at_the_next_call_and_i
     };
 
     assert_eq!(
-        serde_json::to_value(phone.look(&files, "notes", "all", &now()).unwrap()).unwrap(),
+        serde_json::to_value(
+            phone
+                .look(&files, &quiet(), "notes", "all", &now())
+                .unwrap()
+        )
+        .unwrap(),
         json!({"items": [{"kind": "text", "text": "No notes"}]})
     );
 
@@ -108,12 +113,14 @@ fn input_is_judged_before_the_script_sees_it_and_what_is_not_there_is_refused() 
         ),
         (
             phone
-                .open(&mut files, "notes", Some("trash"), &now())
+                .open(&mut files, &quiet(), "notes", Some("trash"), &now())
                 .unwrap_err(),
             "Notes has no view \"trash\"",
         ),
         (
-            phone.open(&mut files, "clock", None, &now()).unwrap_err(),
+            phone
+                .open(&mut files, &quiet(), "clock", None, &now())
+                .unwrap_err(),
             "there is no app \"clock\" on the phone",
         ),
     ] {
@@ -259,7 +266,7 @@ fn a_store_that_fails_is_the_stores_failure() {
     let phone = notes();
 
     assert!(matches!(
-        phone.open(&mut Unreadable, "notes", None, &now()),
+        phone.open(&mut Unreadable, &quiet(), "notes", None, &now()),
         Err(PhoneError::Store(StoreError::Store(_)))
     ));
     assert!(matches!(

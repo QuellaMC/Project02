@@ -2,16 +2,18 @@
  * Everything her phone's window shows, as one value, and every change to
  * it as a pure function of the previous value and one input: the daemon's
  * health, a read of her phone, a read of a view the person opened, the
- * person looking around, the stream's coming and going and what it says of
- * confirmations, what the window it is drawn in says of itself. Her
- * phone's session applies them and React reads the value; a reducer that
- * changes nothing returns the value it was given. Nothing here touches the
- * DOM or reads a clock, so the window's rules are tested in Node.
+ * person looking around, her conversation as the chat reads it, the
+ * stream's coming and going and what it says of confirmations and of her
+ * messages, what the window it is drawn in says of itself. Her phone's
+ * session applies them and React reads the value; a reducer that changes
+ * nothing returns the value it was given. Nothing here touches the DOM or
+ * reads a clock, so the window's rules are tested in Node.
  */
 import type {
   GatewayEvent,
   GatewayHealth,
   GatewayReady,
+  HistoryOutcome,
   LiveReading,
   PendingConfirmation,
   PhoneApp,
@@ -24,7 +26,17 @@ import type {
   ScreenRow,
 } from '@project02/wire/contract';
 import {installAskOf} from './ask-words.ts';
-import type {Connection} from './store.ts';
+import {
+  committed,
+  setAside,
+  threadFor,
+  threadRead,
+  threadUnread,
+  type Connection,
+  type Message,
+  type Opened,
+  type Thread,
+} from './store.ts';
 
 /** Her phone as a read gave it. */
 export type HerPhone = Extract<PhoneOutcome, {status: 'ok'}>;
@@ -91,6 +103,14 @@ export type PhoneState = {
    * a window with a frame of its own, as a browser's popup.
    */
   readonly frame?: {readonly pinned: boolean};
+  /**
+   * Her conversation with the person, as the chat reads it: its newest
+   * page and what the stream committed to it since, once an app messages
+   * come in was on screen; no earlier page is read.
+   */
+  readonly thread?: Thread | undefined;
+  /** Why her conversation could not be opened, in the daemon's sentence; gone once it is. */
+  readonly unopened?: string | undefined;
 };
 
 /** What her phone's screen draws now. */
@@ -108,6 +128,19 @@ export type OnScreen =
       readonly fresh: ReadonlySet<string>;
       /** The apps she waits on the person to install, by their ids, which a row or a header of that id says. */
       readonly waiting: ReadonlySet<string>;
+    }
+  /** An app messages come in, as her phone shows it: what went through it, with the person. */
+  | {
+      readonly kind: 'thread';
+      readonly app: PhoneApp;
+      /** Her messages and the person's that went through it, oldest first. */
+      readonly messages: readonly Message[];
+      /** The person, by the name their newest message goes by; none before they wrote. */
+      readonly person?: string | undefined;
+      /** Why her conversation cannot be shown, in a sentence. */
+      readonly message?: string | undefined;
+      /** Which page of her conversation this is: it changes as a page lands, and when the app does. */
+      readonly page: string;
     };
 
 /** The line under her phone, lit while what it says is under a minute old. */
@@ -132,9 +165,10 @@ export function initialPhoneState(characterId: string): PhoneState {
 }
 
 /**
- * Every `ready`: the stream is live, health says who she is, and what she
+ * Every `ready`: the stream is live, health says who she is, what she
  * asked to install and waits on the person for is what the confirmations
- * waiting now say.
+ * waiting now say, and her conversation, as the chat's thread is, is set
+ * aside for its newest page, read next.
  */
 export function phoneReady(
   state: PhoneState,
@@ -143,10 +177,87 @@ export function phoneReady(
   return snapshot.confirmations.reduce(
     askRaised,
     healthSaid(
-      {...state, connection: {status: 'live'}, asks: noAsks},
+      {
+        ...state,
+        connection: {status: 'live'},
+        asks: noAsks,
+        thread: state.thread === undefined ? undefined : setAside(state.thread),
+      },
       snapshot.health,
     ),
   );
+}
+
+/** Her conversation opened for the window, waiting for its newest page. */
+export function conversationOpened(
+  state: PhoneState,
+  opened: Opened,
+): PhoneState {
+  return {
+    ...state,
+    thread: threadFor(state.thread, opened),
+    unopened: undefined,
+  };
+}
+
+/** Her conversation could not be opened: the window says why where her messages would be. */
+export function conversationUnopened(
+  state: PhoneState,
+  message: string,
+): PhoneState {
+  return state.unopened === message ? state : {...state, unopened: message};
+}
+
+/**
+ * The newest page of her conversation `conversationId`, as the chat's
+ * thread takes one; a page of another conversation is let go.
+ */
+export function conversationRead(
+  state: PhoneState,
+  conversationId: string,
+  outcome: HistoryOutcome,
+): PhoneState {
+  return withConversation(state, conversationId, thread =>
+    threadRead(thread, {}, outcome),
+  );
+}
+
+/** Her conversation's newest page could not be read: the window says why where her messages would be. */
+export function conversationUnread(
+  state: PhoneState,
+  conversationId: string,
+  message: string,
+): PhoneState {
+  return withConversation(state, conversationId, thread =>
+    threadUnread(thread, message),
+  );
+}
+
+/** A step of a turn: a message committed to her conversation joins it, as it joins the chat's thread. */
+export function conversationProgressed(
+  state: PhoneState,
+  event: Extract<GatewayEvent, {kind: 'turn_progress'}>,
+): PhoneState {
+  return withConversation(state, event.conversationId, thread =>
+    committed(thread, event.progress),
+  );
+}
+
+/** Her conversation, when it is `conversationId`, as `update` makes it. */
+function withConversation(
+  state: PhoneState,
+  conversationId: string,
+  update: (thread: Thread) => Thread,
+): PhoneState {
+  const {thread} = state;
+
+  if (thread?.conversationId !== conversationId) {
+    return state;
+  }
+
+  const next = update(thread);
+
+  return next === thread ? state : {...state, thread: next};
 }
 
 /**
@@ -293,8 +404,8 @@ export function screenRead(
 /**
  * What her phone's screen draws now: over everything, the soonest of what
  * rings; else what the window shows, her home screen when that is an app
- * no longer on her phone, and on a view, the apps she waits on the person
- * to install.
+ * no longer on her phone, an app messages come in as its thread, and on
+ * another app's view, the apps she waits on the person to install.
  */
 export function screenOf(state: PhoneState): OnScreen {
   const {phone, shows} = state;
@@ -314,12 +425,17 @@ export function screenOf(state: PhoneState): OnScreen {
   if (shows.kind === 'hers') {
     return phone.front === undefined
       ? {kind: 'home', apps: phone.apps}
-      : viewOn(phone, phone.front, state.fresh, waiting);
+      : viewOn(state, phone, phone.front, state.fresh, waiting);
   }
 
   return shows.kind === 'home'
     ? {kind: 'home', apps: phone.apps}
-    : viewOn(phone, shows, noRows, waiting);
+    : viewOn(state, phone, shows, noRows, waiting);
+}
+
+/** Whether her phone says the app `appId` is one messages come in, which the window draws from her conversation. */
+export function isMessaging(state: PhoneState, appId: string): boolean {
+  return state.phone?.apps.find(app => app.id === appId)?.messaging === true;
 }
 
 /**
@@ -434,8 +550,12 @@ function underneath(state: PhoneState): Look {
     : {kind: 'view', appId: front.appId, viewId: front.viewId};
 }
 
-/** A view of one of her apps; her home screen when the app is not on her phone. */
+/**
+ * A view of one of her apps, an app messages come in as its thread; her
+ * home screen when the app is not on her phone.
+ */
 function viewOn(
+  state: PhoneState,
   phone: HerPhone,
   view: ShownView,
   fresh: ReadonlySet<string>,
@@ -443,8 +563,12 @@ function viewOn(
 ): OnScreen {
   const app = phone.apps.find(candidate => candidate.id === view.appId);
 
-  return app === undefined
-    ? {kind: 'home', apps: phone.apps}
+  if (app === undefined) {
+    return {kind: 'home', apps: phone.apps};
+  }
+
+  return app.messaging
+    ? threadOn(state, app)
     : {
         kind: 'view',
         app,
@@ -454,6 +578,26 @@ function viewOn(
         fresh,
         waiting,
       };
+}
+
+/**
+ * `app`, an app messages come in, as her phone shows it: what went through
+ * it of her conversation as the window holds it, the person by the name
+ * their newest message goes by, and why her conversation cannot be shown,
+ * when it cannot.
+ */
+function threadOn(state: PhoneState, app: PhoneApp): OnScreen {
+  const {thread} = state;
+  const said = [...(thread?.stale ?? []), ...(thread?.messages ?? [])];
+
+  return {
+    kind: 'thread',
+    app,
+    messages: said.filter(message => message.app === app.id),
+    person: said.findLast(message => message.role === 'user')?.speakerName,
+    message: state.unopened ?? thread?.unread,
+    page: `${app.id} ${thread?.stale === undefined ? 'read' : 'reading'}`,
+  };
 }
 
 /**

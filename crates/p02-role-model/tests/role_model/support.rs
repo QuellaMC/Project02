@@ -6,7 +6,7 @@ use p02_contracts::{
     ChatCompletionTool, ChatMessage, ChatToolFunction, ConversationTurn, DecisionContext,
     PluginToolDefinition, ProvidedTool, ReplyDelta, ReplyDraft, ToolInputContract,
 };
-use p02_core::{EventId, EventIdentity, SpeakerName, Timestamp, TraceId};
+use p02_core::{AppNames, EventId, EventIdentity, SpeakerName, Timestamp, TraceId};
 use p02_shared::Identifier;
 use serde_json::json;
 
@@ -36,9 +36,13 @@ pub(crate) fn event() -> EventIdentity {
 }
 
 /// A context for a person going by the name they have until they choose
-/// one.
+/// one, who writes to her in Messages alone.
 pub(crate) fn context() -> DecisionContext {
-    DecisionContext::new(SpeakerName::new("You").unwrap())
+    DecisionContext::new(
+        SpeakerName::new("You").unwrap(),
+        AppNames::new([]),
+        AppNames::new([]),
+    )
 }
 
 /// A tool `name` of `plugin`, taking anything an object holds.
@@ -91,7 +95,9 @@ pub(crate) fn turn(index: u64, line: &str, reply: &str) -> ConversationTurn {
             "speakerId": "local-user",
             "speakerName": "You",
             "text": line,
+            "sentAt": "2026-06-14T00:00:00.000Z",
         },
+        "source": "web",
         "toolRounds": [],
         "finalReplies": [{
             "id": format!("conv_mira.1:message-{}", index * 2),
@@ -99,6 +105,7 @@ pub(crate) fn turn(index: u64, line: &str, reply: &str) -> ConversationTurn {
             "speakerId": "mira",
             "speakerName": "Mira",
             "text": reply,
+            "sentAt": "2026-06-14T00:00:00.000Z",
         }],
     }))
     .unwrap()

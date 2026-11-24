@@ -8,8 +8,9 @@ use std::time::Duration;
 
 use jiff::tz::TimeZone;
 use p02_contracts::{LeasedFiles, StoreError};
-use p02_core::Timestamp;
-use p02_phone::{Acted, Acting, App, Now, Phone, PhoneError};
+use p02_core::{AppNames, Timestamp};
+use p02_phone::{Acted, Acting, App, Chats, Now, Phone, PhoneError};
+use p02_wire::HistoryMessage;
 use serde_json::{Map, Value, json};
 
 /// Far past every limit a call runs under.
@@ -68,6 +69,39 @@ impl LeasedFiles for Files {
         self.texts.remove(path);
         self.writes += 1;
         Ok(())
+    }
+}
+
+/// The conversation between her and the person as a test has it: the apps
+/// that carry her messages, and every message of it, oldest first.
+#[derive(Debug)]
+pub(crate) struct Talk {
+    pub(crate) apps: AppNames,
+    pub(crate) messages: Vec<HistoryMessage>,
+}
+
+impl Chats for Talk {
+    fn apps(&self) -> AppNames {
+        self.apps.clone()
+    }
+
+    fn newest(&self, app: &str, count: usize) -> Result<Vec<HistoryMessage>, String> {
+        let there: Vec<HistoryMessage> = self
+            .messages
+            .iter()
+            .filter(|message| message.app == app)
+            .cloned()
+            .collect();
+
+        Ok(there[there.len().saturating_sub(count)..].to_vec())
+    }
+}
+
+/// Messages alone carries her messages, and nothing was said in it yet.
+pub(crate) fn quiet() -> Talk {
+    Talk {
+        apps: AppNames::new([]),
+        messages: Vec::new(),
     }
 }
 
@@ -171,7 +205,7 @@ pub(crate) fn took(
     now: &Now,
 ) -> Result<Acted, PhoneError> {
     phone
-        .act(files, app, action, &input(given), &[], now)
+        .act(files, &quiet(), app, action, &input(given), &[], now)
         .map(|acting| match acting {
             Acting::Acted(acted) => acted,
             Acting::Asks(ask) => panic!("{app} asks for {ask:?}"),

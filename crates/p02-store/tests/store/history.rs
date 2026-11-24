@@ -67,7 +67,11 @@ fn a_log_makes_its_session_through_the_core_gate_numbering_after_the_last_messag
     );
     assert_eq!(
         session
-            .user_message(UserLine::new("Five?").unwrap(), sam())
+            .user_message(
+                UserLine::new("Five?").unwrap(),
+                sam(),
+                Timestamp::new("2026-10-21T09:00:00.000Z").unwrap()
+            )
             .id
             .number(),
         NonZeroU64::new(5).unwrap()

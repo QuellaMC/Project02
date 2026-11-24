@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 
 /// A visible message committed: the person's line, stamped by the client
 /// that carried it, or a character's reply, named by the round that said
-/// it.
+/// it, with the app it went in.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(try_from = "WireCommit", into = "WireCommit")]
 pub struct MessageCommitted {
@@ -21,8 +21,10 @@ enum Said {
         source: Option<ClientStamp>,
         client_message_id: Option<ClientStamp>,
     },
+    /// A reply an earlier build wrote names no app.
     ByCharacter {
         round: NonZeroU32,
+        app: Option<String>,
         evidence: Vec<Evidence>,
     },
 }
@@ -36,6 +38,8 @@ struct WireCommit {
     source: Option<ClientStamp>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     client_message_id: Option<ClientStamp>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    app: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     round: Option<NonZeroU32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -60,13 +64,22 @@ impl MessageCommitted {
         }
     }
 
-    /// A character's reply, `message`, said in round `round`, with the
-    /// evidence that came with it.
+    /// A character's reply, `message`, said in round `round` and sent in
+    /// the app `app`, with the evidence that came with it.
     #[must_use]
-    pub fn character(message: VisibleMessage, round: NonZeroU32, evidence: Vec<Evidence>) -> Self {
+    pub fn character(
+        message: VisibleMessage,
+        round: NonZeroU32,
+        app: String,
+        evidence: Vec<Evidence>,
+    ) -> Self {
         Self {
             message,
-            said: Said::ByCharacter { round, evidence },
+            said: Said::ByCharacter {
+                round,
+                app: Some(app),
+                evidence,
+            },
         }
     }
 
@@ -80,6 +93,17 @@ impl MessageCommitted {
     pub fn round(&self) -> Option<NonZeroU32> {
         match &self.said {
             Said::ByCharacter { round, .. } => Some(*round),
+            Said::ByPerson { .. } => None,
+        }
+    }
+
+    /// The id of the app a character's reply went in; none for the
+    /// person's line, whose stamp tells its app, and for a reply an earlier
+    /// build wrote.
+    #[must_use]
+    pub fn app(&self) -> Option<&str> {
+        match &self.said {
+            Said::ByCharacter { app, .. } => app.as_deref(),
             Said::ByPerson { .. } => None,
         }
     }
@@ -115,9 +139,14 @@ impl TryFrom<WireCommit> for MessageCommitted {
                     client_message_id: wire.client_message_id,
                 },
             },
-            (VisibleMessageRole::Character, Some(round)) => {
-                Self::character(wire.visible_message, round, wire.runtime_plugin_evidence)
-            }
+            (VisibleMessageRole::Character, Some(round)) => Self {
+                message: wire.visible_message,
+                said: Said::ByCharacter {
+                    round,
+                    app: wire.app,
+                    evidence: wire.runtime_plugin_evidence,
+                },
+            },
             (VisibleMessageRole::Character, None) => {
                 return Err("a character's reply names the round that said it");
             }
@@ -138,14 +167,20 @@ impl From<MessageCommitted> for WireCommit {
                 visible_message: commit.message,
                 source,
                 client_message_id,
+                app: None,
                 round: None,
                 runtime_plugin_evidence: Vec::new(),
             },
-            Said::ByCharacter { round, evidence } => Self {
+            Said::ByCharacter {
+                round,
+                app,
+                evidence,
+            } => Self {
                 visible_message_ids,
                 visible_message: commit.message,
                 source: None,
                 client_message_id: None,
+                app,
                 round: Some(round),
                 runtime_plugin_evidence: evidence,
             },

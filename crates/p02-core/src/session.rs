@@ -2,6 +2,7 @@ use std::num::NonZeroU64;
 
 use p02_shared::Identifier;
 
+use crate::event::Timestamp;
 use crate::id::{MessageId, SessionId};
 use crate::message::{
     LOCAL_USER, SpeakerName, UserLine, VisibleMessage, VisibleMessageRole, VisibleText,
@@ -51,28 +52,41 @@ impl Session {
         &self.messages
     }
 
-    /// The person's line, said under `name`, as the session's next message.
+    /// The person's line, said under `name` and sent at `sent_at`, as the
+    /// session's next message.
     #[must_use]
-    pub fn user_message(&self, line: UserLine, name: SpeakerName) -> VisibleMessage {
+    pub fn user_message(
+        &self,
+        line: UserLine,
+        name: SpeakerName,
+        sent_at: Timestamp,
+    ) -> VisibleMessage {
         VisibleMessage {
             id: self.next_id(),
             role: VisibleMessageRole::User,
             speaker_id: LOCAL_USER.clone(),
             speaker_name: name,
             text: line.into(),
+            sent_at,
         }
     }
 
-    /// The character's reply, said under `name`, as the session's next
-    /// message.
+    /// The character's reply, said under `name` and sent at `sent_at`, as
+    /// the session's next message.
     #[must_use]
-    pub fn character_message(&self, text: VisibleText, name: SpeakerName) -> VisibleMessage {
+    pub fn character_message(
+        &self,
+        text: VisibleText,
+        name: SpeakerName,
+        sent_at: Timestamp,
+    ) -> VisibleMessage {
         VisibleMessage {
             id: self.next_id(),
             role: VisibleMessageRole::Character,
             speaker_id: self.character.clone(),
             speaker_name: name,
             text,
+            sent_at,
         }
     }
 
@@ -140,14 +154,18 @@ mod tests {
         SpeakerName::new(text).unwrap()
     }
 
+    fn noon() -> Timestamp {
+        Timestamp::new("2026-06-15T12:00:00.000Z").unwrap()
+    }
+
     /// Sam's line `text`, as the session's next message.
     fn said(session: &Session, text: &str) -> VisibleMessage {
-        session.user_message(UserLine::new(text).unwrap(), name("Sam"))
+        session.user_message(UserLine::new(text).unwrap(), name("Sam"), noon())
     }
 
     /// Mira's reply `text`, as the session's next message.
     fn replied(session: &Session, text: &str) -> VisibleMessage {
-        session.character_message(VisibleText::normalize(text).unwrap(), name("Mira"))
+        session.character_message(VisibleText::normalize(text).unwrap(), name("Mira"), noon())
     }
 
     fn numbered(mut message: VisibleMessage, number: u64) -> VisibleMessage {

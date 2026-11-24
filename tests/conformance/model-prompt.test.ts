@@ -6,13 +6,14 @@ import {characterJson, configJson, createHome} from './harness/home.ts';
 import {
   calling,
   completion,
+  headed,
   messagesOf,
   reply,
   startModelServer,
   type ChatMessage,
   type ModelRequest,
 } from './harness/model-server.ts';
-import {converse, wireOf} from './harness/wire.ts';
+import {conversationOf, converse, sender, wireOf} from './harness/wire.ts';
 
 async function stop(daemon: Daemon): Promise<void> {
   daemon.signal('SIGINT');
@@ -103,12 +104,72 @@ it("model.prompt-frames: the model is shown her persona's sections and the perso
   expect(curated?.content).toContain('Prefers tea.');
   expect(runtime?.content).toMatch(/\n- Today is /u);
   expect(after.slice(4)).toMatchObject([
-    {role: 'user', content: 'I like tea.'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('I like tea.')) as string,
+    },
     {role: 'assistant'},
     {role: 'tool'},
     {role: 'assistant', content: 'Noted.'},
-    {role: 'user', content: 'Back again.'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Back again.')) as string,
+    },
   ]);
+});
+
+it("model.line-headings: each of the person's lines reaches her under the heading of the app it came in and when it was sent, Messages for a line from the page and Telegram for one stamped by a Telegram bot, and her persona's tail tells her every message shows both", async () => {
+  const model = await startModelServer();
+  const wire = wireOf(
+    await startDaemon(
+      createHome({'config.json': configJson({project02: model.settings})}),
+    ),
+  );
+  const say = await converse(wire, 'mira');
+  const send = await sender(wire);
+  const {conversationId} = await conversationOf(wire, 'mira');
+
+  model.answer(reply('Hello.'), reply('Hello again.'));
+  await say('From the page.', 'page');
+  await send({
+    conversationId,
+    text: 'From Telegram.',
+    source: 'telegram:mira_bot',
+    clientMessageId: 'telegram',
+  });
+
+  const [fromPage, fromTelegram] = model.requests.map(request =>
+    messagesOf(request),
+  );
+
+  expect(fromPage?.at(-1)?.content).toMatch(headed('From the page.'));
+  expect(fromTelegram?.at(-1)?.content).toMatch(
+    headed('From Telegram.', 'Telegram'),
+  );
+  expect(fromPage?.[0]?.content).toContain(
+    ' writes to you, and you write back. Every message to you shows the app it came in and its time. Only what ',
+  );
+});
+
+it('model.line-heading-replayed: a line is replayed on her next turn under the very heading she answered it under, byte for byte', async () => {
+  const model = await startModelServer();
+  const say = await converse(
+    wireOf(
+      await startDaemon(
+        createHome({'config.json': configJson({project02: model.settings})}),
+      ),
+    ),
+    'mira',
+  );
+
+  model.answer(reply('Noted.'), reply('Still noted.'));
+  await say('Remember this.', 'first');
+  await say('And this.', 'second');
+
+  const answered = messagesOf(model.requests[0]).at(-1)?.content;
+
+  expect(answered).toMatch(headed('Remember this.'));
+  expect(conversationIn(model.requests[1])[0]?.content).toBe(answered);
 });
 
 it("model.history-replay: after the daemon dies in the middle of a turn, her next turn replays that turn's line and each call that finished with its result, and drops the call that never did", async () => {
@@ -164,14 +225,20 @@ it("model.history-replay: after the daemon dies in the middle of a turn, her nex
   const replayed = conversationIn(model.requests.at(-1));
 
   expect(replayed).toMatchObject([
-    {role: 'user', content: 'Interrupted?'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Interrupted?')) as string,
+    },
     {
       role: 'assistant',
       content: null,
       tool_calls: [{function: {name: 'runtime_plugin_list'}}],
     },
     {role: 'tool'},
-    {role: 'user', content: 'Still there?'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Still there?')) as string,
+    },
   ]);
   expect(replayed[2]?.tool_call_id).toBe(replayed[1]?.tool_calls?.[0]?.id);
 });
@@ -190,8 +257,9 @@ it('model.continued-session-summary: once a session continues, its summary is a 
     ),
     'mira',
   );
-  // About 70 tokens a turn: the third outgrows the 200-token half of the
-  // window, and only the newest fits the quarter a new segment carries.
+  // About 80 tokens a turn, its line's heading counted: the third outgrows
+  // the 200-token half of the window, and only the newest fits the quarter
+  // a new segment carries.
   const line = (word: string) => `${word} ${'.'.repeat(200)}`;
 
   model.answer(
@@ -217,9 +285,15 @@ it('model.continued-session-summary: once a session continues, its summary is a 
         /^<earlier>\n.*\nWe spoke of one and two\.\n<\/earlier>$/su,
       ) as string,
     },
-    {role: 'user', content: line('Three')},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed(line('Three'))) as string,
+    },
     {role: 'assistant', content: 'Three.'},
-    {role: 'user', content: line('Four')},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed(line('Four'))) as string,
+    },
   ]);
 });
 
@@ -249,8 +323,8 @@ it('model.summarizer-fallback: a summarizer that fails leaves her turn completed
   await say('Last line.', 'last');
   expect(
     earlierConversation(
-      model.requests.find(
-        request => messagesOf(request).at(-1)?.content === 'Last line.',
+      model.requests.find(request =>
+        headed('Last line.').test(messagesOf(request).at(-1)?.content ?? ''),
       ),
     ),
   ).toContain('First line.');

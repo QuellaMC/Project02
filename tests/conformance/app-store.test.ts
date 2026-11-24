@@ -162,7 +162,7 @@ it('store.look-through: before she opens the App Store a look at it says so; her
   await say('Anything good in the App Store?', 'look');
 
   expect(systemLines(model.requests[0])).toContain(
-    '- Your phone. On it: Clock ("clock") — Alarms, timers, and the time anywhere; Notes ("notes") — Notes, quietly; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
+    '- Your phone. You and Sam write to each other on it. On it: Messages ("messages") — Your messages; Clock ("clock") — Alarms, timers, and the time anywhere; Notes ("notes") — Notes, quietly; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
   );
   expect(toolResults(model.requests[2])).toMatchObject([
     {
@@ -293,7 +293,11 @@ it('store.install-approved: phone_install asks the person first, its preview say
       },
     },
   });
-  expect(appsOf(await wire.phone('mira'))).toEqual(['clock', 'store']);
+  expect(appsOf(await wire.phone('mira'))).toEqual([
+    'messages',
+    'clock',
+    'store',
+  ]);
   expect(await wire.answer(confirmationId(asked), 'approved')).toEqual({
     status: 'answered',
   });
@@ -302,6 +306,7 @@ it('store.install-approved: phone_install asks the person first, its preview say
     messages: [{}, {text: 'It is on my phone now.'}],
   });
   expect(appsOf(await wire.phone('mira'))).toEqual([
+    'messages',
     'clock',
     'reminders',
     'store',
@@ -414,7 +419,12 @@ it("store.not-installed: a denied ask, whose preview says the app reaches the in
       'Tool "phone.install" was denied by the user, so it did nothing.',
     ),
   ]);
-  expect(appsOf(await wire.phone('mira'))).toEqual(['clock', 'notes', 'store']);
+  expect(appsOf(await wire.phone('mira'))).toEqual([
+    'messages',
+    'clock',
+    'notes',
+    'store',
+  ]);
 
   model.answer(
     calling(
@@ -501,6 +511,7 @@ it("store.her-apps: a client reads each of her apps with the line she knows it b
   expect(await wire.phone('mira')).toMatchObject({
     status: 'ok',
     apps: [
+      {id: 'messages'},
       listed(
         'clock',
         'Alarms, timers, and the time anywhere',
@@ -579,6 +590,7 @@ it('store.person-gives: the person gives her an app of the App Store and nobody 
       summary: 'Things to do, on a day and time',
       version: '1.0.0',
       source: 'catalog',
+      messaging: false,
       icon: 'list',
       tint: 'orange',
       wakes: true,
@@ -600,7 +612,7 @@ it('store.person-gives: the person gives her an app of the App Store and nobody 
   );
   await say('Remind me to call the dentist.', 'dentist');
   expect(systemLines(model.requests[0])).toContain(
-    '- Your phone. On it: Clock ("clock") — Alarms, timers, and the time anywhere; Reminders ("reminders") — Things to do, on a day and time; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
+    '- Your phone. You and Sam write to each other on it. On it: Messages ("messages") — Your messages; Clock ("clock") — Alarms, timers, and the time anywhere; Reminders ("reminders") — Things to do, on a day and time; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
   );
   expect(toolResults(model.requests[1])).toMatchObject([
     {
@@ -643,7 +655,12 @@ it("store.from-a-file: the person adds an app from a file nobody read: its previ
   const file = `${fileOf(notes)}// ${'x'.repeat(70 * 1024)}\n`;
   const withNotes = (version: string, source: string) => ({
     status: 'ok',
-    apps: [{id: 'clock'}, {id: 'notes', version, source}, {id: 'store'}],
+    apps: [
+      {id: 'messages'},
+      {id: 'clock'},
+      {id: 'notes', version, source},
+      {id: 'store'},
+    ],
   });
   const named = (manifest: Partial<App['manifest']>) =>
     fileOf({...notes, manifest: {...notes.manifest, ...manifest}});
@@ -743,7 +760,7 @@ it('store.remove: the person removes an app installed on her phone: it is gone f
 
   const removed = await wire.phone('mira');
 
-  expect(appsOf(removed)).toEqual(['clock', 'store']);
+  expect(appsOf(removed)).toEqual(['messages', 'clock', 'store']);
   expect(removed).not.toHaveProperty('front');
   expect(readdirSync(join(phone, 'apps'))).toEqual([]);
 

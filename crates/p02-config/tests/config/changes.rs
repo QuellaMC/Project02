@@ -98,7 +98,7 @@ fn a_document_is_written_indented_with_a_trailing_newline_its_sections_in_their_
             &home(),
             json!({
                 "kind": "section_field_set", "namespace": "connectors", "id": "telegram",
-                "field": "mirror", "value": false,
+                "field": "pairedUsers", "value": {"4242": "Alice"},
             }),
         );
 
@@ -120,7 +120,9 @@ fn a_document_is_written_indented_with_a_trailing_newline_its_sections_in_their_
             "  \"connectors\": {\n",
             "    \"telegram\": {\n",
             "      \"config\": {\n",
-            "        \"mirror\": false\n",
+            "        \"pairedUsers\": {\n",
+            "          \"4242\": \"Alice\"\n",
+            "        }\n",
             "      }\n",
             "    }\n",
             "  }\n",
@@ -318,11 +320,7 @@ fn each_target_lists_and_writes_only_what_its_scope_lets_it_set() {
     assert!(section(&mira_view, "plugins", "character-state").is_some());
     assert_eq!(
         telegram_fields(&home_view),
-        [
-            json!("managementBotToken"),
-            json!("mirror"),
-            json!("pairedUsers")
-        ]
+        [json!("managementBotToken"), json!("pairedUsers")]
     );
     assert_eq!(telegram_fields(&mira_view), [json!("botToken")]);
     assert!(!names(&home_view["project02"]).contains(&json!("enabled")));

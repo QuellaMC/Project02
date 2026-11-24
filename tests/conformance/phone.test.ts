@@ -3,7 +3,7 @@ import {join} from 'node:path';
 
 import {expect, it} from 'vitest';
 
-import {startDaemon, type Daemon} from './harness/daemon.ts';
+import {connector, startDaemon, type Daemon} from './harness/daemon.ts';
 import {
   frameOf,
   nextMoment,
@@ -23,7 +23,15 @@ import {
   type ModelRequest,
   type ModelServer,
 } from './harness/model-server.ts';
-import {converse, saveConfig, wireOf, type Wire} from './harness/wire.ts';
+import {startTelegramServer} from './harness/telegram-server.ts';
+import {
+  conversationOf,
+  converse,
+  saveConfig,
+  sender,
+  wireOf,
+  type Wire,
+} from './harness/wire.ts';
 
 /** The person is where the clocks read UTC, so an alarm's ring lands at a moment the test can name. */
 const utc = {TZ: 'UTC'};
@@ -32,6 +40,22 @@ const pinging = {...utc, PROJECT02_TEST_DURATIONS: 'ping=500'};
 /** Alarm a1's line in her note when it rings late: its ring was set for a long-gone morning. */
 const lateAlarm =
   'Clock, Alarm: Wake Sam (set for Monday, January 5, at 07:00).';
+/** Messages as a client reads it on her phone: the app she and the person write to each other in, which every phone comes with. */
+const messagesApp = {
+  id: 'messages',
+  name: 'Messages',
+  summary: 'Your messages',
+  version: '1.0.0',
+  source: 'built_in',
+  messaging: true,
+  icon: 'messages',
+  tint: 'messages',
+  wakes: false,
+  mayWake: true,
+  itMay: ['Keep its own data'],
+  views: [{id: 'conversation', title: 'Messages', icon: 'messages'}],
+  opensOn: 'conversation',
+};
 
 async function stop(daemon: Daemon): Promise<void> {
   daemon.signal('SIGINT');
@@ -184,6 +208,18 @@ function ringing(...rang: readonly string[]): readonly string[] {
   ];
 }
 
+/** A moment as her phone's notes say it where the person is, here UTC: `Tuesday, November 24, 14:10`. */
+function dayAndTime(at: string): string {
+  const day = new Date(at).toLocaleDateString('en-US', {
+    timeZone: 'UTC',
+    weekday: 'long',
+    month: 'long',
+    day: 'numeric',
+  });
+
+  return `${day}, ${at.slice(11, 16)}`;
+}
+
 /** The lines of the system messages the model was shown. */
 function systemLines(request: ModelRequest | undefined): readonly string[] {
   return messagesOf(request)
@@ -217,7 +253,7 @@ it('phone.clock-alarm: she opens the Clock and is shown its views, its actions a
     messages: [{}, {text: 'Set for seven.'}],
   });
   expect(systemLines(model.requests[0])).toContain(
-    '- Your phone. On it: Clock ("clock") — Alarms, timers, and the time anywhere; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
+    '- Your phone. The two of you write to each other on it. On it: Messages ("messages") — Your messages; Clock ("clock") — Alarms, timers, and the time anywhere; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
   );
 
   const [opened, used] = toolResults(model.requests[2]);
@@ -334,7 +370,7 @@ it('phone.clock-alarm: she opens the Clock and is shown its views, its actions a
   });
 });
 
-it("phone.gift: her note opens on how her phone is hers: Mira's package has it simply hers, and once her settings switch A Gift from You on, it is a gift from Sam", async () => {
+it("phone.gift: her note opens on how her phone is hers and that she and Sam write to each other on it: Mira's package has it simply hers, and once her settings switch A Gift from You on, it is a gift from Sam", async () => {
   const model = await startModelServer();
   const wire = wireOf(await startDaemon(quietHome(model)));
   const say = await converse(wire, 'mira');
@@ -358,8 +394,8 @@ it("phone.gift: her note opens on how her phone is hers: Mira's package has it s
   );
   await say('Hello again.', 'gift');
   expect(model.requests.map(opening)).toEqual([
-    '- Your phone.',
-    '- Your phone is a gift from Sam.',
+    '- Your phone. You and Sam write to each other on it.',
+    '- Your phone is a gift from Sam. You and Sam write to each other on it.',
   ]);
 });
 
@@ -397,7 +433,7 @@ it("phone.refusals:what her phone refuses she reads as its sentence with what th
     refused(
       'phone.open',
       'app_not_found',
-      'There is no app "weather" on the phone. Your apps: Clock ("clock"), App Store ("store").',
+      'There is no app "weather" on the phone. Your apps: Messages ("messages"), Clock ("clock"), App Store ("store").',
     ),
     refused(
       'phone.open',
@@ -575,6 +611,7 @@ it('phone.may-not-wake: while Sam says the Clock may not wake her, its ring long
   expect(await wire.phone('mira')).toMatchObject({
     status: 'ok',
     apps: [
+      {id: 'messages'},
       {id: 'clock', wakes: true, mayWake: false},
       {id: 'notes', wakes: false},
       {id: 'store'},
@@ -585,7 +622,7 @@ it('phone.may-not-wake: while Sam says the Clock may not wake her, its ring long
   model.answer(reply('Morning, Sam.'));
   await say('Morning.', 'morning');
   expect(systemLines(model.requests[0])).toContain(
-    '- Your phone. On it: Clock ("clock", which Sam said may not wake you) — Alarms, timers, and the time anywhere; Notes ("notes") — What she writes down; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
+    '- Your phone. You and Sam write to each other on it. On it: Messages ("messages") — Your messages; Clock ("clock", which Sam said may not wake you) — Alarms, timers, and the time anywhere; Notes ("notes") — What she writes down; App Store ("store") — More apps, each reviewed by Project02. To use an app, open it first with phone.open and look at its screen; then do what you want in it with phone.use.',
   );
 
   model.answer(reply('Up you get, Sam.'));
@@ -596,7 +633,7 @@ it('phone.may-not-wake: while Sam says the Clock may not wake her, its ring long
   expect(openingOf(model.requests.at(-1))).toEqual(ringing(lateAlarm));
 });
 
-it("phone.on-the-wire: a client reads her phone: before she touches it, her apps, the Clock with its icon, tint, views and what it may do, and nothing in front, done or ringing; once she opens the Clock and sets an alarm, the stream has named her phone as the plugin of each call and said her phone changed after each, and her phone has the Alarms view in front with the alarm on its screen and what she did in the action's words; a view she is not on, read on request, shows its screen and leaves her phone as it was; a character, an app and a view that are not there are each refused in a sentence", async () => {
+it("phone.on-the-wire: a client reads her phone: before she touches it, her apps, Messages first, the one she and the person write to each other in, then the Clock with its icon, tint, views and what it may do, and nothing in front, done or ringing; once she opens the Clock and sets an alarm, the stream has named her phone as the plugin of each call and said her phone changed after each, and her phone has the Alarms view in front with the alarm on its screen and what she did in the action's words; a view she is not on, read on request, shows its screen and leaves her phone as it was; a character, an app and a view that are not there are each refused in a sentence", async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
@@ -610,6 +647,7 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
     summary: 'Alarms, timers, and the time anywhere',
     version: '1.0.0',
     source: 'built_in',
+    messaging: false,
     icon: 'clock',
     tint: 'graphite',
     wakes: true,
@@ -629,6 +667,7 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
     summary: 'More apps, each reviewed by Project02',
     version: '1.0.0',
     source: 'built_in',
+    messaging: false,
     icon: 'bag',
     tint: 'blue',
     wakes: false,
@@ -640,7 +679,7 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
 
   expect(await wire.phone('mira')).toEqual({
     status: 'ok',
-    apps: [clock, store],
+    apps: [messagesApp, clock, store],
     ringing: [],
   });
 
@@ -676,7 +715,7 @@ it("phone.on-the-wire: a client reads her phone: before she touches it, her apps
   ).toHaveLength(2);
   expect(phone).toEqual({
     status: 'ok',
-    apps: [clock, store],
+    apps: [messagesApp, clock, store],
     front: {
       appId: 'clock',
       viewId: 'alarms',
@@ -766,4 +805,113 @@ it('phone.ring-on-the-wire: while her settings switch her phone off, her phone i
     frameOf('turn_completed', {status: 'completed'}),
   );
   expect(await wire.phone('mira')).toMatchObject({status: 'ok', ringing: []});
+});
+
+it("phone.messages: once a line from the page has her answer and a line from Telegram has hers, she opens Messages and is shown what went through Messages alone, the person's and hers as bubbles under the day and the time where the person is, and nothing to do in it; her phone then has Messages in front, opened", async () => {
+  const model = await startModelServer();
+  const wire = wireOf(await startDaemon(quietHome(model), utc));
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const send = await sender(wire);
+
+  model.answer(
+    reply('Hello, Sam.'),
+    reply('Hello on Telegram.'),
+    calling(['phone_open', {app: 'messages'}]),
+    reply('Just us.'),
+  );
+  await say('Hello from the page.', 'page');
+  await send({
+    conversationId,
+    text: 'From Telegram.',
+    source: 'telegram:mira_bot',
+    clientMessageId: 'telegram',
+  });
+  await say('What is on your phone?', 'phone');
+
+  const [opened] = toolResults(model.requests.at(-1));
+  const {messages} = (await wire.history(conversationId)) as {
+    readonly messages: readonly {readonly sentAt: string}[];
+  };
+
+  expect(opened).toMatchObject({status: 'accepted', toolName: 'phone.open'});
+  expect((opened as {readonly output: unknown}).output).toEqual({
+    app: 'messages',
+    name: 'Messages',
+    view: 'conversation',
+    views: [{id: 'conversation', title: 'Messages'}],
+    actions: [],
+    screen: {
+      items: [
+        {kind: 'note', text: dayAndTime(messages[0]?.sentAt ?? '')},
+        {kind: 'bubble', from: 'them', text: 'Hello from the page.'},
+        {kind: 'bubble', from: 'her', text: 'Hello, Sam.'},
+        {kind: 'bubble', from: 'them', text: 'What is on your phone?'},
+      ],
+    },
+  });
+  expect(await wire.phone('mira')).toMatchObject({
+    front: {appId: 'messages', viewId: 'conversation'},
+    did: {appId: 'messages', words: 'Opened Messages'},
+  });
+});
+
+it('phone.telegram: her phone lists Messages first, and Telegram beside it before the Clock only while her bot is on, both the apps she and the person write to each other in', async () => {
+  const miraBot = {token: '987654:mira', id: 987654, username: 'mira_bot'};
+  const home = createHome({
+    'character-data': {
+      mira: {
+        'config.json': configJson({
+          connectors: {telegram: {config: {botToken: miraBot.token}}},
+        }),
+      },
+    },
+  });
+  const wire = wireOf(await startDaemon(home));
+  const events = await openEvents(wire.address);
+  const apps = async () =>
+    (
+      (await wire.phone('mira')) as {
+        readonly apps: readonly {
+          readonly id: string;
+          readonly messaging: boolean;
+        }[];
+      }
+    ).apps.map(app => [app.id, app.messaging]);
+  const telegram = (connected: boolean, bots: readonly object[]) =>
+    frameOf('health_changed', {
+      health: {connectors: [{id: 'telegram', connected, bots}]},
+    });
+
+  expect(await apps()).toEqual([
+    ['messages', true],
+    ['clock', false],
+    ['store', false],
+  ]);
+
+  const run = connector(
+    ['--store', home],
+    (await startTelegramServer([miraBot])).env,
+  );
+
+  await events.next(
+    telegram(true, [
+      {target: {scope: 'character', characterId: 'mira'}, state: 'on'},
+    ]),
+  );
+  expect(await apps()).toEqual([
+    ['messages', true],
+    ['telegram', true],
+    ['clock', false],
+    ['store', false],
+  ]);
+
+  run.signal('SIGINT');
+  await run.exit();
+  await events.next(telegram(false, []));
+  expect(await apps()).toEqual([
+    ['messages', true],
+    ['clock', false],
+    ['store', false],
+  ]);
 });

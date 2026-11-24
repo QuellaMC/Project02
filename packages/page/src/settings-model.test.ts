@@ -407,7 +407,7 @@ function health(
   accounts: GatewayHealth['accounts'] = [],
 ): GatewayHealth {
   return {
-    protocolVersion: 16,
+    protocolVersion: 17,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -433,7 +433,9 @@ const nothingFound = {rows: new Map(), sections: new Map(), notes: []};
 describe('settings model', () => {
   it('gives each field the control its shape takes: a key box, a switch, a segmented choice of up to three, pills beyond, a select of the values it suggests, a text box otherwise', () => {
     expect(controlOf(field('apiKey', {secret: true}))).toBe('key');
-    expect(controlOf(field('mirror', {valueType: 'boolean'}))).toBe('switch');
+    expect(controlOf(field('askToInstall', {valueType: 'boolean'}))).toBe(
+      'switch',
+    );
     expect(controlOf(kept)).toBe('segmented');
     expect(
       controlOf(field('tone', {allowedValues: ['a', 'b', 'c', 'd']})),

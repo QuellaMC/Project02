@@ -2,8 +2,10 @@ import {describe, expect, it} from 'vitest';
 
 import type {
   CharacterSummary,
+  GatewayEvent,
   GatewayHealth,
   GatewayReady,
+  HistoryMessage,
   PendingConfirmation,
   PhoneApp,
   PhoneDid,
@@ -18,9 +20,15 @@ import {
   askRaised,
   askSettled,
   clockParts,
+  conversationOpened,
+  conversationProgressed,
+  conversationRead,
+  conversationUnopened,
+  conversationUnread,
   framed,
   healthSaid,
   initialPhoneState,
+  isMessaging,
   lineOf,
   liveAt,
   looked,
@@ -48,6 +56,7 @@ const clock: PhoneApp = {
   summary: 'Alarms, timers, and the time anywhere',
   version: '1.0.0',
   source: 'built_in',
+  messaging: false,
   icon: 'clock',
   tint: 'graphite',
   wakes: true,
@@ -70,7 +79,7 @@ const now = Date.parse('2026-11-11T09:00:00.000Z');
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 16,
+    protocolVersion: 17,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -87,7 +96,7 @@ function ready(
   ...confirmations: readonly PendingConfirmation[]
 ): GatewayReady {
   return {
-    protocolVersion: 16,
+    protocolVersion: 17,
     health: said,
     confirmations,
     pairings: [],
@@ -151,6 +160,7 @@ const store: PhoneApp = {
   summary: 'More apps, each reviewed by Project02',
   version: '1.0.0',
   source: 'built_in',
+  messaging: false,
   icon: 'bag',
   tint: 'blue',
   wakes: false,
@@ -601,5 +611,99 @@ describe("her phone's window", () => {
     expect(pinned.frame).toEqual({pinned: true});
     expect(framed(pinned, true)).toBe(pinned);
     expect(framed(pinned, false).frame).toEqual({pinned: false});
+  });
+
+  it('draws an app her phone says messages come in from her conversation: once it is opened, of its newest page and what the stream commits after, only what went through that app, with the person by the name their newest message goes by; why it could not be opened or read in its place; and a frame of another conversation changes nothing', () => {
+    const messaging = (id: string, name: string): PhoneApp => ({
+      ...store,
+      id,
+      name,
+      messaging: true,
+      icon: id,
+      tint: id,
+      views: [{id: 'conversation', title: name, icon: id}],
+      opensOn: 'conversation',
+    });
+    const [messages, telegram] = [
+      messaging('messages', 'Messages'),
+      messaging('telegram', 'Telegram'),
+    ];
+    const said = (
+      messageId: string,
+      role: 'user' | 'character',
+      app: string,
+      speakerName: string,
+    ): HistoryMessage => ({
+      messageId,
+      role,
+      speakerId: role === 'user' ? 'local-user' : 'mira',
+      speakerName,
+      text: `${messageId} in ${app}`,
+      sentAt: new Date(now).toISOString(),
+      app,
+    });
+    let state = looked(
+      watching({status: 'ok', apps: [messages, telegram, clock], ringing: []}),
+      {kind: 'view', appId: 'telegram', viewId: 'conversation'},
+    );
+
+    expect([
+      isMessaging(state, 'telegram'),
+      isMessaging(state, 'clock'),
+    ]).toEqual([true, false]);
+    expect(screenOf(state)).toMatchObject({
+      kind: 'thread',
+      app: telegram,
+      messages: [],
+      message: undefined,
+    });
+
+    state = conversationUnopened(state, 'Mira is not running.');
+    expect(screenOf(state)).toMatchObject({message: 'Mira is not running.'});
+
+    state = conversationOpened(state, {
+      status: 'opened',
+      conversationId: 'conv-1',
+      characterId: 'mira',
+    });
+    state = conversationUnread(state, 'conv-1', 'The daemon is away.');
+    expect(screenOf(state)).toMatchObject({message: 'The daemon is away.'});
+
+    state = conversationRead(state, 'conv-1', {
+      status: 'ok',
+      conversationId: 'conv-1',
+      characterId: 'mira',
+      messages: [
+        said('m1', 'user', 'messages', 'You'),
+        said('m2', 'character', 'messages', 'Mira'),
+        said('m3', 'user', 'telegram', 'Sam'),
+      ],
+    });
+
+    const reply: Extract<GatewayEvent, {kind: 'turn_progress'}> = {
+      kind: 'turn_progress',
+      characterId: 'mira',
+      conversationId: 'conv-1',
+      progress: {
+        kind: 'visible_reply',
+        ...said('m4', 'character', 'telegram', 'Mira'),
+        draftId: '1.0',
+      },
+    };
+
+    state = conversationProgressed(state, reply);
+    expect(
+      conversationProgressed(state, {...reply, conversationId: 'conv-2'}),
+    ).toBe(state);
+    expect(screenOf(state)).toMatchObject({
+      kind: 'thread',
+      app: telegram,
+      messages: [
+        {messageId: 'm3', role: 'user', app: 'telegram'},
+        {messageId: 'm4', role: 'character', app: 'telegram'},
+      ],
+      person: 'Sam',
+      message: undefined,
+    });
   });
 });

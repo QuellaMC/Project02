@@ -12,7 +12,9 @@ use p02_contracts::{
     DecisionRejectionReason, DecisionResult, Invocation, ModelOutput, PluginToolDefinitions,
     ProviderAnswer, RoleModelAdapter, ToolCallResult, WrittenCall,
 };
-use p02_core::{MessageId, SessionId, SpeakerName, VisibleMessage, VisibleMessageRole};
+use p02_core::{
+    ClientStamp, MessageId, SessionId, SpeakerName, VisibleMessage, VisibleMessageRole, VisibleText,
+};
 use p02_role_model::{
     DraftEvent, ModelRound, Opening, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome,
     TurnSink,
@@ -133,6 +135,7 @@ impl TurnSink for Recording {
             speaker_id: id("mira"),
             speaker_name: SpeakerName::new("Mira").unwrap(),
             text: reply.text.clone(),
+            sent_at: event().created_at().clone(),
         })
     }
 
@@ -176,9 +179,20 @@ async fn run(
 ) -> Result<TurnOutcome, &'static str> {
     let event = event();
     let now = event.created_at().in_zone(jiff::tz::TimeZone::UTC);
+    let line = VisibleMessage {
+        id: MessageId::new(SessionId::parse("conv_mira.1").unwrap(), NonZeroU64::MIN),
+        role: VisibleMessageRole::User,
+        speaker_id: id("local-user"),
+        speaker_name: SpeakerName::new("You").unwrap(),
+        text: VisibleText::normalize("Hello?").unwrap(),
+        sent_at: event.created_at().clone(),
+    };
     let mut rounds = Rounds::new(TurnInput {
         event,
-        opening: Opening::Line(p02_core::UserLine::new("Hello?").unwrap().into()),
+        opening: Opening::Line {
+            message: line,
+            source: ClientStamp::new("web").unwrap(),
+        },
         now,
         context: context(),
         plugin_tools: PluginToolDefinitions::new(vec![plugin_tool(

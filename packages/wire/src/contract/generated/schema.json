@@ -2047,7 +2047,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 16
+          "const": 17
         },
         "homeRoot": {
           "type": "string"
@@ -2125,7 +2125,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 16
+          "const": 17
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -2185,8 +2185,12 @@
         "text": {
           "$ref": "#/$defs/VisibleText"
         },
-        "committedAt": {
+        "sentAt": {
           "$ref": "#/$defs/Timestamp"
+        },
+        "app": {
+          "type": "string",
+          "description": "The id of the app the person's line came in, or hers went in, as\n`messages` or `telegram`."
         },
         "source": {
           "$ref": "#/$defs/ClientStamp"
@@ -2201,9 +2205,10 @@
         "speakerId",
         "speakerName",
         "text",
-        "committedAt"
+        "sentAt",
+        "app"
       ],
-      "description": "A committed message as the scrollback shows it, with the stamps its\nclient put on the person's line and when it was committed."
+      "description": "A committed message as the scrollback shows it: when it was sent, the\napp it is in, by its id, and for the person's line the stamps its client\nput on it."
     },
     "HistoryOutcome": {
       "oneOf": [
@@ -3003,6 +3008,10 @@
         "source": {
           "$ref": "#/$defs/AppSource"
         },
+        "messaging": {
+          "type": "boolean",
+          "description": "Whether she and the person write to each other in it: Messages, or\na connector's app while it carries her messages. A window draws such\nan app as their conversation, what went through it."
+        },
         "icon": {
           "type": "string"
         },
@@ -3048,6 +3057,7 @@
         "summary",
         "version",
         "source",
+        "messaging",
         "icon",
         "tint",
         "wakes",
@@ -3056,7 +3066,7 @@
         "views",
         "opensOn"
       ],
-      "description": "An app on her phone as her window draws it and her settings show it:\nthe line she knows it by, its version and where it came from; its icon\nand the tint of its tile, names of the page's own set, which falls back\nfor one it does not know; whether it says it wakes her, and whether the\nperson lets it; what it may do, and the person's account it uses, or\nhow it signs in; its views, in its order; and the view it opens on."
+      "description": "An app on her phone as her window draws it and her settings show it:\nthe line she knows it by, its version and where it came from; whether\nshe and the person write to each other in it; its icon and the tint of\nits tile, names of the page's own set, which falls back for one it does\nnot know; whether it says it wakes her, and whether the person lets it;\nwhat it may do, and the person's account it uses, or how it signs in;\nits views, in its order; and the view it opens on."
     },
     "PhoneDid": {
       "type": "object",
@@ -4480,6 +4490,13 @@
             "text": {
               "$ref": "#/$defs/VisibleText"
             },
+            "sentAt": {
+              "$ref": "#/$defs/Timestamp"
+            },
+            "app": {
+              "type": "string",
+              "description": "The id of the app the line came in, as `messages` or `telegram`."
+            },
             "source": {
               "$ref": "#/$defs/ClientStamp"
             },
@@ -4497,6 +4514,8 @@
             "speakerId",
             "speakerName",
             "text",
+            "sentAt",
+            "app",
             "source",
             "clientMessageId"
           ]
@@ -4516,6 +4535,13 @@
             "text": {
               "$ref": "#/$defs/VisibleText"
             },
+            "sentAt": {
+              "$ref": "#/$defs/Timestamp"
+            },
+            "app": {
+              "type": "string",
+              "description": "The id of the app it went in, as `messages` or `telegram`."
+            },
             "draftId": {
               "type": "string",
               "description": "The draft this message replaces."
@@ -4531,6 +4557,8 @@
             "speakerId",
             "speakerName",
             "text",
+            "sentAt",
+            "app",
             "draftId"
           ]
         },

@@ -49,11 +49,12 @@ pub enum PhoneRefusal {
 }
 
 /// An app on her phone as her window draws it and her settings show it:
-/// the line she knows it by, its version and where it came from; its icon
-/// and the tint of its tile, names of the page's own set, which falls back
-/// for one it does not know; whether it says it wakes her, and whether the
-/// person lets it; what it may do, and the person's account it uses, or
-/// how it signs in; its views, in its order; and the view it opens on.
+/// the line she knows it by, its version and where it came from; whether
+/// she and the person write to each other in it; its icon and the tint of
+/// its tile, names of the page's own set, which falls back for one it does
+/// not know; whether it says it wakes her, and whether the person lets it;
+/// what it may do, and the person's account it uses, or how it signs in;
+/// its views, in its order; and the view it opens on.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -63,6 +64,10 @@ pub struct PhoneApp {
     pub summary: String,
     pub version: String,
     pub source: AppSource,
+    /// Whether she and the person write to each other in it: Messages, or
+    /// a connector's app while it carries her messages. A window draws such
+    /// an app as their conversation, what went through it.
+    pub messaging: bool,
     pub icon: String,
     pub tint: String,
     /// Whether it says it wakes her: only such an app sets a ring.

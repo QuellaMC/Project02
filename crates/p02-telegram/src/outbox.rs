@@ -1,18 +1,16 @@
 //! What a bot writes in its chats. Its calls to Telegram go one at a time
-//! in the order they were decided, so no edit overtakes a commit nor a
-//! reply the line shown before it, and none once the bot has stopped; one
-//! Telegram asks to wait on is made again after the pause. A write to a
-//! paired account's chat waits while the settings are in doubt and is made
-//! only while the account is paired, each checked as the call's turn
-//! comes. A chat that answers 403 never opened the bot, and is skipped
-//! until it writes.
+//! in the order they were decided, so no message overtakes one decided
+//! before it, and none once the bot has stopped; one Telegram asks to wait
+//! on is made again after the pause. A write to a paired account's chat
+//! waits while the settings are in doubt and is made only while the
+//! account is paired, each checked as the call's turn comes. A chat that
+//! answers 403 never opened the bot, and is skipped until it writes.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeSet, VecDeque};
 use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
-use p02_wire::RunningDraft;
 use tokio::sync::{mpsc, watch};
 use tokio::time::{Instant, sleep, sleep_until};
 use tokio_util::sync::CancellationToken;
@@ -23,6 +21,10 @@ use crate::bot::unwritten;
 use crate::bot_api::{BotApi, Failure, Keyboard, MAX_MESSAGE, Message};
 use crate::cards::{CardKind, CardText, Cards, Revision};
 use crate::table::BotSettings;
+
+/// How often a chat that shows her typing is shown it again: Telegram lets
+/// the mark go after about five seconds.
+const TYPING_AGAIN: Duration = Duration::from_secs(4);
 
 /// The messages a text takes, in order, none cutting a character.
 fn pieces(text: &str) -> Vec<String> {
@@ -68,25 +70,14 @@ enum Command {
     Typing {
         chat: i64,
     },
-    /// A turn shown begins: in every paired chat, its line when it is
-    /// another surface's, and the bot typing.
-    Started {
-        mirrored: Option<String>,
+    /// Her typing shown in the chat, kept up until another chat or none is
+    /// named.
+    KeepTyping {
+        chat: Option<i64>,
     },
-    /// Her drafts, each its text so far: one held that is not among them
-    /// is withdrawn, a new one is posted in every paired chat when `post`
-    /// and it has words, and one already posted is edited at most once an
-    /// interval, to the text it has then.
-    Drafts {
-        drafts: Vec<RunningDraft>,
-        post: bool,
-    },
-    /// The committed text replaces its draft; with none posted, `post`
-    /// sends it whole.
-    Commit {
-        id: String,
+    /// A message of hers, whole, in every paired chat.
+    Post {
         text: String,
-        post: bool,
     },
     Card {
         kind: CardKind,
@@ -130,7 +121,6 @@ impl Outbox {
         api: BotApi,
         settings: watch::Receiver<Arc<BotSettings>>,
         held: watch::Receiver<bool>,
-        draft_edits: Duration,
         lines: Arc<dyn Lines>,
         stop: CancellationToken,
         tracker: &TaskTracker,
@@ -144,12 +134,11 @@ impl Outbox {
                 settings,
                 read,
                 held,
-                draft_edits,
                 lines,
                 stop,
                 commands: taken,
                 jobs: VecDeque::new(),
-                drafts: HashMap::new(),
+                typing: None,
                 cards: [
                     Cards::new(CardKind::Confirmation),
                     Cards::new(CardKind::Pairing),
@@ -188,20 +177,12 @@ impl Outbox {
         self.send(Command::Typing { chat });
     }
 
-    pub(crate) fn started(&self, mirrored: Option<String>) {
-        self.send(Command::Started { mirrored });
+    pub(crate) fn keep_typing(&self, chat: Option<i64>) {
+        self.send(Command::KeepTyping { chat });
     }
 
-    pub(crate) fn drafts(&self, drafts: Vec<RunningDraft>, post: bool) {
-        self.send(Command::Drafts { drafts, post });
-    }
-
-    pub(crate) fn commit(&self, id: &str, text: String, post: bool) {
-        self.send(Command::Commit {
-            id: id.to_owned(),
-            text,
-            post,
-        });
+    pub(crate) fn post(&self, text: String) {
+        self.send(Command::Post { text });
     }
 
     pub(crate) fn card(&self, kind: CardKind, key: String, text: CardText, to: Target) {
@@ -250,42 +231,12 @@ enum Job {
     Typing {
         chat: i64,
     },
-    /// A draft brought to its words while it is written.
-    Render {
-        id: String,
-    },
-    /// A draft ended as its committed text, which it holds.
-    Commit(Box<Draft>),
-    /// A withdrawn draft's messages, deleted.
-    Delete(BTreeMap<i64, (i64, String)>),
     Card {
         kind: CardKind,
         key: String,
         chat: i64,
     },
     Revise(Revision),
-}
-
-/// A reply as the chats show it while it is written. Its commit or its
-/// withdrawal takes it from the drafts at once, since the next reply's
-/// draft may come under the same id.
-#[derive(Debug)]
-struct Draft {
-    /// The text so far, for the next edit; its committed text once it is.
-    text: String,
-    /// Each chat's message of it, and the words it shows.
-    messages: BTreeMap<i64, (i64, String)>,
-    edit_due: Option<Instant>,
-}
-
-impl Draft {
-    fn new(text: String) -> Self {
-        Self {
-            text,
-            messages: BTreeMap::new(),
-            edit_due: None,
-        }
-    }
 }
 
 struct Writer {
@@ -296,12 +247,12 @@ struct Writer {
     read: Arc<BotSettings>,
     /// Whether the settings are in doubt: being read, or the daemon away.
     held: watch::Receiver<bool>,
-    draft_edits: Duration,
     lines: Arc<dyn Lines>,
     stop: CancellationToken,
     commands: mpsc::UnboundedReceiver<Command>,
     jobs: VecDeque<Job>,
-    drafts: HashMap<String, Draft>,
+    /// The chat that shows her typing, and when it is shown it next.
+    typing: Option<(i64, Instant)>,
     cards: [Cards; 2],
     admitted: BTreeSet<i64>,
     silent: BTreeSet<i64>,
@@ -312,11 +263,7 @@ impl Writer {
     /// one at a time, until the stop.
     async fn run(mut self) {
         loop {
-            let due = self
-                .drafts
-                .values()
-                .filter_map(|draft| draft.edit_due)
-                .min();
+            let due = self.typing.map(|(_, due)| due);
             let job = tokio::select! {
                 biased;
                 () = self.stop.cancelled() => return,
@@ -328,7 +275,7 @@ impl Writer {
                     None => return,
                 },
                 () = sleep_until(due.unwrap_or_else(Instant::now)), if due.is_some() => {
-                    self.edits_due();
+                    self.type_again();
                     continue;
                 }
                 () = std::future::ready(()), if !self.jobs.is_empty() => self.jobs.pop_front(),
@@ -377,36 +324,18 @@ impl Writer {
                 self.jobs.push_back(Job::Tell { chat, text, paired });
             }
             Command::Typing { chat } => self.jobs.push_back(Job::Typing { chat }),
-            Command::Started { mirrored } => {
+            Command::KeepTyping { chat } => {
+                self.typing = chat.map(|chat| (chat, Instant::now()));
+            }
+            Command::Post { text } => {
                 for chat in self.paired() {
-                    if let Some(line) = &mirrored {
-                        self.jobs.push_back(Job::Tell {
-                            chat,
-                            text: line.clone(),
-                            paired: true,
-                        });
-                    }
-
-                    self.jobs.push_back(Job::Typing { chat });
+                    self.jobs.push_back(Job::Tell {
+                        chat,
+                        text: text.clone(),
+                        paired: true,
+                    });
                 }
             }
-            Command::Drafts { drafts, post } => {
-                let gone: Vec<String> = self
-                    .drafts
-                    .keys()
-                    .filter(|id| !drafts.iter().any(|draft| draft.draft_id == **id))
-                    .cloned()
-                    .collect();
-
-                for id in gone {
-                    self.withdraw(&id);
-                }
-
-                for draft in drafts {
-                    self.drafted(draft.draft_id, draft.text, post);
-                }
-            }
-            Command::Commit { id, text, post } => self.committed(&id, text, post),
             Command::Card {
                 kind,
                 key,
@@ -434,31 +363,12 @@ impl Writer {
         }
     }
 
-    fn drafted(&mut self, id: String, text: String, post: bool) {
-        match self.drafts.get_mut(&id) {
-            Some(draft) if draft.text != text => {
-                draft.text = text;
-                draft
-                    .edit_due
-                    .get_or_insert(Instant::now() + self.draft_edits);
-            }
-            None if post && !text.trim().is_empty() => {
-                self.drafts.insert(id.clone(), Draft::new(text));
-                self.jobs.push_back(Job::Render { id });
-            }
-            Some(_) | None => {}
-        }
-    }
-
-    fn committed(&mut self, id: &str, text: String, post: bool) {
-        let draft = match self.drafts.remove(id) {
-            Some(draft) => Some(draft),
-            None => post.then(|| Draft::new(String::new())),
-        };
-
-        if let Some(mut draft) = draft {
-            draft.text = text;
-            self.jobs.push_back(Job::Commit(Box::new(draft)));
+    /// The chat that shows her typing is shown it again now, and again an
+    /// interval later.
+    fn type_again(&mut self) {
+        if let Some((chat, due)) = &mut self.typing {
+            *due = Instant::now() + TYPING_AGAIN;
+            self.jobs.push_back(Job::Typing { chat: *chat });
         }
     }
 
@@ -502,24 +412,6 @@ impl Writer {
         }
     }
 
-    fn withdraw(&mut self, id: &str) {
-        if let Some(draft) = self.drafts.remove(id) {
-            self.jobs.push_back(Job::Delete(draft.messages));
-        }
-    }
-
-    /// Each draft whose interval is over is brought to its words.
-    fn edits_due(&mut self) {
-        let now = Instant::now();
-
-        for (id, draft) in &mut self.drafts {
-            if draft.edit_due.is_some_and(|due| due <= now) {
-                draft.edit_due = None;
-                self.jobs.push_back(Job::Render { id: id.clone() });
-            }
-        }
-    }
-
     async fn work(&mut self, job: Job) {
         match job {
             Job::Tell { chat, text, paired } => {
@@ -539,27 +431,6 @@ impl Writer {
                 })
                 .await;
             }
-            Job::Render { id } => {
-                // Nothing else of the outbox moves while a job runs, so the
-                // draft is back before the next command is taken.
-                if let Some(mut draft) = self.drafts.remove(&id) {
-                    self.render(&mut draft, false).await;
-                    self.drafts.insert(id, draft);
-                }
-            }
-            Job::Commit(mut draft) => self.render(&mut draft, true).await,
-            Job::Delete(messages) => {
-                for (chat, (message, _)) in messages {
-                    let api = self.api.clone();
-
-                    self.made(chat, None, move || {
-                        let api = api.clone();
-
-                        async move { api.delete_message(chat, message).await }
-                    })
-                    .await;
-                }
-            }
             Job::Card { kind, key, chat } => {
                 let Some((text, keyboard)) = self.cards(kind).message(&key) else {
                     return;
@@ -569,49 +440,7 @@ impl Writer {
                 self.cards(kind)
                     .sent(&key, chat, sent.map(|message| message.id));
             }
-            Job::Revise((chat, message, text)) => {
-                self.edit(chat, message, text).await;
-            }
-        }
-    }
-
-    /// Brings the draft's message in every paired chat to its text: sent
-    /// where it has none, edited where it shows other words, an edit that
-    /// failed leaving the words for the next to try again; a chat paired no
-    /// longer gets no more of it. A draft shows what fits one message; its
-    /// commit sends the rest after, and only after.
-    async fn render(&mut self, draft: &mut Draft, commit: bool) {
-        let mut pieces = pieces(&draft.text).into_iter();
-        let first = pieces.next().unwrap_or_default();
-        let rest: Vec<String> = pieces.collect();
-
-        for chat in self.paired() {
-            match draft.messages.get(&chat).cloned() {
-                None => {
-                    if let Some(sent) = self.send(chat, first.clone(), None, true).await {
-                        draft.messages.insert(chat, (sent.id, first.clone()));
-                    }
-                }
-                Some((message, words)) if words != first => {
-                    if self.edit(chat, message, first.clone()).await {
-                        draft.messages.insert(chat, (message, first.clone()));
-                    }
-                }
-                Some(_) => {}
-            }
-
-            let whole = draft
-                .messages
-                .get(&chat)
-                .is_some_and(|(_, words)| *words == first);
-
-            if commit && whole {
-                for piece in &rest {
-                    if self.send(chat, piece.clone(), None, true).await.is_none() {
-                        break;
-                    }
-                }
-            }
+            Job::Revise((chat, message, text)) => self.edit(chat, message, text).await,
         }
     }
 
@@ -632,9 +461,9 @@ impl Writer {
         .await
     }
 
-    /// Whether the message shows `text` now: one that showed it already is
-    /// as good as edited.
-    async fn edit(&mut self, chat: i64, message: i64, text: String) -> bool {
+    /// Edits the message to `text`: one that shows it already is as good as
+    /// edited.
+    async fn edit(&mut self, chat: i64, message: i64, text: String) {
         let api = self.api.clone();
         let made = self
             .patiently(Some(chat), move || {
@@ -643,17 +472,17 @@ impl Writer {
                 async move { api.edit_message_text(chat, message, &text).await }
             })
             .await;
-
-        match made {
+        let shown = matches!(
+            &made,
             Some(Err(failure))
                 if failure.code() == Some(400)
                     && failure
                         .description()
-                        .starts_with("Bad Request: message is not modified") =>
-            {
-                true
-            }
-            made => self.heard(chat, made).is_some(),
+                        .starts_with("Bad Request: message is not modified")
+        );
+
+        if !shown {
+            self.heard(chat, made);
         }
     }
 

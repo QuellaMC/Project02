@@ -3,7 +3,7 @@
 
 use std::num::NonZeroU32;
 
-use p02_core::{ClientStamp, ConversationId, MessageId, SpeakerName, VisibleText};
+use p02_core::{ClientStamp, ConversationId, MessageId, SpeakerName, Timestamp, VisibleText};
 use p02_shared::Identifier;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -140,6 +140,9 @@ pub enum TurnProgress {
         speaker_id: Identifier,
         speaker_name: SpeakerName,
         text: VisibleText,
+        sent_at: Timestamp,
+        /// The id of the app the line came in, as `messages` or `telegram`.
+        app: String,
         source: ClientStamp,
         client_message_id: ClientStamp,
     },
@@ -148,6 +151,9 @@ pub enum TurnProgress {
         speaker_id: Identifier,
         speaker_name: SpeakerName,
         text: VisibleText,
+        sent_at: Timestamp,
+        /// The id of the app it went in, as `messages` or `telegram`.
+        app: String,
         /// The draft this message replaces.
         draft_id: String,
     },

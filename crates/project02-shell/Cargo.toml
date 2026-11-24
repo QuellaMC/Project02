@@ -18,6 +18,7 @@ serde_json.workspace = true
 # inherited one.
 tauri = { version = "2.12.5", features = ["tray-icon"] }
 tauri-plugin-dialog.workspace = true
+tauri-plugin-notification.workspace = true
 tauri-plugin-opener.workspace = true
 tauri-plugin-single-instance.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }

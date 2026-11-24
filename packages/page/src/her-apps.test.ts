@@ -50,6 +50,7 @@ function app(
     summary: `${name}, on her phone`,
     version: '1.0.0',
     source: 'catalog',
+    messaging: false,
     icon: 'doc',
     tint: 'gray',
     wakes: false,
@@ -77,12 +78,20 @@ const reminders = app('reminders', 'Reminders', {
   tint: 'orange',
   wakes: true,
 });
+const messages = app('messages', 'Messages', {
+  source: 'built_in',
+  messaging: true,
+  icon: 'messages',
+  tint: 'messages',
+  views: [{id: 'conversation', title: 'Messages', icon: 'messages'}],
+  opensOn: 'conversation',
+});
 const notes = app('notes', 'Notes', {source: 'file', version: '2.0.0'});
 
-/** Her phone as a read gives it: the Clock, Reminders from the App Store, Notes from a file, and the App Store last. */
+/** Her phone as a read gives it: Messages, the Clock, Reminders from the App Store, Notes from a file, and the App Store last. */
 const phone: PhoneOutcome = {
   status: 'ok',
-  apps: [clock, reminders, notes, appStore],
+  apps: [messages, clock, reminders, notes, appStore],
   ringing: [],
 };
 
@@ -135,7 +144,7 @@ const herPage: SettingsPage = {kind: 'character', characterId: 'mira'};
 const mira = {characterId: 'mira', name: 'Mira'};
 
 describe('her apps in the settings window', () => {
-  it("draws her Phone group: an icon for each app on her phone but the App Store, in her phone's order, why her phone could not be read in the daemon's words, nothing before it was read, and where apps come from, saying that she asks first only while she may", () => {
+  it("draws her Phone group: an icon for each app on her phone but the App Store and the apps messages come in, in her phone's order, why her phone could not be read in the daemon's words, nothing before it was read, and where apps come from, saying that she asks first only while she may", () => {
     expect(stripOf(phone)).toEqual({
       kind: 'apps',
       apps: [clock, reminders, notes],

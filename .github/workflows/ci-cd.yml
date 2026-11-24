@@ -18,6 +18,9 @@ jobs:
   clients:
     name: clients
     runs-on: ubuntu-latest
+    # A few minutes when all is well: a run that hangs is stopped, not left
+    # for the six hours a job may take.
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
@@ -68,6 +71,8 @@ jobs:
   rust:
     name: rust
     runs-on: ${{ matrix.os }}
+    # About ten minutes with a warm cache, and under half an hour cold.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:

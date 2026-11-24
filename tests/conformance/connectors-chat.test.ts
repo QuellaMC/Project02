@@ -11,13 +11,7 @@ import {
   type Account,
   type TelegramBot,
 } from './harness/telegram-server.ts';
-import {
-  conversationOf,
-  converse,
-  saveConfig,
-  wireOf,
-  type Wire,
-} from './harness/wire.ts';
+import {conversationOf, saveConfig, wireOf, type Wire} from './harness/wire.ts';
 
 const miraBot = {token: '987654:mira', id: 987654, username: 'mira_bot'};
 const novaBot = {token: '555555:nova', id: 555555, username: 'nova_bot'};
@@ -338,117 +332,6 @@ it('connectors.telegram-held-while-daemon-down: a line written while the daemon 
     {text: 'Hello.'},
     {text: 'Anyone there?'},
   ]);
-});
-
-it("connectors.telegram-mirror: another surface's turn is shown in each paired chat, its line as the person's and then the reply; a line the bot carried is not repeated; and with Mirror off another surface's turn is not shown", async () => {
-  const model = await startModelServer();
-  const home = createHome({
-    'config.json': homeSettings(model, [alice, bob]),
-    'character-data': {mira: {'config.json': botSettings(miraBot)}},
-  });
-  const wire = wireOf(await startDaemon(home));
-  const telegram = await startTelegramServer([miraBot]);
-  const run = connector(['--store', home], telegram.env);
-
-  await run.printed(miraAnswers);
-
-  const sayOnWeb = await converse(wire, 'mira');
-  const mirrored = ['You (web): From the web.', 'Hello, web.'];
-
-  model.answer(reply('Hello, web.'));
-  await sayOnWeb('From the web.', 'web-1');
-
-  for (const account of [alice, bob]) {
-    await telegram.shows(miraBot.token, account.id, 'Hello, web.');
-    expect(textsIn(telegram.calls(miraBot.token), account.id)).toEqual(
-      mirrored,
-    );
-  }
-
-  model.answer(reply('Hello, Alice.'));
-  telegram.push(miraBot.token, messageFrom(alice, 1, 'Hello, Mira.'));
-  await telegram.shows(miraBot.token, bob.id, 'Hello, Alice.');
-  await saveConfig(
-    wire,
-    {scope: 'global'},
-    {
-      kind: 'section_field_set',
-      namespace: 'connectors',
-      id: 'telegram',
-      field: 'mirror',
-      value: false,
-    },
-  );
-  model.answer(reply('Quietly, web.'));
-  await sayOnWeb('Quiet now.', 'web-2');
-  model.answer(reply('Hello again, Alice.'));
-  telegram.push(miraBot.token, messageFrom(alice, 2, 'Still there?'));
-
-  for (const account of [alice, bob]) {
-    await telegram.shows(miraBot.token, account.id, 'Hello again, Alice.');
-    expect(textsIn(telegram.calls(miraBot.token), account.id)).toEqual([
-      ...mirrored,
-      'Hello, Alice.',
-      'Hello again, Alice.',
-    ]);
-  }
-});
-
-it('connectors.telegram-mirror-before-open: a web line that opens her thread after a restart, while her bot starts, is shown in the chat once that turn is done, her thread answering an open while the turn runs', async () => {
-  const model = await startModelServer();
-  const home = createHome({
-    'config.json': homeSettings(model, [alice]),
-    'character-data': {mira: {'config.json': botSettings(miraBot)}},
-  });
-  const first = await startDaemon(home);
-  const before = wireOf(first);
-
-  await before.start('mira');
-
-  const {conversationId} = await conversationOf(before, 'mira');
-
-  first.signal('SIGINT');
-  await first.exit();
-
-  const restarted = await startDaemon(home);
-  const wire = wireOf(restarted);
-  const held = model.hold();
-  const boot = await openEvents(restarted);
-
-  // Her roster comes up behind the address, and until the boot pass
-  // reaches her she takes no line: the line goes once it has, which her
-  // state in the stream's snapshot, or its first change after, says.
-  await boot.holding('the boot pass to reach her', frames =>
-    frames.find(
-      frame =>
-        frameOf('state_changed', {characterId: 'mira'})(frame) ||
-        ['starting', 'ready'].some(state =>
-          frameOf('ready', {health: {characters: [{id: 'mira', state}]}})(
-            frame,
-          ),
-        ),
-    ),
-  );
-  await expect(
-    wire.turn({
-      conversationId,
-      text: 'From the web.',
-      source: 'web',
-      clientMessageId: 'web-1',
-    }),
-  ).resolves.toEqual({status: 'queued'});
-  await held.arrived();
-  await expect(wire.open('mira')).resolves.toMatchObject({
-    status: 'opened',
-    conversationId,
-  });
-
-  const telegram = await startTelegramServer([miraBot]);
-  const run = connector(['--store', home], telegram.env);
-
-  await run.printed(miraAnswers);
-  held.release(reply('Hello, web.'));
-  await telegram.shows(miraBot.token, alice.id, 'Hello, web.');
 });
 
 it('connectors.telegram-split-4096: a reply longer than one Telegram message arrives whole in as many messages as it takes, in order', async () => {

@@ -3,10 +3,11 @@
 Her phone: the apps it comes with and those installed on it, the engine
 that runs one, the screens they show, what they keep and the rings they
 set, and what she has in front. It depends on p02-contracts, p02-core and
-p02-shared, and on p02-wire for the screen it reads an app's into. It reads
-no file itself: a call that touches the phone's files is handed a plugin
-store's files under its lease. It is synchronous, and its callers run it on
-the blocking pool.
+p02-shared, and on p02-wire for the screen it reads an app's into and the
+messages of the conversation its own apps show. It reads no file itself:
+a call that touches the phone's files is handed a plugin store's files
+under its lease, and the conversation its caller reads. It is
+synchronous, and its callers run it on the blocking pool.
 
 - **An app is one file**, an ES module that imports nothing. It exports
   its `manifest`, plain data that survives as JSON: `format`
@@ -140,8 +141,10 @@ the blocking pool.
   not read is passed over and said, and every app is signed out. The
   phone knows no service: what a connection is, and whether it is
   connected, is its caller's.
-- **Her apps** are the apps her phone comes with, then those installed on
-  it by name, then the App Store, each character her own. An installed app
+- **Her apps** are the apps messages come in, then those her phone comes
+  with, then those installed on it by name, then the App Store, each
+  character her own, each listed with whether messages come in it. An
+  installed app
   is its one file, kept as text in `apps/<app-id>.txt`, and
   `installed.json` lists each with what her phone shows of it without
   running it: its id, name, summary, version, icon, tint, what it asks
@@ -150,7 +153,8 @@ the blocking pool.
   its views and the view it opens on, and where it came from, the catalog
   or a file.
   Installing makes the app first, so a broken one is refused and writes
-  nothing; an id the phone comes with is refused; an id already installed
+  nothing; an id the phone comes with, an app messages come in among them,
+  is refused; an id already installed
   is replaced, whatever its version or source, keeping what it keeps, and
   installing says the version it replaced. A preview judges a file as
   installing it does, and neither writes it nor keeps the app it makes.
@@ -165,7 +169,8 @@ the blocking pool.
 - **What a phone comes with**: the apps in `apps/`, compiled in, today the
   Clock, `apps/clock.js`: alarms, timers, a stopwatch and a world clock. A
   bundled app that is refused fails the bundled phone at its first use, as
-  a build that must not ship. And the App Store, last on her home screen.
+  a build that must not ship. And the App Store, last on her home screen,
+  and the apps messages come in, first.
 - **The apps we publish** to the App Store's catalog are kept here too, in
   `catalog/`, and tested in the engine as the Clock is, though no phone
   comes with them: today Reminders, `catalog/reminders.js`, things to do on
@@ -213,3 +218,22 @@ the blocking pool.
   and under "What's New" its version with what changed.
   Opened again, it shows its list; before it read anything, a line says
   so.
+- **The apps messages come in** are the phone's own too, written here with
+  no script, since they show what no app is given: the conversation
+  between her and the person. They are Messages, always, and a connector's
+  app, as Telegram, exactly while it carries her messages, by the ids and
+  names her phone's caller says through `Chats`, which reads the
+  conversation for them too; every call that lists her apps, opens or
+  looks at one, takes one's id or keeps what she has in front is handed
+  it. Each is drawn by the icon and the tint named as its id, goes by the
+  summary "Your messages", sets no ring and has no action: a message is
+  sent one way only. Nothing installs over one or removes it while her
+  phone has it. Its one view, `conversation`, shows her the newest twenty
+  messages that went through it, hers and the person's as bubbles, one
+  longer than 2 KiB cut at a character with an ellipsis, so a screen of
+  them keeps within the limits every answer of her phone is held to; a
+  note of the day and the time where the person is, `Tuesday, November
+  24, 14:10`, stands above the first and above one sent on another day
+  or more than 15 minutes after the one before it; while there are none,
+  "No Messages". A conversation that cannot be read is the app failing,
+  saying why.

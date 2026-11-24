@@ -1,16 +1,17 @@
 use std::num::NonZeroU32;
 
-use p02_core::{EventIdentity, Timestamp, VisibleMessage};
+use p02_core::{ClientStamp, EventIdentity, Timestamp, VisibleMessage};
 use p02_shared::{Identifier, redact_credentials, redact_object_credentials};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::tool::ToolCallId;
 
-/// A finished turn as the model replays it: the person's message, none for
-/// a moment of the character's own, what rang on her phone when its
-/// ringing began the moment, every tool round with its results, then the
-/// character's final replies. The event that opened the turn names it.
+/// A finished turn as the model replays it: the person's message, with the
+/// stamp of the surface it came from, none for a moment of the character's
+/// own, what rang on her phone when its ringing began the moment, every
+/// tool round with its results, then the character's final replies. The
+/// event that opened the turn names it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ConversationTurn {
@@ -18,6 +19,10 @@ pub struct ConversationTurn {
     pub identity: EventIdentity,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_message: Option<VisibleMessage>,
+    /// What its client stamped the person's message with; none for a moment,
+    /// and for a line an earlier build kept without it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<ClientStamp>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rang: Vec<Rang>,
     pub tool_rounds: Vec<ToolRound>,
@@ -166,6 +171,7 @@ mod tests {
             "speakerId": if role == "user" { "local-user" } else { "mira" },
             "speakerName": if role == "user" { "You" } else { "Mira" },
             "text": text,
+            "sentAt": "2026-06-15T00:00:00.000Z",
         })
     }
 

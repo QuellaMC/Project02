@@ -1,6 +1,7 @@
 //! An app: its one file, a script that exports its manifest beside its
 //! functions, made once and checked whole, so a broken one is refused when
-//! it is added; or the App Store, the phone's own.
+//! it is added; or one of the phone's own, the App Store and the apps
+//! messages come in.
 
 use std::iter;
 
@@ -30,6 +31,9 @@ pub(crate) enum Runs {
     Script { text: String, hears_rings: bool },
     /// The App Store, in Rust: it needs what no app is given.
     Store,
+    /// An app messages come in, in Rust: it shows the conversation, which
+    /// no app is given.
+    Chat,
 }
 
 impl App {
@@ -79,6 +83,15 @@ impl App {
         Self {
             manifest,
             runs: Runs::Store,
+        }
+    }
+
+    /// An app messages come in, whose manifest keeps every rule an app's
+    /// does.
+    pub(crate) fn chat(manifest: Manifest) -> Self {
+        Self {
+            manifest,
+            runs: Runs::Chat,
         }
     }
 

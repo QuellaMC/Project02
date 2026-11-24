@@ -1,3 +1,4 @@
+use p02_core::AppNames;
 use p02_shared::Identifier;
 use serde_json::{Map, Value};
 
@@ -8,19 +9,20 @@ use crate::role_model::decision::{
 use crate::role_model::tools::{ModelToolCall, SEND_MESSAGE};
 
 impl DecisionResult {
-    /// The one verdict on a model round of a turn begun from `occasion`. A
-    /// provider that failed is `provider_error`. Text beside the model's
-    /// calls is its note. With no call, its text alone is its reply in a
-    /// turn the person began, and a thought the character keeps in a moment
-    /// of her own, where an answer of nothing at all stands too. Anything
-    /// else, from no answer in a person's turn to a call the runtime cannot
-    /// make, is `malformed_output`, and the details say what to fix, since
-    /// the model is told them in its next round. A call's input keeps its
-    /// credential-named values, to run the call.
+    /// The one verdict on a model round of a turn begun from `occasion`,
+    /// for her with `apps`, the apps she has now. A provider that failed is
+    /// `provider_error`. Text beside the model's calls is its note. With no
+    /// call, its text alone is its reply in a turn the person began, and a
+    /// thought the character keeps in a moment of her own, where an answer
+    /// of nothing at all stands too. Anything else, from no answer in a
+    /// person's turn to a call the runtime cannot make or a message in an
+    /// app she does not have, is `malformed_output`, and the details say
+    /// what to fix, since the model is told them in its next round. A
+    /// call's input keeps its credential-named values, to run the call.
     #[must_use]
-    pub fn judge(answer: &ProviderAnswer, occasion: Occasion) -> Self {
+    pub fn judge(answer: &ProviderAnswer, occasion: Occasion, apps: &AppNames) -> Self {
         let (reason, details) = match answer {
-            ProviderAnswer::Answered { output, .. } => match decide(output, occasion) {
+            ProviderAnswer::Answered { output, .. } => match decide(output, occasion, apps) {
                 Ok(decision) => return Self::Accepted { decision },
                 Err(details) => (DecisionRejectionReason::MalformedOutput, details),
             },
@@ -39,7 +41,11 @@ impl DecisionResult {
     }
 }
 
-fn decide(output: &ModelOutput, occasion: Occasion) -> Result<CharacterDecision, String> {
+fn decide(
+    output: &ModelOutput,
+    occasion: Occasion,
+    apps: &AppNames,
+) -> Result<CharacterDecision, String> {
     // A thinking model leaves a newline where its reasoning was: blank text
     // is nothing the model said.
     let text = output
@@ -52,7 +58,8 @@ fn decide(output: &ModelOutput, occasion: Occasion) -> Result<CharacterDecision,
             Occasion::Line => {
                 let text =
                     text.ok_or("Nothing was sent. Send a message, or do something first.")?;
-                let reply = ModelToolCall::reply(text).map_err(|error| format!("{error}."))?;
+                let reply =
+                    ModelToolCall::reply(text, None).map_err(|error| format!("{error}."))?;
 
                 Ok(CharacterDecision::judged(vec![reply], None))
             }
@@ -66,13 +73,13 @@ fn decide(output: &ModelOutput, occasion: Occasion) -> Result<CharacterDecision,
     let calls = output
         .tool_calls
         .iter()
-        .map(judge_call)
+        .map(|call| judge_call(call, apps))
         .collect::<Result<Vec<_>, _>>()?;
 
     Ok(CharacterDecision::judged(calls, text.map(str::to_owned)))
 }
 
-fn judge_call(call: &WrittenCall) -> Result<ModelToolCall, String> {
+fn judge_call(call: &WrittenCall, apps: &AppNames) -> Result<ModelToolCall, String> {
     let Ok(name) = Identifier::new(&call.name) else {
         return Err(format!("\"{}\" is not the name of a tool.", call.name));
     };
@@ -81,7 +88,7 @@ fn judge_call(call: &WrittenCall) -> Result<ModelToolCall, String> {
     };
 
     if name.as_str() == SEND_MESSAGE {
-        return judge_reply(input);
+        return judge_reply(input, apps);
     }
 
     // The tool's own contract is the host's to judge; here the input only
@@ -89,14 +96,16 @@ fn judge_call(call: &WrittenCall) -> Result<ModelToolCall, String> {
     ModelToolCall::plugin(name, input.clone()).map_err(|error| format!("{error}."))
 }
 
-fn judge_reply(input: &Map<String, Value>) -> Result<ModelToolCall, String> {
+/// A message: its text, and the app it goes in when she names one, which
+/// must be one of `apps`, those she has now.
+fn judge_reply(input: &Map<String, Value>, apps: &AppNames) -> Result<ModelToolCall, String> {
     let Some(Value::String(text)) = input.get("text") else {
         return Err("Nothing was sent. A message needs its text as a string.".to_owned());
     };
     let others: Vec<&str> = input
         .keys()
         .map(String::as_str)
-        .filter(|key| *key != "text")
+        .filter(|key| !["text", "app"].contains(key))
         .collect();
 
     if !others.is_empty() {
@@ -106,7 +115,21 @@ fn judge_reply(input: &Map<String, Value>) -> Result<ModelToolCall, String> {
         ));
     }
 
-    ModelToolCall::reply(text).map_err(|error| format!("{error}."))
+    let app = match input.get("app") {
+        None => None,
+        Some(Value::String(app)) if apps.has(app) => Some(app.clone()),
+        Some(named) => {
+            let named = named
+                .as_str()
+                .map_or_else(|| named.to_string(), str::to_owned);
+
+            return Err(format!(
+                "Nothing was sent. You have no app called \"{named}\"."
+            ));
+        }
+    };
+
+    ModelToolCall::reply(text, app).map_err(|error| format!("{error}."))
 }
 
 #[cfg(test)]
@@ -132,8 +155,13 @@ mod tests {
         }
     }
 
+    /// The apps she has in these rounds: Messages and Telegram.
+    fn apps() -> AppNames {
+        AppNames::new([("telegram", "Telegram")])
+    }
+
     fn accepted(answer: &ProviderAnswer, occasion: Occasion) -> Value {
-        match DecisionResult::judge(answer, occasion) {
+        match DecisionResult::judge(answer, occasion, &apps()) {
             DecisionResult::Accepted { decision } => serde_json::to_value(decision).unwrap(),
             DecisionResult::Rejected { rejection } => panic!("{answer:?}: {rejection:?}"),
         }
@@ -144,16 +172,23 @@ mod tests {
         json!({"name": "send_message", "input": {"text": text}})
     }
 
+    /// A message as the model sends it in `app`.
+    fn sent_in(text: &str, app: &str) -> Value {
+        json!({"name": "send_message", "input": {"text": text, "app": app}})
+    }
+
     /// A message as the decision keeps it on the record.
     fn kept(text: &str) -> Value {
         json!({"name": "visible_reply", "input": {"text": text}})
     }
 
+    /// A message of hers is kept with the app she named, one she has: the
+    /// app's own chat too, while it is her only one.
     #[test]
     fn calls_are_the_decision_text_beside_them_its_note_and_text_alone_the_reply() {
         let calls = [
             sent("<think>plan it</think> first\r\n"),
-            sent("second"),
+            sent_in("second", "telegram"),
             json!({"name": "character_state.patch", "input": {"mood": "angry"}}),
         ];
 
@@ -165,12 +200,20 @@ mod tests {
             json!({
                 "toolCalls": [
                     kept("first"),
-                    kept("second"),
+                    {"name": "visible_reply", "input": {"text": "second", "app": "telegram"}},
                     {"name": "character_state.patch", "input": {"mood": "angry"}},
                 ],
                 "text": "Let me check what I remember.",
             })
         );
+        assert!(matches!(
+            DecisionResult::judge(
+                &answered(&[sent_in("hi", "messages")], None),
+                Occasion::Line,
+                &AppNames::new([])
+            ),
+            DecisionResult::Accepted { .. }
+        ));
         assert_eq!(
             accepted(&answered(&[sent("hi")], Some(" \n\t ")), Occasion::Line),
             json!({"toolCalls": [kept("hi")]})
@@ -263,6 +306,11 @@ mod tests {
                 any,
             ),
             (
+                answered(&[sent_in("hi", "whatsapp")], None),
+                "Nothing was sent. You have no app called \"whatsapp\".",
+                any,
+            ),
+            (
                 answered(&[sent("<think>still thinking")], None),
                 "Nothing was sent. The message was empty.",
                 any,
@@ -280,7 +328,7 @@ mod tests {
         for (answer, details, occasions) in cases {
             for &occasion in occasions {
                 assert_eq!(
-                    DecisionResult::judge(&answer, occasion),
+                    DecisionResult::judge(&answer, occasion, &apps()),
                     DecisionResult::Rejected {
                         rejection: DecisionRejection {
                             reason: DecisionRejectionReason::MalformedOutput,

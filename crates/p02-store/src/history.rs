@@ -11,7 +11,7 @@ use p02_contracts::{
 };
 use p02_core::{EventId, EventIdentity, TraceId, VisibleMessage, VisibleMessageRole};
 
-use crate::record::{LogRecord, RecordBody, ToolCallStarted};
+use crate::record::{LogRecord, MessageCommitted, RecordBody, ToolCallStarted};
 
 /// What the model is shown of a session before its next turn.
 #[derive(Clone, Debug, PartialEq)]
@@ -30,7 +30,8 @@ struct Gathered<'a> {
     occasion: Occasion,
     /// What rang on her phone, when its ringing began a moment.
     rang: &'a [Rang],
-    user_message: Option<&'a VisibleMessage>,
+    /// The commit of the person's line, the first when a turn holds two.
+    line: Option<&'a MessageCommitted>,
     replies: Vec<(&'a VisibleMessage, NonZeroU32)>,
     started: Vec<&'a ToolCallStarted>,
     results: HashMap<&'a ToolCallId, &'a ToolCallResult>,
@@ -64,7 +65,7 @@ pub(crate) fn project<'a>(records: impl IntoIterator<Item = &'a LogRecord>) -> C
                     identity,
                     occasion: Occasion::Line,
                     rang: &[],
-                    user_message: None,
+                    line: None,
                     replies: Vec::new(),
                     started: Vec::new(),
                     results: HashMap::new(),
@@ -84,7 +85,7 @@ pub(crate) fn project<'a>(records: impl IntoIterator<Item = &'a LogRecord>) -> C
                     turn.replies.push((commit.message(), round));
                 }
                 _ => {
-                    turn.user_message.get_or_insert(commit.message());
+                    turn.line.get_or_insert(commit);
                 }
             },
             RecordBody::ModelRound(round) => {
@@ -147,13 +148,14 @@ impl Gathered<'_> {
             .map(|(message, _)| (*message).clone())
             .collect();
         let replayed = match self.occasion {
-            Occasion::Line => self.user_message.is_some(),
+            Occasion::Line => self.line.is_some(),
             Occasion::Moment => !self.replies.is_empty() || !rounds.is_empty(),
         };
 
         replayed.then(|| ConversationTurn {
             identity: self.identity.clone(),
-            user_message: self.user_message.cloned(),
+            user_message: self.line.map(|line| line.message().clone()),
+            source: self.line.and_then(MessageCommitted::source).cloned(),
             rang: self.rang.to_vec(),
             tool_rounds,
             final_replies,

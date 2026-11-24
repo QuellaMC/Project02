@@ -15,17 +15,17 @@ use p02_contracts::{
     ToolInputContract, TurnIdentity, TurnText,
 };
 use p02_core::{
-    CharacterProfile, EventId, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
-    TraceId, VisibleText,
+    AppNames, CharacterProfile, EventId, EventIdentity, MessageId, SessionId, SpeakerName,
+    Timestamp, TraceId, VisibleText,
 };
-use p02_phone::Account;
+use p02_phone::{Account, Chats};
 use p02_plugins::{
     AppCatalog, AppInternet, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
     Connections, FieldChange, FieldChangeOutcome, PluginHost, PluginHostBuilder, PluginSettings,
     ProposedToolCall, ReadConfigError, ToolCallReport, Turn, Unanswered, list,
 };
 use p02_shared::{BaseUrl, Identifier};
-use p02_wire::{ActivationStatus, AppConnection};
+use p02_wire::{ActivationStatus, AppConnection, HistoryMessage};
 use serde_json::{Map, Value, json};
 use tokio::sync::{Notify, oneshot};
 
@@ -217,8 +217,8 @@ impl ConfigControl for NoSettings {
 }
 
 /// A host's builder over `storage`, with nobody to ask, no settings, an
-/// App Store and an internet nothing serves, and no connection of the
-/// person's.
+/// App Store and an internet nothing serves, no connection of the
+/// person's and a quiet conversation.
 pub(crate) fn builder(storage: Arc<dyn CharacterStorage>) -> PluginHostBuilder {
     PluginHost::builder(
         storage,
@@ -227,6 +227,7 @@ pub(crate) fn builder(storage: Arc<dyn CharacterStorage>) -> PluginHostBuilder {
         nowhere(),
         offline(),
         Arc::new(Unconnected),
+        Arc::new(Quiet),
     )
 }
 
@@ -249,6 +250,21 @@ impl Connections for Unconnected {
         _request: &TextCompletionRequest,
     ) -> Result<String, Unanswered> {
         unreachable!("no app of these tests asks a model")
+    }
+}
+
+/// Her conversation with the person, quiet: Messages alone carries her
+/// messages, and nothing came in it.
+#[derive(Debug)]
+pub(crate) struct Quiet;
+
+impl Chats for Quiet {
+    fn apps(&self) -> AppNames {
+        AppNames::new([])
+    }
+
+    fn newest(&self, _app: &str, _count: usize) -> Result<Vec<HistoryMessage>, String> {
+        Ok(Vec::new())
     }
 }
 

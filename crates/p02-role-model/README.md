@@ -9,16 +9,24 @@ what the plugins prepared again; it picks a provider with
 
 Every sentence the model is told lives in the prompt module; text from a
 plugin or an earlier summary is fenced and never reaches a system message.
-A moment of the character's own opens where the person's line would be,
-with the runtime's fenced note of the time, and of what rang when her
-phone's ringing began it, and the system messages read the same
-whichever began the turn.
+Each of the person's lines, the one a turn opens with and each one her
+history replays, is told under one heading: the app it came in, by the
+name the daemon gives it, and when it was sent, where the person is; her
+own messages replay as she wrote them. A moment of the character's own
+opens where the person's line would be, with the runtime's fenced note of
+the time, and of what rang when her phone's ringing began it, and the
+system messages read the same whichever began the turn.
 
-Each round is judged once, by what began its turn, and recorded before
-anything it decided happens. A round that calls no plugin tool ends the
-turn: in a moment it may say nothing, its text a thought she keeps. A
-refused round is told to the model in the next one, a provider failure
-ends the turn, and a turn spends at most 99 rounds of tool calls.
+Each round is judged once, by what began its turn and the apps she has
+now, and recorded before anything it decided happens. While she has more
+than one app, `send_message` offers them by name; each message she says
+goes in the one she names. Naming none, an answer goes in the app its
+line came in, and a message of her own in the one the person last wrote
+in while she has it, otherwise in Messages. A round that calls no
+plugin tool ends the turn: in a moment it may say nothing, its text a
+thought she keeps. A refused round is told to the model in the next one,
+a provider failure ends the turn, and a turn spends at most 99 rounds of
+tool calls.
 
 An adapter speaks one protocol. The NVIDIA adapter streams a chat
 completion from NVIDIA's cloud or a server of the person's own. The

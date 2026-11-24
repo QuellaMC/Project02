@@ -51,6 +51,10 @@ const icons = {
   key: 'M11.5 15a3.5 3.5 0 1 1-7 0a3.5 3.5 0 1 1 7 0z M10.5 12.5L19 4 M16 7l2 2 M14 9l2 2',
   alert: 'M12 4l9 16H3z M12 10v4 M12 17h.01',
   leaf: 'M5 19c0-8 5-13 14-14 0 9-5 14-13 14z M5 19l7-7',
+  // The apps messages come in, each named as its id, as the design draws them.
+  messages:
+    'M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4.5 3.5V17H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2z',
+  telegram: 'M20.5 4.5L3.5 11l5.5 2 2 5.5 3-4 4 3 2.5-13z M9 13l8-6',
 } as const;
 
 export type IconName = keyof typeof icons;
@@ -77,6 +81,9 @@ const tints = [
   'mint',
   'teal',
   'graphite',
+  // The apps messages come in, each named as its id.
+  'messages',
+  'telegram',
 ] as const;
 
 export type Tint = (typeof tints)[number];

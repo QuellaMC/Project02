@@ -21,6 +21,7 @@ import {
 import {
   calling,
   finish,
+  headed,
   messagesOf,
   reply,
   startModelServer,
@@ -30,7 +31,7 @@ import {
   type ModelRequest,
   type ModelServer,
 } from './harness/model-server.ts';
-import {startTelegramServer} from './harness/telegram-server.ts';
+import {messageFrom, startTelegramServer} from './harness/telegram-server.ts';
 import {
   changeConfig,
   conversationOf,
@@ -205,9 +206,15 @@ it('heartbeat.quiet: a moment answered with plain text or with nothing commits n
   model.answer(reply('Still here.'));
   await say('Still there?', 'still');
   expect(conversationIn(model.requests.at(-1))).toMatchObject([
-    {role: 'user', content: 'Morning.'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Morning.')) as string,
+    },
     {role: 'assistant', content: 'Tea first.'},
-    {role: 'user', content: 'Still there?'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Still there?')) as string,
+    },
   ]);
 
   const log = sessionLog(home, 'mira', `${conversationId}.1`);
@@ -283,14 +290,17 @@ it("heartbeat.writes-first: a moment that calls send_message commits her message
   model.answer(reply('Good.'));
   await say('Yes!', 'yes');
   expect(conversationIn(model.requests.at(-1))).toMatchObject([
-    {role: 'user', content: 'Morning.'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Morning.')) as string,
+    },
     {role: 'assistant', content: 'Tea first.'},
     {
       role: 'user',
       content: expect.stringMatching(pastMoment) as string,
     },
     {role: 'assistant', content: 'Found your keys yet?'},
-    {role: 'user', content: 'Yes!'},
+    {role: 'user', content: expect.stringMatching(headed('Yes!')) as string},
   ]);
 });
 
@@ -336,7 +346,10 @@ it("heartbeat.tools: a moment in which she uses a tool and says nothing ends wit
     ),
   ).toBe(true);
   expect(conversationIn(prompt)).toMatchObject([
-    {role: 'user', content: 'Morning.'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('Morning.')) as string,
+    },
     {role: 'assistant', content: 'Tea first.'},
     {
       role: 'user',
@@ -347,7 +360,10 @@ it("heartbeat.tools: a moment in which she uses a tool and says nothing ends wit
       tool_calls: [{function: {name: 'character_state_patch'}}],
     },
     {role: 'tool'},
-    {role: 'user', content: 'How are you?'},
+    {
+      role: 'user',
+      content: expect.stringMatching(headed('How are you?')) as string,
+    },
   ]);
 });
 
@@ -502,9 +518,9 @@ it('heartbeat.not-before-met: a character whose thread was never opened has no m
   expect(readdirSync(join(home, 'conversations'))).toHaveLength(1);
 });
 
-it('heartbeat.telegram: her own message shows in every paired chat of her bot with Show Other Chats off, and a moment in which she says nothing sends Telegram nothing, not even typing', async () => {
+it('heartbeat.telegram: a message of her own that names no app goes in the app the person last wrote in, Telegram, to every paired chat; a moment in which she says nothing sends Telegram nothing, not even typing', async () => {
   const miraBot = {token: '987654:mira', id: 987654, username: 'mira_bot'};
-  const accounts = [
+  const [alice, bob] = [
     {id: 4242, first_name: 'Alice'},
     {id: 5151, first_name: 'Bob'},
   ];
@@ -515,9 +531,11 @@ it('heartbeat.telegram: her own message shows in every paired chat of her bot wi
       connectors: {
         telegram: {
           config: {
-            mirror: false,
             pairedUsers: Object.fromEntries(
-              accounts.map(account => [String(account.id), account.first_name]),
+              [alice, bob].map(account => [
+                String(account.id),
+                account.first_name,
+              ]),
             ),
           },
         },
@@ -533,25 +551,53 @@ it('heartbeat.telegram: her own message shows in every paired chat of her bot wi
     },
   });
   const daemon = await startDaemon(home, shortened);
+  const wire = wireOf(daemon);
   const events = await openEvents(daemon);
   const telegram = await startTelegramServer([miraBot]);
-  const run = connector(['--store', home], telegram.env);
 
-  // Her bot opens her thread, and her heartbeat starts: her first moment is
-  // a thought of her own, her second a message.
-  model.answer(reply('I wonder how they are.'), {
+  connector(['--store', home], telegram.env);
+  await events.next(
+    frameOf('health_changed', {
+      health: {
+        connectors: [
+          {
+            id: 'telegram',
+            bots: [
+              {target: {scope: 'character', characterId: 'mira'}, state: 'on'},
+            ],
+          },
+        ],
+      },
+    }),
+  );
+  // Alice writes in Telegram; a heartbeat after, her first moment is a
+  // thought of her own, her second a message.
+  model.answer(reply('Tea first.'), reply('I wonder how they are.'), {
     chunks: [...visibleReply('Thinking of you.'), finish('tool_calls')],
   });
-  await run.printed('Telegram: @mira_bot answers for Mira.');
-  await events.next(own('turn_completed'));
+  telegram.push(miraBot.token, messageFrom(alice, 1, 'Morning.'));
 
-  for (const account of accounts) {
+  for (const account of [alice, bob]) {
     await telegram.shows(miraBot.token, account.id, 'Thinking of you.');
+
+    const inChat = telegram
+      .calls(miraBot.token)
+      .filter(call => call.body['chat_id'] === account.id);
+
     expect(
-      telegram
-        .calls(miraBot.token)
-        .filter(call => call.body['chat_id'] === account.id)
+      inChat
+        .slice(inChat.findIndex(call => call.body['text'] === 'Tea first.') + 1)
         .map(call => [call.method, call.body['text']]),
     ).toEqual([['sendMessage', 'Thinking of you.']]);
   }
+
+  const {conversationId} = await conversationOf(wire, 'mira');
+
+  await expect(wire.history(conversationId)).resolves.toMatchObject({
+    messages: [
+      {role: 'user', text: 'Morning.', app: 'telegram'},
+      {role: 'character', text: 'Tea first.', app: 'telegram'},
+      {role: 'character', text: 'Thinking of you.', app: 'telegram'},
+    ],
+  });
 });

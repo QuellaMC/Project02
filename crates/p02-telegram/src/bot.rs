@@ -54,7 +54,6 @@ pub(crate) enum Inbox {
 pub(crate) struct Start {
     pub(crate) telegram: Arc<Telegram>,
     pub(crate) token: BotToken,
-    pub(crate) draft_edits: Duration,
     pub(crate) daemon: watch::Receiver<Option<Daemon>>,
     pub(crate) held: watch::Receiver<bool>,
     pub(crate) latest: watch::Receiver<Option<Latest>>,
@@ -150,7 +149,6 @@ async fn run(
     let Start {
         telegram,
         token,
-        draft_edits,
         daemon,
         held,
         latest,
@@ -190,7 +188,6 @@ async fn run(
         api.clone(),
         settings.clone(),
         held.clone(),
-        draft_edits,
         Arc::clone(&lines),
         quiet.clone(),
         &tasks,

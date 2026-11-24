@@ -128,8 +128,8 @@ export function catalogCharacterOf(
 
 /**
  * What her Phone group shows where its icons are: her apps but the App
- * Store, which has nothing to set; or why her phone could not be read, in
- * the daemon's words.
+ * Store and the apps messages come in, which have nothing to set; or why
+ * her phone could not be read, in the daemon's words.
  */
 export type Strip =
   | {readonly kind: 'apps'; readonly apps: readonly PhoneApp[]}
@@ -142,7 +142,10 @@ export function stripOf(phone: PhoneOutcome | undefined): Strip | undefined {
   }
 
   return phone.status === 'ok'
-    ? {kind: 'apps', apps: phone.apps.filter(app => app.id !== appStore)}
+    ? {
+        kind: 'apps',
+        apps: phone.apps.filter(app => app.id !== appStore && !app.messaging),
+      }
     : {kind: 'unread', message: phone.message};
 }
 

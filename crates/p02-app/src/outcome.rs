@@ -4,7 +4,7 @@
 //! stream is told it.
 
 use p02_characters::{PackageDiagnostic, PackageLocation};
-use p02_core::{ClientStamp, ConversationId, MessageId};
+use p02_core::{ClientStamp, ConversationId, MessageId, app_of};
 use p02_plugins::PHONE_PLUGIN;
 use p02_runtime::Progress;
 use p02_shared::{Identifier, error_sentence};
@@ -83,12 +83,18 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
                 speaker_id: message.speaker_id,
                 speaker_name: message.speaker_name,
                 text: message.text,
+                sent_at: message.sent_at,
+                app: app_of(Some(&source)).to_owned(),
                 source,
                 client_message_id,
             }),
             true,
         ),
-        Progress::VisibleReply { message, draft } => {
+        Progress::VisibleReply {
+            message,
+            draft,
+            app,
+        } => {
             let draft_id = draft.to_string();
 
             turn.drafts.retain(|open| open.draft_id != draft_id);
@@ -98,6 +104,8 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
                     speaker_id: message.speaker_id,
                     speaker_name: message.speaker_name,
                     text: message.text,
+                    sent_at: message.sent_at,
+                    app,
                     draft_id,
                 }),
                 true,

@@ -1,8 +1,8 @@
 /**
  * Telegram, the one connector, drawn by hand: its switch, each
- * character's bot, the accounts paired and the requests waiting, what it
- * shows of other chats, and the home's own bot; and a bot's page, its
- * token to add or how health says it stands.
+ * character's bot, the accounts paired and the requests waiting, and the
+ * home's own bot; and a bot's page, its token to add or how health says it
+ * stands.
  */
 import type {JsonValue, PairingRequest} from '@project02/wire/contract';
 import {
@@ -101,7 +101,6 @@ export function TelegramPage({ctx}: {readonly ctx: Ctx}) {
           <Bots ctx={ctx} />
           <Paired ctx={ctx} />
           <Group>
-            <Mirror ctx={ctx} />
             <LinkCell
               {...botValue(ctx, home)}
               tall
@@ -248,22 +247,6 @@ function Request({
         </button>
       </span>
     </Cell>
-  );
-}
-
-/** Show Other Chats: the home's switch for what the bots show of other surfaces. */
-function Mirror({ctx}: {readonly ctx: Ctx}) {
-  const row = telegramRow('mirror');
-  const view = viewOf(ctx.settings, home);
-  const field = view === undefined ? undefined : fieldAt(view, row.place);
-
-  return field === undefined ? null : (
-    <FieldRow
-      ctx={ctx}
-      row={row}
-      field={field}
-      detail="Also shows what you say in this app"
-    />
   );
 }
 

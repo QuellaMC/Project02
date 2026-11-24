@@ -3,25 +3,33 @@
 //! earlier one's, and the window of turns that fits the context.
 
 use std::num::NonZeroU64;
+use std::sync::LazyLock;
 
 use jiff::tz::TimeZone;
 use p02_contracts::{
     ChatFunctionCall, ChatMessage, ChatToolCall, ConversationToolCall, ConversationTurn,
     ToolCallResult, ToolRound,
 };
+use p02_core::AppNames;
 use serde::Serialize;
 use serde_json::json;
 
-use crate::prompt::past_moment;
+use crate::prompt::{line, past_moment};
 
-/// An earlier turn as the model replays it: the person's line, or the note
-/// of a moment of the character's own, telling when it was in `zone` and
-/// what rang when her phone's ringing began it; each tool round as the
-/// assistant's calls and their results; then the character's replies as
-/// plain assistant text. `send_message` itself is never replayed.
-pub(crate) fn turn_messages(turn: &ConversationTurn, zone: &TimeZone) -> Vec<ChatMessage> {
+/// An earlier turn as the model replays it: the person's line under its
+/// heading, the app it came in by the name `apps` gives it and when it was
+/// sent, or the note of a moment of the character's own, telling when it
+/// was and what rang when her phone's ringing began it, each time in
+/// `zone`; each tool round as the assistant's calls and their results; then
+/// the character's replies as plain assistant text. `send_message` itself
+/// is never replayed.
+pub(crate) fn turn_messages(
+    turn: &ConversationTurn,
+    apps: &AppNames,
+    zone: &TimeZone,
+) -> Vec<ChatMessage> {
     let opening = match &turn.user_message {
-        Some(line) => line.text.to_string(),
+        Some(message) => line(message, turn.source.as_ref(), apps, zone),
         None => past_moment(
             &turn.identity.created_at().in_zone(zone.clone()),
             &turn.rang,
@@ -119,10 +127,12 @@ fn estimated_tokens(chars: u64) -> u64 {
     chars.div_ceil(4)
 }
 
-/// What `turn` costs replayed, a moment's note counted in UTC, which its
-/// length hardly feels.
+/// What `turn` costs replayed, its times told in UTC and its app by no name
+/// but Messages, which its length hardly feels.
 fn turn_tokens(turn: &ConversationTurn) -> u64 {
-    turn_messages(turn, &TimeZone::UTC)
+    static UNNAMED: LazyLock<AppNames> = LazyLock::new(|| AppNames::new([]));
+
+    turn_messages(turn, &UNNAMED, &TimeZone::UTC)
         .iter()
         .map(|message| estimated_tokens(wire_chars(message)))
         .sum()
@@ -177,7 +187,9 @@ mod tests {
                 "speakerId": "local-user",
                 "speakerName": "You",
                 "text": format!("question {index}"),
+                "sentAt": "2026-06-14T23:58:00.000Z",
             },
+            "source": "web",
             "toolRounds": [],
             "finalReplies": [{
                 "id": format!("chat.1:message-{}", index * 2),
@@ -185,9 +197,15 @@ mod tests {
                 "speakerId": "mira",
                 "speakerName": "Mira",
                 "text": reply,
+                "sentAt": "2026-06-15T00:00:02.000Z",
             }],
         }))
         .unwrap()
+    }
+
+    /// The apps a line comes in, named as the daemon names them.
+    fn apps() -> AppNames {
+        AppNames::new([("telegram", "Telegram")])
     }
 
     fn ids(turns: &[ConversationTurn]) -> Vec<&str> {
@@ -250,13 +268,14 @@ mod tests {
                 "speakerId": "mira",
                 "speakerName": "Mira",
                 "text": "Found your keys yet?",
+                "sentAt": "2026-11-07T04:40:03.000Z",
             }],
         }))
         .unwrap();
         let zone = TimeZone::fixed(jiff::tz::offset(-5));
 
         assert_eq!(
-            serde_json::to_value(turn_messages(&moment, &zone)).unwrap(),
+            serde_json::to_value(turn_messages(&moment, &apps(), &zone)).unwrap(),
             json!([
                 {
                     "role": "user",
@@ -295,13 +314,14 @@ mod tests {
                 "speakerId": "mira",
                 "speakerName": "Mira",
                 "text": "Up you get.",
+                "sentAt": "2026-11-07T04:40:03.000Z",
             }],
         }))
         .unwrap();
         let zone = TimeZone::fixed(jiff::tz::offset(-5));
 
         assert_eq!(
-            serde_json::to_value(turn_messages(&moment, &zone)).unwrap(),
+            serde_json::to_value(turn_messages(&moment, &apps(), &zone)).unwrap(),
             json!([
                 {
                     "role": "user",
@@ -317,6 +337,8 @@ mod tests {
         );
     }
 
+    /// The person's line replays under its heading, then each tool round as
+    /// the calls and their results, then her replies as she wrote them.
     #[test]
     fn a_tool_round_replays_as_its_note_and_replies_its_calls_and_their_results() {
         let mut replayed = turn(1, "done");
@@ -331,6 +353,7 @@ mod tests {
                     "speakerId": "mira",
                     "speakerName": "Mira",
                     "text": "checking",
+                    "sentAt": "2026-06-15T00:00:01.000Z",
                 }],
                 "toolCalls": [{
                     "toolCallId": "call-1",
@@ -344,9 +367,12 @@ mod tests {
         ];
 
         assert_eq!(
-            serde_json::to_value(turn_messages(&replayed, &TimeZone::UTC)).unwrap(),
+            serde_json::to_value(turn_messages(&replayed, &apps(), &TimeZone::UTC)).unwrap(),
             json!([
-                {"role": "user", "content": "question 1"},
+                {
+                    "role": "user",
+                    "content": "In Messages, on Sunday, June 14, 2026, at 23:58:\nquestion 1",
+                },
                 {
                     "role": "assistant",
                     "content": "let me look\n\nchecking",
@@ -365,7 +391,7 @@ mod tests {
             ])
         );
         assert!(
-            !serde_json::to_string(&turn_messages(&replayed, &TimeZone::UTC))
+            !serde_json::to_string(&turn_messages(&replayed, &apps(), &TimeZone::UTC))
                 .unwrap()
                 .contains("send_message")
         );

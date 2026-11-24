@@ -6,7 +6,7 @@ use p02_phone::{Phone, SignedIn, Source};
 use p02_shared::Identifier;
 use serde_json::json;
 
-use crate::support::{Files, manifest, text};
+use crate::support::{Files, manifest, quiet, text};
 
 fn phone() -> &'static Phone {
     Phone::bundled().unwrap()
@@ -35,7 +35,7 @@ fn signed(connection: &str, model: Option<&str>) -> SignedIn {
 
 /// How Asker is signed in on the phone `files` keep.
 fn asker_signed_in(files: &Files) -> Option<SignedIn> {
-    let on_phone = phone().apps(files).unwrap();
+    let on_phone = phone().apps(files, &quiet()).unwrap();
 
     on_phone.signed_in(on_phone.app("asker").unwrap()).cloned()
 }
@@ -45,7 +45,7 @@ fn an_app_signed_in_is_kept_whole_through_its_update_and_forgotten_when_it_is_re
     let mut files = Files::default();
 
     phone()
-        .install(&mut files, &asker("1.0.0"), Source::File)
+        .install(&mut files, &quiet(), &asker("1.0.0"), Source::File)
         .unwrap();
 
     assert_eq!(asker_signed_in(&files), None);
@@ -61,7 +61,7 @@ fn an_app_signed_in_is_kept_whole_through_its_update_and_forgotten_when_it_is_re
         )
         .unwrap();
     phone()
-        .install(&mut files, &asker("1.1.0"), Source::Catalog)
+        .install(&mut files, &quiet(), &asker("1.1.0"), Source::Catalog)
         .unwrap();
 
     assert_eq!(
@@ -80,7 +80,7 @@ fn an_app_signed_in_is_kept_whole_through_its_update_and_forgotten_when_it_is_re
     phone()
         .sign_in(&mut files, "asker", Some(signed("chatgpt", None)))
         .unwrap();
-    phone().remove(&mut files, "asker").unwrap();
+    phone().remove(&mut files, &quiet(), "asker").unwrap();
 
     assert_eq!(files.documents["signed-in.json"], json!({"apps": {}}));
 }
@@ -90,14 +90,14 @@ fn a_list_of_the_apps_signed_in_that_does_not_read_is_passed_over_and_said_each_
     let mut files = Files::default();
 
     phone()
-        .install(&mut files, &asker("1.0.0"), Source::File)
+        .install(&mut files, &quiet(), &asker("1.0.0"), Source::File)
         .unwrap();
     files.documents.insert(
         "signed-in.json".to_owned(),
         json!({"apps": [{"asker": "chatgpt"}]}),
     );
 
-    let on_phone = phone().apps(&files).unwrap();
+    let on_phone = phone().apps(&files, &quiet()).unwrap();
 
     assert_eq!(on_phone.signed_in(on_phone.app("asker").unwrap()), None);
     assert_eq!(

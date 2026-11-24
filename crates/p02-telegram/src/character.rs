@@ -1,8 +1,9 @@
 //! A character's bot: her thread with the person, opened once the bot
-//! knows its name; a paired account's line handed to her inbox; her
-//! conversation shown in every paired chat as the stream tells it, her own
-//! turns always; and a card with Approve and Deny for each confirmation a
-//! turn of this bot's line raises. Nothing is read from history.
+//! knows its name; a paired account's line handed to her inbox, and her
+//! typing shown in its chat while the turn it began runs; each message she
+//! sends in Telegram posted whole in every paired chat, and nothing else of
+//! her conversation; and a card with Approve and Deny for each confirmation
+//! a turn of this bot's line raises. Nothing is read from history.
 
 use p02_core::{ClientStamp, ConversationId};
 use p02_shared::Identifier;
@@ -14,9 +15,9 @@ use p02_wire::{
 use crate::bot::{Chat, DAEMON_DOWN, Done, Rules};
 use crate::bot_api::Message;
 use crate::cards::{CardKind, CardText, Press, confirm, confirmation_ending};
-use crate::daemon::short;
+use crate::daemon::{CONNECTOR, short};
 use crate::outbox::Target;
-use crate::table::{Owner, Snapshot};
+use crate::table::Snapshot;
 
 const TEXT_ONLY: &str = "I can only read text here for now.";
 
@@ -43,16 +44,6 @@ impl Character {
 
     fn name(chat: &Chat) -> String {
         chat.settings().owner.name().to_owned()
-    }
-
-    /// Whether a turn the line `source` carried is shown here: this bot
-    /// carried it, or Mirror is on; and a turn of her own, which no line
-    /// began, always.
-    fn shown(chat: &Chat, source: Option<&ClientStamp>) -> bool {
-        source.is_none_or(|source| {
-            *source == chat.source
-                || matches!(chat.settings().owner, Owner::Character { mirror: true, .. })
-        })
     }
 
     /// Opens her thread, unless it is open or being opened.
@@ -121,15 +112,21 @@ impl Character {
         }
     }
 
-    /// Her turn as the daemon says it now, none once it ended: its drafts
-    /// brought to their words in the chats, posted where none is when it
-    /// is shown here, and a draft shown that it no longer holds withdrawn.
+    /// Her turn as the daemon says it now, none once it ended: while one a
+    /// line of this bot's began runs, the chat the line came from shows her
+    /// typing.
     fn running(&mut self, chat: &Chat, turn: Option<RunningTurn>) {
-        let (drafts, shown) = turn.as_ref().map_or((Vec::new(), false), |turn| {
-            (turn.drafts.clone(), Self::shown(chat, turn.source.as_ref()))
-        });
+        let typing = |turn: Option<&RunningTurn>| {
+            turn.filter(|turn| turn.source.as_ref() == Some(&chat.source))
+                .and_then(|turn| turn.client_message_id.as_ref())
+                .and_then(chat_of_line)
+        };
+        let now = typing(turn.as_ref());
 
-        chat.outbox.drafts(drafts, shown);
+        if now != typing(self.turn.as_ref()) {
+            chat.outbox.keep_typing(now);
+        }
+
         self.turn = turn;
     }
 
@@ -162,24 +159,13 @@ impl Character {
         );
     }
 
-    /// What her turn says as it goes: its line shown as the person's when
-    /// another surface carried it, and each reply ending its draft as
-    /// committed.
-    fn progressed(&self, chat: &Chat, progress: &TurnProgress) {
-        match progress {
-            TurnProgress::UserMessage { source, text, .. } if Self::shown(chat, Some(source)) => {
-                chat.outbox
-                    .started((*source != chat.source).then(|| format!("You ({source}): {text}")));
-            }
-            TurnProgress::VisibleReply { draft_id, text, .. } => {
-                let shown = self
-                    .turn
-                    .as_ref()
-                    .is_some_and(|turn| Self::shown(chat, turn.source.as_ref()));
-
-                chat.outbox.commit(draft_id, text.to_string(), shown);
-            }
-            _ => {}
+    /// A message of hers, once committed, posted whole when she sent it in
+    /// Telegram.
+    fn progressed(chat: &Chat, progress: &TurnProgress) {
+        if let TurnProgress::VisibleReply { app, text, .. } = progress
+            && app == CONNECTOR
+        {
+            chat.outbox.post(text.to_string());
         }
     }
 }
@@ -224,11 +210,10 @@ impl Rules for Character {
         }
     }
 
-    /// On a stream the daemon could not resume, her turn is the snapshot's:
-    /// a draft shown here that it still carries keeps its message and is
-    /// brought to its words, and one it does not is withdrawn. A card whose
-    /// confirmation the snapshot no longer holds is ended, and one still
-    /// waiting has its card where it should.
+    /// On a stream the daemon could not resume, her turn is the snapshot's,
+    /// and her typing shows where it says. A card whose confirmation the
+    /// snapshot no longer holds is ended, and one still waiting has its
+    /// card where it should.
     fn install(&mut self, chat: &mut Chat, snapshot: &Snapshot) {
         let turn = snapshot
             .turns
@@ -261,7 +246,7 @@ impl Rules for Character {
                 character_id,
                 progress,
                 ..
-            } if *character_id == self.id => self.progressed(chat, progress),
+            } if *character_id == self.id => Self::progressed(chat, progress),
             Event::TurnCompleted {
                 character_id,
                 source,

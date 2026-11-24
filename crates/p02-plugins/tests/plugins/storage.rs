@@ -309,6 +309,14 @@ impl Feed {
             NonZeroU64::new(u64::try_from(number).unwrap()).unwrap(),
         );
 
+        let at = Timestamp::new(&format!(
+            "2026-10-18T{:02}:{:02}:{:02}.000Z",
+            second / 3_600,
+            second / 60 % 60,
+            second % 60
+        ))
+        .unwrap();
+
         messages.push(HistoryMessage {
             message: VisibleMessage {
                 id: message_id.clone(),
@@ -316,14 +324,9 @@ impl Feed {
                 speaker_id: id(speaker_id),
                 speaker_name: SpeakerName::new(speaker).unwrap(),
                 text: VisibleText::normalize(text).unwrap(),
+                sent_at: at.clone(),
             },
-            committed_at: Timestamp::new(&format!(
-                "2026-10-18T{:02}:{:02}:{:02}.000Z",
-                second / 3_600,
-                second / 60 % 60,
-                second % 60
-            ))
-            .unwrap(),
+            committed_at: at,
         });
         message_id.to_string()
     }

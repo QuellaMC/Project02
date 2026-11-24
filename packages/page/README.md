@@ -53,15 +53,33 @@ away from it, and only their scroll says so (`thread-scroll.ts`): it
 follows the dock frame by frame, and what is new at its end eases in by
 the dock's closing, so a line that arrives as the dock closes settles
 with it in one motion; a chat scrolled up does not move. A person who
-asked for less motion gets none. Each turn in progress is the daemon's
-own word on it, replaced whole by each `turn_running` frame and installed
-from every `ready`; a stream the daemon resumed is live again with nothing
-installed.
+asked for less motion gets none. The thread reads as a messaging app's,
+by the rules of `thread-layout.ts`, pure and tested in Node: a time stands
+above a message that is the first shown or was sent on another day, more
+than 15 minutes after, or in another app than the one before it, with the
+app's name above the time where the app changed; the day is in the page's
+words and the time as the viewer's system writes one, where they are, and
+each bubble says its own on hover; the person's bubbles take their app's
+colour, Telegram's or the page's blue; one sender's messages in a row sit
+close; and the head of the chat names her, while a bubble says whose it is
+only to a reader of the screen. A line of the
+person's not yet committed is drawn as theirs sent now in Messages. Each
+turn in progress is the daemon's own word on it, replaced whole by each
+`turn_running` frame and installed from every `ready`; a stream the daemon
+resumed is live again with nothing installed.
 A turn of her own, which no line began, shows nothing until she drafts,
 and its end raises no notice. A reply of hers committed to a chat that
 is not on screen, whatever began her turn, puts a dot after her name in
 the roster until her chat opens: one dot however many wait, the tab's
 own, so a reload starts without.
+In the desktop app, a message of hers the stream commits in Messages
+while the main window does not have the focus has the app show a
+notification, her name over her words, once for each message, by the
+rule of `notifications.ts`, pure and tested in Node: none for her drafts,
+a page of the scrollback or a snapshot, for what she sends in Telegram,
+or while the window is in front. The first asks the system's permission,
+once, and a no is final and silent. Her phone's window never notifies,
+and a browser tab, which has no such call, shows none.
 Her chat's head has a Her Phone button unless the daemon says she has no
 phone. It opens her phone in the one window every character's phone
 shares, and closes it, and is pressed while that window shows hers: the
@@ -150,8 +168,8 @@ character a model.
 
 While her settings give her a phone, her page has her phone, over the
 daemon's verbs for her apps: A Gift from You, a field of her phone's; an
-icon for each app on her phone but the App Store, which has nothing to
-set, each opening the app's page; Get More Apps; and, among her
+icon for each app on her phone but the App Store and the apps messages
+come in, which have nothing to set, each opening the app's page; Get More Apps; and, among her
 permissions, Ask to Install Apps, her phone's other field. Each field is
 saved as any field is. A page about her
 apps reads her phone when the window comes to it and again on every
@@ -216,15 +234,31 @@ app's id say so in place of their status: "Waiting", and "Waiting for
 you", since the window does not know the person's name. The window learns
 of her asks from what the stream says of confirmations, those waiting
 when it connects and each one raised and settled; the daemon keeps none.
+An app her phone says messages come in, Messages or a connector's, is
+drawn as its thread, never read as a view: once one is on screen the
+window opens her conversation as the chat does and reads its newest page
+by the chat's rules, `store.ts`'s, and a message the stream commits joins
+it as it joins the chat; no earlier page is read. It shows what went
+through that app alone, laid out by `thread-layout.ts` as the chat is and
+mirrored, since it is her phone: hers at the line's end in the app's
+colour and the person's at its start on a card, a time where time has
+passed and no app's name, one app being on screen; her drafts are not
+there. At its head stand a way back to her home screen and the person,
+by the name their newest message goes by, with the app's name under
+theirs but in Messages; at its foot a message box that is only drawn. It
+follows its newest message as the chat does, and a conversation that
+cannot be opened or read is said in the daemon's sentence where her
+messages would be.
 A character the daemon does not know, or whose settings give her no phone,
 is said in the daemon's sentence where her phone would be.
 `phone-window.tsx` and `phone-device.tsx` draw it as the design draws an
 iPhone, with nothing painted around it, so a window that can show what is
 behind it does. `window-calls.ts` tells, from the page's `window` and
 importing nothing of the app, whether a page is in the desktop app and what
-its window answers. The app's window for her phone has no frame of its own
-and answers four window calls: there the bar moves the window, a pin keeps
-it on top of other windows as the window says it does, and closing it, from
-the bar or when the chat asks, is the app's. A browser's popup, which has a
-title bar of its own, answers none: it gets no pin and no moving bar, and
-closes as a window a script opened.
+its window answers, and has the app show a notification. The app's window
+for her phone has no frame of its own and answers four window calls: there
+the bar moves the window, a pin keeps it on top of other windows as the
+window says it does, and closing it, from the bar or when the chat asks, is
+the app's. A browser's popup, which has a title bar of its own, answers
+none: it gets no pin and no moving bar, and closes as a window a script
+opened.

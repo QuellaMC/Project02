@@ -231,65 +231,101 @@ function createFrameParser(emit: (frame: Frame) => void): {
   readonly feed: (text: string) => void;
   readonly end: () => void;
 } {
-  let rest = '';
+  const lineEnd = /\r\n|\r|\n/gu;
+  // The line not yet ended, in the pieces it came in: joined once, when it
+  // ends, so a line of megabytes costs its length once, however many
+  // pieces it comes in.
+  let pieces: string[] = [];
+  // A CR at the very end of a piece may be the first half of a CRLF.
+  let heldCr = false;
   let fields: {id?: string; event?: string; data?: string; comment?: string} =
     {};
+  const take = (line: string): void => {
+    if (line === '') {
+      if (fields.data !== undefined) {
+        checkFrame(fields.event, fields.data);
+      }
+
+      if (Object.keys(fields).length > 0) {
+        emit(fields);
+      }
+
+      fields = {};
+
+      return;
+    }
+
+    const colon = line.indexOf(':');
+    const name = colon === -1 ? line : line.slice(0, colon);
+    const value = colon === -1 ? '' : line.slice(colon + 1).replace(/^ /u, '');
+
+    if (name === '') {
+      fields.comment = value;
+    } else if (name === 'data') {
+      fields.data =
+        fields.data === undefined ? value : `${fields.data}\n${value}`;
+    } else if (name === 'id' || name === 'event') {
+      fields[name] = value;
+    }
+  };
   const feed = (text: string): void => {
-    rest += text;
+    const piece = heldCr ? `\r${text}` : text;
+    let from = 0;
+
+    heldCr = false;
 
     for (;;) {
-      const end = /\r\n|\r|\n/u.exec(rest);
+      lineEnd.lastIndex = from;
 
-      // A CR at the very end may be the first half of a CRLF.
-      if (end === null || (end[0] === '\r' && end.index === rest.length - 1)) {
+      const end = lineEnd.exec(piece);
+
+      if (end === null) {
+        pieces.push(piece.slice(from));
+
         return;
       }
 
-      const line = rest.slice(0, end.index);
+      pieces.push(piece.slice(from, end.index));
 
-      rest = rest.slice(end.index + end[0].length);
+      if (end[0] === '\r' && end.index === piece.length - 1) {
+        heldCr = true;
 
-      if (line === '') {
-        if (fields.data !== undefined) {
-          checkFrame(fields.event, fields.data);
-        }
-
-        if (Object.keys(fields).length > 0) {
-          emit(fields);
-        }
-
-        fields = {};
-        continue;
+        return;
       }
 
-      const colon = line.indexOf(':');
-      const name = colon === -1 ? line : line.slice(0, colon);
-      const value =
-        colon === -1 ? '' : line.slice(colon + 1).replace(/^ /u, '');
+      const line = pieces.join('');
 
-      if (name === '') {
-        fields.comment = value;
-      } else if (name === 'data') {
-        fields.data =
-          fields.data === undefined ? value : `${fields.data}\n${value}`;
-      } else if (name === 'id' || name === 'event') {
-        fields[name] = value;
-      }
+      pieces = [];
+      from = end.index + end[0].length;
+      take(line);
     }
   };
 
   return {
     feed,
     end: () => {
-      if (rest.endsWith('\r')) {
+      if (heldCr) {
         feed('\n');
       }
     },
   };
 }
 
+/**
+ * The most of a frame's field a failure shows: a frame of a long draft
+ * holds megabytes, and a report of them takes a runner hours to print.
+ */
+const shownChars = 2000;
+
 function describeFrame(frame: Frame): string {
   return Object.entries(frame)
-    .map(([field, value]) => `${field}: ${value}`)
+    .map(
+      ([field, value]) =>
+        `${field}: ${
+          value.length > shownChars
+            ? `${value.slice(0, shownChars)}… (${String(value.length)} characters)`
+            : value
+        }`,
+    )
     .join(' | ');
 }

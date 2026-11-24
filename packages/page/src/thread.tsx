@@ -8,6 +8,7 @@ import {
   type Thread,
   type WebState,
 } from './store.ts';
+import {laidOut, type Divider, type Placement} from './thread-layout.ts';
 import {useFollowing} from './thread-scroll.ts';
 
 /** States a character rests in; one switched off and resting is off. */
@@ -92,7 +93,15 @@ export function ThreadPane({
   const phoning = state.phoning.has(thread.conversationId);
   // A turn of her own, which no line began, shows nothing until she drafts.
   const writing = turn?.clientMessageId !== undefined && drafts.length === 0;
-  const shown = [...(thread.stale ?? []), ...thread.messages];
+  const {locale, timeZone} = Intl.DateTimeFormat().resolvedOptions();
+  const laid = laidOut(
+    {
+      messages: [...(thread.stale ?? []), ...thread.messages],
+      between: drafts.length > 0 || phoning || writing,
+      pending,
+    },
+    {now: Date.now(), locale, timeZone},
+  );
   // Which pages of its history the thread has read: a page landing moves
   // its lines as a whole, where anything else changes only its end.
   const following = useFollowing(
@@ -133,16 +142,22 @@ export function ThreadPane({
               Load earlier
             </button>
           )}
-          {shown.map(message => (
+          {laid.messages.map(placed => (
             <Bubble
-              key={message.messageId}
-              own={message.role === 'user'}
-              name={message.speakerName}
-              text={message.text}
+              key={placed.message.messageId}
+              own={placed.own}
+              speaker={placed.message.speakerName}
+              text={placed.message.text}
+              placement={placed}
             />
           ))}
           {drafts.map(draft => (
-            <Bubble key={draft.draftId} name={name} text={draft.text} draft />
+            <Bubble
+              key={draft.draftId}
+              speaker={name}
+              text={draft.text}
+              draft
+            />
           ))}
           {phoning ? (
             <p className="typing muted small">
@@ -152,9 +167,19 @@ export function ThreadPane({
           ) : writing ? (
             <p className="typing muted small">{name} is writing…</p>
           ) : null}
-          {pending.map(([clientMessageId, line]) => (
-            <Bubble key={clientMessageId} own text={line.text} pending />
-          ))}
+          {laid.pending.map(placed => {
+            const [clientMessageId, line] = placed.message;
+
+            return (
+              <Bubble
+                key={clientMessageId}
+                own
+                text={line.text}
+                placement={placed}
+                pending
+              />
+            );
+          })}
         </div>
         <div className="slack" ref={following.slack} aria-hidden="true" />
       </div>
@@ -233,31 +258,65 @@ function HerPhoneButton({
   );
 }
 
-function Bubble({
+/**
+ * A bubble, with what stands above it where the thread's layout puts
+ * anything there; a draft of hers has no place of its own yet. Whose it
+ * is, `speaker`, is said to a reader of the screen and not drawn: the
+ * side and the colour say it to the eye. Her phone draws its threads with
+ * it too.
+ */
+export function Bubble({
   own = false,
   draft = false,
   pending = false,
-  name,
+  speaker,
+  placement,
   text,
 }: {
   readonly own?: boolean;
   readonly draft?: boolean;
   readonly pending?: boolean;
-  readonly name?: string;
+  readonly speaker?: string;
+  readonly placement?: Placement;
   readonly text: string;
 }) {
   const kind = own ? 'own' : 'theirs';
 
   return (
-    <div
-      className={`bubble bubble-${kind}${draft ? ' bubble-draft' : ''}${pending ? ' bubble-pending' : ''}`}
-      data-draft={draft ? 'true' : undefined}
-      data-pending={pending ? 'true' : undefined}
-    >
-      {own || name === undefined ? null : (
-        <span className="bubble-name">{name}</span>
+    <>
+      {placement?.divider === undefined ? null : (
+        <TimeDivider divider={placement.divider} />
       )}
-      <span className="bubble-text">{text}</span>
+      <div
+        className={`bubble bubble-${kind}${placement?.joined === true ? ' bubble-joined' : ''}${draft ? ' bubble-draft' : ''}${pending ? ' bubble-pending' : ''}`}
+        style={
+          placement?.colour === undefined
+            ? undefined
+            : {background: placement.colour}
+        }
+        title={placement?.when}
+        data-draft={draft ? 'true' : undefined}
+        data-pending={pending ? 'true' : undefined}
+      >
+        {speaker === undefined ? null : (
+          <span className="visually-hidden">{`${speaker}: `}</span>
+        )}
+        <span className="bubble-text">{text}</span>
+      </div>
+    </>
+  );
+}
+
+/** Where time has passed or the app changed: the app's name where it changed, then the day and the time. */
+function TimeDivider({divider}: {readonly divider: Divider}) {
+  return (
+    <div className="divider">
+      {divider.app === undefined ? null : (
+        <span className="divider-app">{divider.app}</span>
+      )}
+      <time dateTime={divider.at}>
+        <span className="divider-day">{divider.day}</span> {divider.time}
+      </time>
     </div>
   );
 }

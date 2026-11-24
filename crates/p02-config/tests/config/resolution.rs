@@ -60,12 +60,12 @@ fn a_value_held_outside_its_scope_warns_at_its_path_and_never_takes_effect() {
             {
                 "characterId": "mira",
                 "activation": {"enabled": true, "status": "active", "reasons": ["built_in_connector", "enabled_by_default"]},
-                "values": {"mirror": true, "pairedUsers": {}},
+                "values": {"pairedUsers": {}},
             },
             {
                 "characterId": "zeta",
                 "activation": {"enabled": true, "status": "active", "reasons": ["built_in_connector", "enabled_by_default"]},
-                "values": {"mirror": true, "pairedUsers": {}},
+                "values": {"pairedUsers": {}},
             },
         ])
     );
@@ -201,7 +201,7 @@ fn a_plugin_and_a_connector_sharing_an_id_never_meet() {
         "global_with_character_overrides",
         true,
         &json!([{
-            "name": "mirror", "description": "Not the connector's.", "secret": false,
+            "name": "pairedUsers", "description": "Not the connector's.", "secret": false,
             "valueType": "string", "redactionLabels": [],
         }]),
     ));
@@ -209,8 +209,8 @@ fn a_plugin_and_a_connector_sharing_an_id_never_meet() {
     let world = World::with_plugins(declared);
 
     world.write_home(&document(json!({
-        "plugins": {"telegram": {"config": {"mirror": "plain text"}}},
-        "connectors": {"telegram": {"config": {"mirror": "not a boolean"}}},
+        "plugins": {"telegram": {"config": {"pairedUsers": "plain text"}}},
+        "connectors": {"telegram": {"config": {"pairedUsers": "not an object"}}},
     })));
 
     let view = world.view(&home());
@@ -219,7 +219,7 @@ fn a_plugin_and_a_connector_sharing_an_id_never_meet() {
 
     assert_eq!(plugin["activation"]["status"], "active");
     assert_eq!(
-        field(plugin, "mirror").unwrap()["effective"]["value"],
+        field(plugin, "pairedUsers").unwrap()["effective"]["value"],
         "plain text"
     );
     assert_eq!(connector["activation"]["status"], "blocked");
@@ -227,7 +227,7 @@ fn a_plugin_and_a_connector_sharing_an_id_never_meet() {
         findings(&view["diagnostics"]),
         [(
             "runtime_config_value_invalid".to_owned(),
-            "connectors.telegram.config.mirror".to_owned()
+            "connectors.telegram.config.pairedUsers".to_owned()
         )]
     );
 }
@@ -258,7 +258,7 @@ fn what_she_runs_on_changes_only_with_her_own_values_and_the_plugins_she_runs() 
         document(json!({
             "project02": key("nvapi-first"),
             "plugins": {"mem0": mem0},
-            "connectors": {"telegram": {"config": {"mirror": false}}},
+            "connectors": {"telegram": {"config": {"pairedUsers": {"4242": "Alice"}}}},
         })),
         document(json!({
             "project02": key("nvapi-first"),

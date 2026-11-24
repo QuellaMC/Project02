@@ -53,12 +53,17 @@ export type Connection =
 /** A surface's value, the chat's or her phone's window's: how its connection stands moves the same way for each. */
 type Connected = {readonly connection: Connection};
 
-/** A committed message as the page shows it; a person's own is told by its role. */
+/**
+ * A committed message as the page shows it, with when it was sent and the
+ * id of the app it is in; a person's own is told by its role.
+ */
 export type Message = {
   readonly messageId: string;
   readonly role: VisibleMessageRole;
   readonly speakerName: string;
   readonly text: string;
+  readonly sentAt: string;
+  readonly app: string;
   readonly clientMessageId?: string;
 };
 
@@ -397,7 +402,7 @@ export function installSnapshot(
  * The thread set aside for the newest page read next: still on screen,
  * stitched to nothing that comes, and past every cursor it held.
  */
-function setAside(thread: Thread): Thread {
+export function setAside(thread: Thread): Thread {
   return {
     ...thread,
     stale: [...(thread.stale ?? []), ...thread.messages],
@@ -476,10 +481,15 @@ export function pageUnread(
   message: string,
 ): WebState {
   return withThread(state, thread =>
-    thread.conversationId === conversationId && thread.unread !== message
-      ? {...thread, unread: message}
+    thread.conversationId === conversationId
+      ? threadUnread(thread, message)
       : thread,
   );
+}
+
+/** `thread` says why its last page could not be read. */
+export function threadUnread(thread: Thread, message: string): Thread {
+  return thread.unread === message ? thread : {...thread, unread: message};
 }
 
 /**
@@ -491,20 +501,23 @@ export function pageUnread(
  * conversation in front of them.
  */
 export function threadOpened(state: WebState, opened: Opened): WebState {
-  const {conversationId, characterId} = opened;
-  const {thread} = state;
   const unseen = new Set(state.unseen);
 
-  unseen.delete(characterId);
+  unseen.delete(opened.characterId);
 
-  return {
-    ...state,
-    thread:
-      thread?.conversationId === conversationId
-        ? setAside(thread)
-        : {characterId, conversationId, stale: [], messages: []},
-    unseen,
-  };
+  return {...state, thread: threadFor(state.thread, opened), unseen};
+}
+
+/**
+ * The thread `opened` names, waiting for its newest page: `thread`, when
+ * it is that one, set aside, or else a thread of its own.
+ */
+export function threadFor(thread: Thread | undefined, opened: Opened): Thread {
+  const {conversationId, characterId} = opened;
+
+  return thread?.conversationId === conversationId
+    ? setAside(thread)
+    : {characterId, conversationId, stale: [], messages: []};
 }
 
 export function composerChanged(state: WebState, text: string): WebState {
@@ -520,13 +533,7 @@ export function composerChanged(state: WebState, text: string): WebState {
  * a hundred messages, and a busy turn can put more than that between a
  * line and now — so no line is ever returned on a page's silence.
  *
- * The newest page is the thread. What was shown before its first message
- * — earlier pages — stays before it, and what arrived live after its last
- * message stays after it; a page that meets nothing shown is the whole
- * thread, and what was shown came live after it. What a reconnect set
- * aside is replaced. An earlier page goes in front and moves the cursor
- * on. A message the thread already shows is shown once, from a page or
- * from a frame, so reading the same page twice changes nothing.
+ * A page for the thread on screen lands on it as `threadRead` reads one.
  */
 export function historyPageRead(
   state: WebState,
@@ -534,28 +541,40 @@ export function historyPageRead(
   request: HistoryPage,
   outcome: HistoryOutcome,
 ): WebState {
-  const {thread} = state;
+  return withThread(state, thread =>
+    thread.conversationId === conversationId
+      ? threadRead(thread, request, outcome)
+      : thread,
+  );
+}
 
-  if (thread?.conversationId !== conversationId) {
-    return state;
-  }
-
+/**
+ * A page of `thread`'s log, as `request` asked for it. The newest page is
+ * the thread. What was shown before its first message — earlier pages —
+ * stays before it, and what arrived live after its last message stays
+ * after it; a page that meets nothing shown is the whole thread, and what
+ * was shown came live after it. What a reconnect set aside is replaced. An
+ * earlier page goes in front and moves the cursor on. A message the thread
+ * already shows is shown once, from a page or from a frame, so reading the
+ * same page twice changes nothing. A page that could not be read says so
+ * on the thread.
+ */
+export function threadRead(
+  thread: Thread,
+  request: HistoryPage,
+  outcome: HistoryOutcome,
+): Thread {
   if (outcome.status !== 'ok') {
-    return pageUnread(state, conversationId, outcome.message);
+    return threadUnread(thread, outcome.message);
   }
 
   const messages = outcome.messages.map(messageOf);
-  // A page in front of the person answers whatever the thread last said
-  // about being read.
+  // A page answers whatever the thread last said about being read.
   const read: Thread = {...thread, unread: undefined};
 
-  return {
-    ...state,
-    thread:
-      request.before === undefined
-        ? newestPage(read, messages, outcome.earlier)
-        : earlierPage(read, messages, outcome.earlier),
-  };
+  return request.before === undefined
+    ? newestPage(read, messages, outcome.earlier)
+    : earlierPage(read, messages, outcome.earlier);
 }
 
 /**
@@ -1054,8 +1073,8 @@ function replyUnseen(state: WebState, characterId: string): WebState {
     : {...state, unseen: new Set(state.unseen).add(characterId)};
 }
 
-/** A committed message of the thread on screen joins it; the log holds the rest. */
-function committed(
+/** A committed message of the thread joins it; the log holds the rest. */
+export function committed(
   thread: Thread,
   progress: Extract<GatewayEvent, {kind: 'turn_progress'}>['progress'],
 ): Thread {
@@ -1316,6 +1335,8 @@ function messageOf(source: {
   readonly role: VisibleMessageRole;
   readonly speakerName: string;
   readonly text: string;
+  readonly sentAt: string;
+  readonly app: string;
   readonly clientMessageId?: string;
 }): Message {
   return {
@@ -1323,6 +1344,8 @@ function messageOf(source: {
     role: source.role,
     speakerName: source.speakerName,
     text: source.text,
+    sentAt: source.sentAt,
+    app: source.app,
     ...(source.clientMessageId === undefined
       ? {}
       : {clientMessageId: source.clientMessageId}),

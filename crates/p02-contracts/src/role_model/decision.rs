@@ -1,4 +1,4 @@
-use p02_core::SpeakerName;
+use p02_core::{AppNames, SpeakerName};
 use p02_shared::{Identifier, vocabulary};
 use serde::{Deserialize, Serialize};
 
@@ -153,10 +153,13 @@ fn non_blank(text: String) -> Result<String, BlankContextTextError> {
 }
 
 /// What a model call is told besides the conversation: the name the person
-/// goes by, and what the runtime and the plugins contribute.
+/// goes by, the names of the apps they write in, the apps her messages go
+/// in now, and what the runtime and the plugins contribute.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DecisionContext {
     person: SpeakerName,
+    apps: AppNames,
+    apps_now: AppNames,
     /// The condensed earlier conversation a continued session opens with.
     context_summary: Option<String>,
     runtime_notes: Vec<RuntimeNote>,
@@ -166,9 +169,11 @@ pub struct DecisionContext {
 
 impl DecisionContext {
     #[must_use]
-    pub fn new(person: SpeakerName) -> Self {
+    pub fn new(person: SpeakerName, apps: AppNames, apps_now: AppNames) -> Self {
         Self {
             person,
+            apps,
+            apps_now,
             context_summary: None,
             runtime_notes: Vec::new(),
             plugin_context_items: Vec::new(),
@@ -202,6 +207,16 @@ impl DecisionContext {
     #[must_use]
     pub fn person(&self) -> &SpeakerName {
         &self.person
+    }
+
+    #[must_use]
+    pub fn apps(&self) -> &AppNames {
+        &self.apps
+    }
+
+    #[must_use]
+    pub fn apps_now(&self) -> &AppNames {
+        &self.apps_now
     }
 
     #[must_use]

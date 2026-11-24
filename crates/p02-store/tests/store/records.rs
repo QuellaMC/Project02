@@ -10,7 +10,8 @@ use p02_store::{EventReceived, LogRecord, RecordBody};
 use crate::support::{World, conversation_named, lines_of, session};
 
 const TEA_RECEIVED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_event_received","payloadSummary":{"rawInput":" Tea? ","normalizedCurrentUserMessage":"Tea?"}}"#;
-const TEA_ASKED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-1"],"visibleMessage":{"id":"conv_a.1:message-1","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Tea?"},"source":"web","clientMessageId":"tea"}"#;
+/// Sam's line, sent half a minute before the turn that took it began.
+const TEA_ASKED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-1"],"visibleMessage":{"id":"conv_a.1:message-1","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Tea?","sentAt":"2026-10-21T08:59:30.000Z"},"source":"web","clientMessageId":"tea"}"#;
 const TEA_ROUND_1: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"role_model_round","round":1,"output":{"toolCalls":[{"name":"character_state.patch","input":{"mood":"warm"}}],"text":"Checking."},"finishReason":"tool_calls","usage":{"promptTokens":1200,"completionTokens":14},"parsedRoleModelDecisionSnapshot":{"result":{"status":"accepted","decision":{"toolCalls":[{"name":"character_state.patch","input":{"mood":"warm"}}],"text":"Checking."}}}}"#;
 /// Round 1 as a record kept a round before rounds were lean: with its
 /// prompt, its raw output and the decision contract's version.
@@ -18,13 +19,13 @@ const TEA_ROUND_1_KEPT_BEFORE: &str = r#"{"eventId":"evt_1","traceId":"trace_1",
 const TEA_CALLED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"tool_call_started","round":1,"toolCallId":"evt_1.trace_1.round-1.1.character_state.patch","toolName":"character_state.patch","toolPluginId":"character-state","toolInput":{"mood":"warm"}}"#;
 const TEA_ANSWERED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"tool_call_finished","round":1,"toolCallId":"evt_1.trace_1.round-1.1.character_state.patch","toolName":"character_state.patch","toolPluginId":"character-state","toolResult":{"status":"accepted","output":{"mood":"warm"}},"runtimePluginEvidence":[{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","pluginId":"character-state","evidenceKind":"tool_invocation","status":"accepted","summary":"Mood set.","redactionLabels":[]}]}"#;
 const TEA_ROUND_2: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"role_model_round","round":2,"output":{"toolCalls":[],"text":"Tea, always."},"finishReason":"stop","usage":{"promptTokens":1260,"completionTokens":4},"parsedRoleModelDecisionSnapshot":{"result":{"status":"accepted","decision":{"toolCalls":[{"name":"visible_reply","input":{"text":"Tea, always."}}]}}}}"#;
-const TEA_REPLIED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-2"],"visibleMessage":{"id":"conv_a.1:message-2","role":"character","speakerId":"mira","speakerName":"Mira","text":"Tea, always."},"round":2}"#;
+const TEA_REPLIED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-2"],"visibleMessage":{"id":"conv_a.1:message-2","role":"character","speakerId":"mira","speakerName":"Mira","text":"Tea, always.","sentAt":"2026-10-21T09:00:04.000Z"},"app":"messages","round":2}"#;
 const TEA_COMPLETED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_turn_completed","status":"completed","visibleMessageIds":["conv_a.1:message-1","conv_a.1:message-2"],"toolCallIds":["evt_1.trace_1.round-1.1.character_state.patch"],"round":2,"commitValidation":{"result":{"status":"accepted","acceptedVisibleReplyText":"Tea, always."}}}"#;
 const TEA_AFTER: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"after_turn_committed","status":"completed_with_failures","runtimePluginEvidence":[{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","pluginId":"mem0","evidenceKind":"after_turn_committed","status":"degraded","summary":"Not queued.","redactionLabels":[]}]}"#;
 const BLANK_RECEIVED: &str = r#"{"eventId":"evt_2","traceId":"trace_2","createdAt":"2026-10-21T09:01:00.000Z","kind":"runtime_event_received","payloadSummary":{"rawInput":" \t\n "}}"#;
 const BLANK_REFUSED: &str = r#"{"eventId":"evt_2","traceId":"trace_2","createdAt":"2026-10-21T09:01:00.000Z","kind":"runtime_turn_rejected","reason":"input_validation_rejected","message":"Provide a non-empty message."}"#;
 const FAILED_RECEIVED: &str = r#"{"eventId":"evt_3","traceId":"trace_3","createdAt":"2026-10-21T09:02:00.000Z","kind":"runtime_event_received","payloadSummary":{"rawInput":"Still there?","normalizedCurrentUserMessage":"Still there?"}}"#;
-const FAILED_ASKED: &str = r#"{"eventId":"evt_3","traceId":"trace_3","createdAt":"2026-10-21T09:02:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-4"],"visibleMessage":{"id":"conv_a.1:message-4","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Still there?"}}"#;
+const FAILED_ASKED: &str = r#"{"eventId":"evt_3","traceId":"trace_3","createdAt":"2026-10-21T09:02:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-4"],"visibleMessage":{"id":"conv_a.1:message-4","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Still there?","sentAt":"2026-10-21T09:02:00.000Z"}}"#;
 const FAILED_ROUND: &str = r#"{"eventId":"evt_3","traceId":"trace_3","createdAt":"2026-10-21T09:02:00.000Z","kind":"role_model_round","round":1,"failure":{"code":"http_error","message":"The provider answered 503.","status":503},"parsedRoleModelDecisionSnapshot":{"result":{"status":"rejected","rejection":{"reason":"provider_error","details":"The provider answered 503."}}}}"#;
 const FAILED_REJECTED: &str = r#"{"eventId":"evt_3","traceId":"trace_3","createdAt":"2026-10-21T09:02:00.000Z","kind":"runtime_turn_rejected","reason":"provider_error","message":"The provider answered 503.","visibleMessageIds":["conv_a.1:message-4"],"round":1}"#;
 const MOMENT_RECEIVED: &str = r#"{"eventId":"evt_4","traceId":"trace_4","createdAt":"2026-10-21T09:03:00.000Z","kind":"runtime_event_received","occasion":"moment"}"#;
@@ -33,8 +34,8 @@ const MOMENT_COMPLETED: &str = r#"{"eventId":"evt_4","traceId":"trace_4","create
 /// A moment of Mira's own that her phone's ringing began.
 const RINGING_RECEIVED: &str = r#"{"eventId":"evt_6","traceId":"trace_6","createdAt":"2026-10-22T07:00:01.000Z","kind":"runtime_event_received","occasion":"moment","rang":[{"app":"Clock","title":"Alarm","body":"Wake Sam","at":"2026-10-22T07:00:00.000Z"},{"app":"Clock","title":"Timer","at":"2026-10-22T07:00:00.500Z"}]}"#;
 /// The continuation of the first segment, carrying its first turn as the
-/// model replays it, in the shape every earlier build wrote.
-const CONTINUED: &str = r#"{"eventId":"evt_5","traceId":"trace_5","createdAt":"2026-10-21T09:05:00.000Z","kind":"session_continued","sessionContinuation":{"sessionId":"conv_a.2","continuedFrom":{"sessionId":"conv_a.1","lastEventId":"evt_4"},"summary":"They talked about tea.","summarizedTurnCount":1,"carriedTurns":[{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","userMessage":{"id":"conv_a.1:message-1","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Tea?"},"toolRounds":[{"round":1,"text":"Checking.","interimReplies":[],"toolCalls":[{"toolCallId":"evt_1.trace_1.round-1.1.character_state.patch","pluginId":"character-state","toolName":"character_state.patch","input":{"mood":"warm"},"result":{"status":"accepted","output":{"mood":"warm"}}}]}],"finalReplies":[{"id":"conv_a.1:message-2","role":"character","speakerId":"mira","speakerName":"Mira","text":"Tea, always."}]}],"summarizer":{"status":"fallback","reason":"The provider has no model to ask."}}}"#;
+/// model replays it.
+const CONTINUED: &str = r#"{"eventId":"evt_5","traceId":"trace_5","createdAt":"2026-10-21T09:05:00.000Z","kind":"session_continued","sessionContinuation":{"sessionId":"conv_a.2","continuedFrom":{"sessionId":"conv_a.1","lastEventId":"evt_4"},"summary":"They talked about tea.","summarizedTurnCount":1,"carriedTurns":[{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","userMessage":{"id":"conv_a.1:message-1","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Tea?","sentAt":"2026-10-21T08:59:30.000Z"},"source":"web","toolRounds":[{"round":1,"text":"Checking.","interimReplies":[],"toolCalls":[{"toolCallId":"evt_1.trace_1.round-1.1.character_state.patch","pluginId":"character-state","toolName":"character_state.patch","input":{"mood":"warm"},"result":{"status":"accepted","output":{"mood":"warm"}}}]}],"finalReplies":[{"id":"conv_a.1:message-2","role":"character","speakerId":"mira","speakerName":"Mira","text":"Tea, always.","sentAt":"2026-10-21T09:00:04.000Z"}]}],"summarizer":{"status":"fallback","reason":"The provider has no model to ask."}}}"#;
 
 /// The first segment: a turn with a tool round and the plugins' work after
 /// it, a blank text refused as no line, a turn whose provider failed, and a
@@ -116,6 +117,31 @@ fn a_moment_s_event_keeps_what_rang_and_an_earlier_one_rang_nothing() {
         );
         assert_eq!(record.to_line(), line);
     }
+}
+
+/// A message an earlier build kept says nothing of when it was sent: it
+/// counts as sent at its record's moment, and, carried into a continued
+/// session, at its own turn's, not the continuation's.
+#[test]
+fn a_message_kept_without_its_time_counts_as_sent_at_its_record_s() {
+    let asked = LogRecord::from_line(untimed(TEA_ASKED).as_bytes()).unwrap();
+    let RecordBody::MessageCommitted(commit) = asked.body() else {
+        panic!("{asked:?}");
+    };
+
+    assert_eq!(&commit.message().sent_at, asked.identity().created_at());
+
+    let continued = LogRecord::from_line(untimed(CONTINUED).as_bytes()).unwrap();
+    let RecordBody::SessionContinued(continued) = continued.body() else {
+        panic!("{continued:?}");
+    };
+    let carried = &continued.session_continuation.carried_turns()[0];
+    let sent: Vec<&str> = carried
+        .visible_messages()
+        .map(|message| message.sent_at.as_str())
+        .collect();
+
+    assert_eq!(sent, ["2026-10-21T09:00:00.000Z"; 2]);
 }
 
 /// A record is read as it was written: a field this build does not know
@@ -204,6 +230,24 @@ fn a_record_that_fits_no_turn_is_skipped_and_named_and_the_session_reads() {
     );
     assert_eq!(replay.session().messages().len(), 1);
     assert_eq!(replay.skipped_lines().to_string(), "lines 1, 4, 7");
+}
+
+/// `line` with no message in it saying when it was sent, as every message
+/// an earlier build kept.
+fn untimed(line: &str) -> String {
+    const SENT_AT: &str = r#","sentAt":""#;
+    // The quoted moment's 24 characters and its closing quote.
+    const MOMENT: usize = 25;
+
+    let mut rest = line;
+    let mut kept = String::new();
+
+    while let Some(at) = rest.find(SENT_AT) {
+        kept.push_str(&rest[..at]);
+        rest = &rest[at + SENT_AT.len() + MOMENT..];
+    }
+
+    kept + rest
 }
 
 /// `line` with the first `from` in it made `to`; `from` must be there.

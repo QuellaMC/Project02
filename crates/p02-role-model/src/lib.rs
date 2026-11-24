@@ -14,7 +14,7 @@ mod transport;
 pub use anthropic::AnthropicSettings;
 pub use nvidia::NvidiaSettings;
 pub use prompt::{
-    Opening, Person, Recollection, newest_turns_within, select_history_window,
+    Opening, Person, Recollection, line_heading_of, newest_turns_within, select_history_window,
     summarizer_instructions, today_note,
 };
 pub use responses::{ChatgptSettings, OpenaiSettings, PlanAccess, PlanSignIn};

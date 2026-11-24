@@ -8,8 +8,12 @@ depends on p02-shared alone.
   person is `local-user` in all of them. Its segments are sessions,
   `<conversation id>.<segment>`, from 1.
 - A session's messages climb in number as they are committed, each with
-  the name its speaker had then, and every one joins through one gate,
-  said now or read back.
+  the name its speaker had then and when it was sent, and every one joins
+  through one gate, said now or read back.
+- A line of the person's came in an app, which the stamp of the surface it
+  came from tells: the part before its first `:`, as `telegram`, or
+  `messages`, the app's own chat, which she knows as Messages. The daemon
+  names the others.
 - Visible text is normalized once, `\n` line endings and both ends
   trimmed; stored text that is not is refused, never rewritten.
 - A moment is UTC to the millisecond, `2026-06-15T00:00:00.000Z`.

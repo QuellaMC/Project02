@@ -1,13 +1,17 @@
 //! A conversation as one scrollback: its character keeps it in segments,
 //! a page is filled backward across them, newest first, and its cursor
-//! names where the next page ends. Only committed messages are read, from
-//! the store, so a stopped character's thread reads as a running one's.
+//! names where the next page ends; and the newest messages of one app, as
+//! her phone shows them. Only committed messages are read, from the store,
+//! so a stopped character's thread reads as a running one's.
 
 use std::num::NonZeroU64;
 use std::ops::Range;
 
-use p02_core::{Conversation, ConversationId, SessionId};
-use p02_store::{CharacterData, Home, RecordBody, SessionEntry, SettingsDocument, StorageError};
+use p02_core::{Conversation, ConversationId, MESSAGES, SessionId, VisibleMessageRole, app_of};
+use p02_shared::Identifier;
+use p02_store::{
+    CharacterData, Home, LogRecord, RecordBody, SessionEntry, SettingsDocument, StorageError,
+};
 use p02_wire::{HistoryMessage, HistoryOutcome, HistoryRefusal};
 
 use crate::daemon::character_of;
@@ -112,6 +116,47 @@ pub(crate) fn read(home: &Home, conversation: &str, asked: &HistoryPage) -> Hist
         Ok(None) => refused(HistoryRefusal::InvalidPage, INVALID_PAGE.to_owned()),
         Err(error) => HistoryOutcome::Failed(storage_failure(&error)),
     }
+}
+
+/// The newest messages of the conversation between `character` and the
+/// person on `home` that are in `app`, `count` at most, oldest first, as
+/// the scrollback reads them, however far back they lie: none while the
+/// conversation was never made.
+pub(crate) fn newest(
+    home: &Home,
+    character: &Identifier,
+    app: &str,
+    count: usize,
+) -> Result<Vec<HistoryMessage>, StorageError> {
+    let Some(conversation) = p02_runtime::Conversation::find(home, character)? else {
+        return Ok(Vec::new());
+    };
+    let Some(data) = CharacterData::open(home, character)? else {
+        return Ok(Vec::new());
+    };
+    let mut segments = Segments::of(data, conversation)?;
+    let mut newest = Vec::new();
+
+    for segment in (0..segments.numbers.len()).rev() {
+        let wanted = count - newest.len();
+
+        newest.extend(
+            segments
+                .messages(segment)?
+                .iter()
+                .rev()
+                .filter(|message| message.app == app)
+                .take(wanted)
+                .cloned(),
+        );
+
+        if newest.len() == count {
+            break;
+        }
+    }
+
+    newest.reverse();
+    Ok(newest)
 }
 
 /// A page's messages, and the cursor of the page before it.
@@ -221,39 +266,121 @@ impl Segments {
         Ok(self.messages(segment)?[range].to_vec())
     }
 
-    /// Segment `segment`'s committed messages, with the stamps the person's
-    /// lines carry and when each was committed.
+    /// Segment `segment`'s committed messages, as [`messages_of`] reads
+    /// them.
     fn messages(&mut self, segment: usize) -> Result<&[HistoryMessage], StorageError> {
         if self.read[segment].is_none() {
             let replay = self
                 .data
                 .session_log(&self.conversation, self.numbers[segment])?
                 .read()?;
-            let messages = replay
-                .records()
-                .iter()
-                .filter_map(|record| match record.body() {
-                    RecordBody::MessageCommitted(commit) => {
-                        let message = commit.message().clone();
 
-                        Some(HistoryMessage {
-                            message_id: message.id,
-                            role: message.role,
-                            speaker_id: message.speaker_id,
-                            speaker_name: message.speaker_name,
-                            text: message.text,
-                            committed_at: record.identity().created_at().clone(),
-                            source: commit.source().cloned(),
-                            client_message_id: commit.client_message_id().cloned(),
-                        })
-                    }
-                    _ => None,
-                })
-                .collect();
-
-            self.read[segment] = Some(messages);
+            self.read[segment] = Some(messages_of(replay.records()));
         }
 
         Ok(self.read[segment].as_deref().unwrap_or_default())
+    }
+}
+
+/// The messages `records`, one segment's, committed: each with when it was
+/// sent and the app it is in, and the person's lines with the stamps they
+/// carry. A message of hers an earlier build kept names no app: it is in
+/// the app of the person's line nearest before it in the segment, which it
+/// answered, and in Messages when there is none.
+fn messages_of(records: &[LogRecord]) -> Vec<HistoryMessage> {
+    let mut nearest = MESSAGES;
+
+    records
+        .iter()
+        .filter_map(|record| match record.body() {
+            RecordBody::MessageCommitted(commit) => Some(commit),
+            _ => None,
+        })
+        .map(|commit| {
+            let message = commit.message().clone();
+            let app = match message.role {
+                VisibleMessageRole::User => {
+                    nearest = app_of(commit.source());
+                    nearest
+                }
+                VisibleMessageRole::Character => commit.app().unwrap_or(nearest),
+            };
+
+            HistoryMessage {
+                message_id: message.id,
+                role: message.role,
+                speaker_id: message.speaker_id,
+                speaker_name: message.speaker_name,
+                text: message.text,
+                sent_at: message.sent_at,
+                app: app.to_owned(),
+                source: commit.source().cloned(),
+                client_message_id: commit.client_message_id().cloned(),
+            }
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::{Value, json};
+
+    use super::*;
+
+    /// Message `number` of a segment as its commit's log line holds it,
+    /// said by `role`, with `fields` beside it.
+    fn commit(number: u64, role: &str, fields: &Value) -> LogRecord {
+        let id = format!("conv_a.1:message-{number}");
+        let mut line = json!({
+            "eventId": "evt_1",
+            "traceId": "trace_1",
+            "createdAt": "2026-11-24T09:00:00.000Z",
+            "kind": "visible_message_committed",
+            "visibleMessageIds": [id],
+            "visibleMessage": {
+                "id": id,
+                "role": role,
+                "speakerId": if role == "user" { "local-user" } else { "mira" },
+                "speakerName": if role == "user" { "Sam" } else { "Mira" },
+                "text": "Hello.",
+                "sentAt": "2026-11-24T09:00:00.000Z",
+            },
+        });
+
+        line.as_object_mut()
+            .unwrap()
+            .extend(fields.as_object().unwrap().clone());
+        LogRecord::from_line(line.to_string().as_bytes()).unwrap()
+    }
+
+    /// A message of hers an earlier build kept, which names no app, is in
+    /// the app of the person's line nearest before it in its segment, and
+    /// in Messages before the first; one this build kept is in its own.
+    #[test]
+    fn a_message_of_hers_kept_without_its_app_is_in_the_app_of_the_line_before_it() {
+        let hers = json!({"round": 1});
+        let records = [
+            commit(1, "character", &hers),
+            commit(
+                2,
+                "user",
+                &json!({"source": "telegram:mira_bot", "clientMessageId": "a"}),
+            ),
+            commit(3, "character", &hers),
+            commit(4, "user", &json!({"source": "web", "clientMessageId": "b"})),
+            commit(5, "character", &hers),
+            commit(6, "character", &json!({"app": "telegram", "round": 2})),
+        ];
+        let apps: Vec<String> = messages_of(&records)
+            .into_iter()
+            .map(|message| message.app)
+            .collect();
+
+        assert_eq!(
+            apps,
+            [
+                "messages", "telegram", "telegram", "messages", "messages", "telegram"
+            ]
+        );
     }
 }

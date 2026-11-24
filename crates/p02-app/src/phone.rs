@@ -1,25 +1,31 @@
 //! Her phone as a client reads it, from her data whether she runs or not:
-//! her apps, those it comes with and those installed on it, what she has
-//! in front with its screen, what she last did on it and what rings; and
-//! one view's screen, which a person looking around her phone reads, and
-//! which changes nothing of hers.
+//! her apps, the apps that carry her messages now, those it comes with and
+//! those installed on it, what she has in front with its screen, what she
+//! last did on it and what rings; and one view's screen, which a person
+//! looking around her phone reads, and which changes nothing of hers. Her
+//! conversation with the person, as her phone's own apps show it, is the
+//! daemon's to say.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use p02_characters::discover;
 use p02_contracts::{CharacterStorage, FileStoreBackend, LeasedFiles, StoreError};
-use p02_phone::{Account, AccountKind, Listed, Now, OnPhone, Phone, PhoneError, Source, it_may};
+use p02_core::AppNames;
+use p02_phone::{
+    Account, AccountKind, Chats, Listed, Now, OnPhone, Phone, PhoneError, Source, it_may,
+};
 use p02_plugins::PHONE_PLUGIN;
 use p02_shared::{Identifier, error_chain, error_sentence, sentence};
-use p02_store::CharacterData;
+use p02_store::{CharacterData, Home};
 use p02_wire::{
-    AppAccount, AppSignIn, AppSource, AppView, PersonAccount, PhoneApp, PhoneDid, PhoneFront,
-    PhoneOutcome, PhoneRefusal, PhoneRing, Screen, ScreenOutcome, ScreenRefusal,
+    AppAccount, AppSignIn, AppSource, AppView, HistoryMessage, PersonAccount, PhoneApp, PhoneDid,
+    PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing, Screen, ScreenOutcome, ScreenRefusal,
 };
 
 use crate::connections::Linked;
-use crate::daemon::{Daemon, World, blocking};
+use crate::daemon::{Daemon, WeakDaemon, World, blocking};
+use crate::history;
 use crate::reconcile::settings_now;
 
 /// How long her phone's store is waited for, which a call of her phone's
@@ -35,13 +41,25 @@ pub(crate) enum Unread {
 }
 
 /// Her phone as the daemon reaches it, whether she runs or not: whose it
-/// is, the phone every character has, and its store in her data.
+/// is, the phone every character has, its store in her data, and her
+/// conversation with the person as her phone's own apps show it.
 #[derive(Clone, Debug)]
 pub(crate) struct HerPhone {
     /// Her id, as the daemon knows her.
     pub(crate) id: Identifier,
     pub(crate) phone: &'static Phone,
     store: Arc<dyn FileStoreBackend>,
+    pub(crate) chats: HerChats,
+}
+
+/// Her conversation with the person as her phone's own apps show it: the
+/// apps that carry her messages now, as the daemon says while it lasts,
+/// and the newest messages that went through one, read from the store.
+#[derive(Clone, Debug)]
+pub(crate) struct HerChats {
+    home: Home,
+    daemon: WeakDaemon,
+    id: Identifier,
 }
 
 impl Daemon {
@@ -51,14 +69,17 @@ impl Daemon {
     /// her actor last published.
     pub async fn phone(&self, character: &str) -> PhoneOutcome {
         let world = Arc::clone(self.world());
+        let daemon = self.downgrade();
         let ringing = self.ringing(character);
         let character = character.to_owned();
 
         blocking(move || {
-            HerPhone::of(&world, &character).and_then(|her| {
+            HerPhone::of(&world, daemon, &character).and_then(|her| {
                 let linked = Linked::now(&world);
 
-                her.with(|phone, files| shown(phone, files, &Now::system(), ringing, &linked))
+                her.with(|phone, files| {
+                    shown(phone, files, &her.chats, &Now::system(), ringing, &linked)
+                })
             })
         })
         .await
@@ -69,11 +90,14 @@ impl Daemon {
     /// it sees it: read as her phone is, and changing nothing of hers.
     pub async fn phone_screen(&self, character: &str, app: &str, view: &str) -> ScreenOutcome {
         let world = Arc::clone(self.world());
+        let daemon = self.downgrade();
         let (character, app, view) = (character.to_owned(), app.to_owned(), view.to_owned());
 
         blocking(move || {
-            HerPhone::of(&world, &character).and_then(|her| {
-                her.with(|phone, files| looked(phone.look(files, &app, &view, &Now::system())))
+            HerPhone::of(&world, daemon, &character).and_then(|her| {
+                her.with(|phone, files| {
+                    looked(phone.look(files, &her.chats, &app, &view, &Now::system()))
+                })
             })
         })
         .await
@@ -84,9 +108,10 @@ impl Daemon {
     /// [`HerPhone::of`] reads it.
     pub(crate) async fn her_phone(&self, character: &str) -> Result<HerPhone, Unread> {
         let world = Arc::clone(self.world());
+        let daemon = self.downgrade();
         let character = character.to_owned();
 
-        blocking(move || HerPhone::of(&world, &character)).await
+        blocking(move || HerPhone::of(&world, daemon, &character)).await
     }
 
     /// What rings on the phone of `character` as her actor last published
@@ -102,10 +127,11 @@ impl Daemon {
 
 impl HerPhone {
     /// The phone of `character` in `world`, her data made if she has none
-    /// yet. The daemon must know her, and her settings switch her phone on;
-    /// settings that cannot be read do not take it from her, since her start
-    /// says what is wrong with them.
-    pub(crate) fn of(world: &World, character: &str) -> Result<Self, Unread> {
+    /// yet, whose apps that carry her messages `daemon` says. The daemon
+    /// must know her, and her settings switch her phone on; settings that
+    /// cannot be read do not take it from her, since her start says what is
+    /// wrong with them.
+    pub(crate) fn of(world: &World, daemon: WeakDaemon, character: &str) -> Result<Self, Unread> {
         let discovery = discover(world.home.root());
         let definition = discovery
             .find(character)
@@ -133,6 +159,7 @@ impl HerPhone {
             id: definition.profile.id.clone(),
             phone,
             store: data.file_store(plugin),
+            chats: HerChats::new(world.home.clone(), daemon, definition.profile.id.clone()),
         })
     }
 
@@ -151,7 +178,26 @@ impl HerPhone {
     /// What is on her phone, read under a lease of its store, on the
     /// calling thread.
     pub(crate) fn apps(&self) -> Result<OnPhone, StoreError> {
-        self.phone.apps(lease(self.store.as_ref())?.as_ref())
+        self.phone
+            .apps(lease(self.store.as_ref())?.as_ref(), &self.chats)
+    }
+}
+
+impl HerChats {
+    /// The conversation between the character `id` of `home` and the
+    /// person, with the apps that carry her messages as `daemon` says them.
+    pub(crate) fn new(home: Home, daemon: WeakDaemon, id: Identifier) -> Self {
+        Self { home, daemon, id }
+    }
+}
+
+impl Chats for HerChats {
+    fn apps(&self) -> AppNames {
+        self.daemon.apps_of(&self.id)
+    }
+
+    fn newest(&self, app: &str, count: usize) -> Result<Vec<HistoryMessage>, String> {
+        history::newest(&self.home, &self.id, app, count).map_err(|error| error_chain(&error))
     }
 }
 
@@ -161,26 +207,28 @@ pub(crate) fn lease(store: &dyn FileStoreBackend) -> Result<Box<dyn LeasedFiles 
     store.lease(Instant::now() + LEASE)
 }
 
-/// Her phone as `files` keep it at `now`, with `ringing` what rings on it
-/// and `linked` what of the person's it is linked to.
+/// Her phone as `files` keep it at `now`, with the apps `chats` says carry
+/// her messages, `ringing` what rings on it and `linked` what of the
+/// person's it is linked to.
 fn shown(
     phone: &Phone,
     files: &dyn LeasedFiles,
+    chats: &dyn Chats,
     now: &Now,
     ringing: Vec<PhoneRing>,
     linked: &Linked,
 ) -> Result<PhoneOutcome, Unread> {
     let on_phone = phone
-        .apps(files)
+        .apps(files, chats)
         .map_err(|error| Unread::Failed(unread(&error)))?;
     let state = phone
-        .state(files)
+        .state(files, chats)
         .map_err(|error| Unread::Failed(unread(&error)))?;
     let front = match state.front {
         None => None,
         Some(front) => {
             let (screen, message) =
-                match phone.look(files, front.app.as_str(), front.view.as_str(), now) {
+                match phone.look(files, chats, front.app.as_str(), front.view.as_str(), now) {
                     Ok(screen) => (Some(screen), None),
                     Err(PhoneError::Store(error)) => return Err(Unread::Failed(unread(&error))),
                     Err(failure) => (None, Some(sentence(&failure.to_string()))),
@@ -233,9 +281,10 @@ fn looked(looked: Result<Screen, PhoneError>) -> Result<ScreenOutcome, Unread> {
 
 /// `app`, on her phone as `on_phone` has it, as her window draws it and
 /// her settings show it, `linked` what of the person's her phone is linked
-/// to: the account it uses by a key, with whether the person gave her
-/// phone that key, or, for an app that asks a model, the connections of
-/// theirs it can sign in with now and how it is signed in.
+/// to: whether she and the person write to each other in it, the account
+/// it uses by a key, with whether the person gave her phone that key, or,
+/// for an app that asks a model, the connections of theirs it can sign in
+/// with now and how it is signed in.
 pub(crate) fn drawn(app: &Listed, on_phone: &OnPhone, linked: &Linked) -> PhoneApp {
     PhoneApp {
         id: app.id.clone(),
@@ -247,6 +296,7 @@ pub(crate) fn drawn(app: &Listed, on_phone: &OnPhone, linked: &Linked) -> PhoneA
             Some(Source::Catalog) => AppSource::Catalog,
             Some(Source::File) => AppSource::File,
         },
+        messaging: app.messaging,
         icon: app.icon.clone(),
         tint: app.tint.clone(),
         wakes: app.asks.wakes(),

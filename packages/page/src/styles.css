@@ -51,6 +51,10 @@
   --teal-glyph: #008198;
   --graphite-tile: rgba(28, 28, 30, 0.12);
   --graphite-glyph: #1c1c1e;
+  --messages-tile: rgba(52, 199, 89, 0.14);
+  --messages-glyph: #248a3d;
+  --telegram-tile: rgba(47, 127, 196, 0.14);
+  --telegram-glyph: #2f7fc4;
   --float-shadow:
     0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.16);
   --device-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
@@ -58,6 +62,8 @@
   --ask-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 2px 12px rgba(0, 0, 0, 0.08);
   --edge-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06);
   --green-ink: #248a3d;
+  /* Telegram's own colour, the same in light and dark. */
+  --telegram: #0f7fb0;
   /*
    * The dock's motion, as the approved prototype times it: it opens easing
    * out, and closes a little quicker, easing in and out. The chat's lines
@@ -122,6 +128,10 @@
     --teal-glyph: #00d2e0;
     --graphite-tile: rgba(229, 229, 234, 0.18);
     --graphite-glyph: #e5e5ea;
+    --messages-tile: rgba(48, 209, 88, 0.22);
+    --messages-glyph: #30d158;
+    --telegram-tile: rgba(77, 163, 255, 0.22);
+    --telegram-glyph: #4da3ff;
     --float-shadow:
       0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.5);
     --device-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
@@ -787,9 +797,28 @@ code {
   font-size: 13px;
 }
 
+/*
+ * Where time has passed or the app changed: the app's name where it
+ * changed, on a line of its own, then the day and the time.
+ */
+.divider {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1px;
+  padding: 6px 0 2px;
+  font-size: 11.5px;
+  color: var(--secondary);
+}
+
+.divider-app,
+.divider-day {
+  font-weight: 600;
+}
+
 .bubble {
-  max-width: min(72ch, 85%);
-  padding: 8px 13px;
+  max-width: min(72ch, 72%);
+  padding: 8px 14px;
   border-radius: 18px;
   background: var(--card);
   box-shadow: var(--card-shadow);
@@ -797,15 +826,20 @@ code {
   overflow-wrap: anywhere;
 }
 
+/* The holder's own, in their app's colour, which the thread's layout gives each: the person's in their chat, hers on her phone. */
 .bubble-own {
   align-self: flex-end;
-  background: var(--link);
   color: #ffffff;
   box-shadow: none;
 }
 
 .bubble-theirs {
   align-self: flex-start;
+}
+
+/* Under a message of the same sender's with nothing between, 2px apart where the thread's lines are 8px. */
+.bubble-joined {
+  margin-top: -6px;
 }
 
 .bubble-draft {
@@ -819,13 +853,6 @@ code {
 
 .bubble-pending {
   opacity: 0.6;
-}
-
-.bubble-name {
-  display: block;
-  font-size: 12px;
-  color: var(--secondary);
-  margin-bottom: 2px;
 }
 
 /* What she is doing before her reply begins: writing it, or using her phone. */
@@ -1465,6 +1492,16 @@ code {
   color: var(--graphite-glyph);
 }
 
+.tint-messages {
+  background: var(--messages-tile);
+  color: var(--messages-glyph);
+}
+
+.tint-telegram {
+  background: var(--telegram-tile);
+  color: var(--telegram-glyph);
+}
+
 /*
  * A tile drawn solid: its icon white on its tint, in light and dark alike,
  * as an app's on her phone and what the card that asks is about.
@@ -1514,6 +1551,15 @@ code {
 
 .tile-solid.tint-graphite {
   background: #1c1c1e;
+}
+
+/* The tiles of the apps messages come in, as the approved design draws them. */
+.tile-solid.tint-messages {
+  background: #248a3d;
+}
+
+.tile-solid.tint-telegram {
+  background: #2f7fc4;
 }
 
 .face {
@@ -2953,6 +2999,125 @@ body:has(> #root > .phone-window) {
   line-height: 1.4;
   background: var(--card);
   box-shadow: var(--card-shadow);
+}
+
+/*
+ * An app messages come in, as the design draws it: the person at its head,
+ * what went through it, and a message box that is only drawn.
+ */
+.phone-thread {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.phone-thread-head {
+  flex: none;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 4px 16px 8px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.phone-thread-back {
+  position: absolute;
+  left: 6px;
+  top: 8px;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  display: grid;
+  place-items: center;
+  color: var(--link);
+}
+
+.phone-thread-face {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--fill);
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.phone-thread-name {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.phone-thread-app {
+  font-size: 11px;
+  color: var(--secondary);
+}
+
+/* What went through it scrolls above the box, a few messages at its foot. */
+.phone-thread-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 12px 6px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.phone-thread-messages > .lines {
+  margin-top: auto;
+}
+
+.phone-thread .bubble {
+  max-width: 78%;
+  padding: 8px 13px;
+}
+
+/* Why her conversation cannot be shown, where her messages would be. */
+.phone-thread-quiet {
+  margin: 0;
+  text-align: center;
+  font-size: 15px;
+  color: var(--secondary);
+}
+
+.phone-thread-foot {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px 2px;
+}
+
+.phone-thread-plus {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: var(--fill);
+  color: var(--secondary);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.phone-thread-field {
+  flex: 1 1 auto;
+  height: 32px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  border: 1px solid var(--divider);
+  border-radius: 16px;
+  font-size: 14px;
+  color: var(--secondary);
 }
 
 .phone-tabs {

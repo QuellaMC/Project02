@@ -45,10 +45,12 @@ const mira: CharacterSummary = {
   state: 'ready',
 };
 const conversationId = 'conv-1';
+/** When every message of these tests was sent: the store keeps it as the daemon says it. */
+const sentAt = '2026-09-11T00:00:00.000Z';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 16,
+    protocolVersion: 17,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -64,7 +66,7 @@ function ready(
   turns: readonly RunningTurn[] = [],
 ): GatewayReady {
   return {
-    protocolVersion: 16,
+    protocolVersion: 17,
     health: health(mira),
     confirmations,
     pairings: [],
@@ -106,6 +108,8 @@ function userMessage(
       speakerId: 'local-user',
       speakerName: 'You',
       text,
+      sentAt,
+      app: 'messages',
       source: 'web',
       clientMessageId,
     },
@@ -239,7 +243,8 @@ function committed(
     speakerId: clientMessageId === undefined ? 'mira' : 'local-user',
     speakerName: clientMessageId === undefined ? 'Mira' : 'You',
     text,
-    committedAt: '2026-09-11T00:00:00.000Z',
+    sentAt,
+    app: 'messages',
     ...(clientMessageId === undefined ? {} : {source: 'web', clientMessageId}),
   };
 }
@@ -361,7 +366,7 @@ describe('web store', () => {
     expect(nova.thread?.stale).toEqual([]);
   });
 
-  it('shows a line once the daemon says so: the pending bubble becomes the message, and a frame seen twice shows once', () => {
+  it('shows a line once the daemon says so: the pending bubble becomes the message, with when it was sent and its app, and a frame seen twice shows once', () => {
     let state = sent(opened(), 'hello there', 'line-1');
 
     expect(composerText(state)).toBe('');
@@ -386,6 +391,8 @@ describe('web store', () => {
         role: 'user',
         speakerName: 'You',
         text: 'hello there',
+        sentAt,
+        app: 'messages',
         clientMessageId: 'line-1',
       },
     ]);
@@ -417,6 +424,8 @@ describe('web store', () => {
         speakerId: 'mira',
         speakerName: 'Mira',
         text: 'I remember you',
+        sentAt,
+        app: 'messages',
         draftId: '1.0',
       }),
     );
@@ -486,6 +495,8 @@ describe('web store', () => {
         speakerId: 'mira',
         speakerName: 'Mira',
         text: 'I remember you',
+        sentAt,
+        app: 'messages',
         draftId: '1.0',
       }),
     );
@@ -518,6 +529,8 @@ describe('web store', () => {
         speakerId: 'mira',
         speakerName: 'Mira',
         text: 'Found your keys yet?',
+        sentAt,
+        app: 'messages',
         draftId: '1.0',
       }),
     );
@@ -562,6 +575,8 @@ describe('web store', () => {
         speakerId: 'mira',
         speakerName: 'Mira',
         text: 'Found your keys yet?',
+        sentAt,
+        app: 'messages',
         draftId: '1.0',
       });
 
@@ -621,6 +636,8 @@ describe('web store', () => {
           speakerId: 'mira',
           speakerName: 'Mira',
           text: 'Set for seven.',
+          sentAt,
+          app: 'messages',
           draftId: '2.0',
         }),
       ).phoning.size,

@@ -12,6 +12,7 @@ use p02_wire::Screen;
 use serde_json::{Map, Value};
 
 use crate::app::{App, Runs};
+use crate::chat::{self, Chats};
 use crate::data::{Kept, Ring};
 use crate::engine::{self, Failure};
 use crate::error::PhoneError;
@@ -22,9 +23,10 @@ use crate::manifest::View;
 use crate::store;
 use crate::time::Now;
 
-/// A phone: the apps it comes with, the App Store among them, and, for
-/// every character, the apps installed on hers, which each call finds in
-/// the files it is given.
+/// A phone: the apps it comes with, the App Store among them and the apps
+/// messages come in, which each call's caller says, and, for every
+/// character, the apps installed on hers, which each call finds in the
+/// files it is given.
 #[derive(Debug)]
 pub struct Phone {
     /// The apps compiled into the daemon.
@@ -87,27 +89,37 @@ impl Phone {
         }
     }
 
-    /// The app of `id` the phone comes with: one compiled into the daemon,
-    /// or the App Store. No app installs over it, and none removes it.
+    /// The app of `id` the phone comes with: one that carries her messages
+    /// now, as `chats` says, one compiled into the daemon, or the App
+    /// Store. No app installs over it, and none removes it.
     #[must_use]
-    pub fn comes_with(&self, id: &str) -> Option<&Arc<App>> {
-        self.bundled
-            .iter()
-            .chain(iter::once(&self.store))
-            .find(|app| app.id().as_str() == id)
+    pub fn comes_with(&self, chats: &dyn Chats, id: &str) -> Option<Arc<App>> {
+        let messaging = chats.apps();
+
+        if messaging.has(id) {
+            return Some(Arc::new(chat::app(id, messaging.name(id))));
+        }
+
+        self.compiled(id).cloned()
     }
 
     /// The app of `id` on her phone, as `files` keep it: one it comes with,
-    /// or one installed on it, made from its file.
+    /// the apps messages come in as `chats` says them among them, or one
+    /// installed on it, made from its file.
     ///
     /// # Errors
     ///
     /// [`PhoneError::NoApp`] when her phone has none,
     /// [`PhoneError::CannotRun`] for an app installed whose file is gone or
     /// no longer makes it, or the store's.
-    pub fn app(&self, files: &dyn LeasedFiles, id: &str) -> Result<Arc<App>, PhoneError> {
-        match self.comes_with(id) {
-            Some(app) => Ok(Arc::clone(app)),
+    pub fn app(
+        &self,
+        files: &dyn LeasedFiles,
+        chats: &dyn Chats,
+        id: &str,
+    ) -> Result<Arc<App>, PhoneError> {
+        match self.comes_with(chats, id) {
+            Some(app) => Ok(app),
             None => self.installed(files, id),
         }
     }
@@ -116,7 +128,8 @@ impl Phone {
     /// named: it is in front of her, with that view's screen, and opening
     /// it is what she last did, at `now`. What she has in front is kept
     /// once the screen came back, and an open whose keeping failed still
-    /// stands.
+    /// stands. `chats` says which apps messages come in now, and what came
+    /// in them.
     ///
     /// # Errors
     ///
@@ -127,16 +140,17 @@ impl Phone {
     pub fn open(
         &self,
         files: &mut dyn LeasedFiles,
+        chats: &dyn Chats,
         app: &str,
         view: Option<&str>,
         now: &Now,
     ) -> Result<Opened, PhoneError> {
-        let app = self.app(files, app)?;
+        let app = self.app(files, chats, app)?;
         let view = match view {
             None => app.opens_on().clone(),
             Some(view) => view_of(&app, view)?.clone(),
         };
-        let screen = self.screen(files, &app, &view, now)?;
+        let screen = self.screen(files, chats, &app, &view, now)?;
 
         let unkept =
             PhoneState::put(files, &app, &view, &format!("Opened {}", app.name()), now).err();
@@ -150,7 +164,8 @@ impl Phone {
     }
 
     /// `app`'s `view` as someone looking at her phone sees it, by a call
-    /// that only reads: nothing is put in front of her.
+    /// that only reads: nothing is put in front of her. `chats` says which
+    /// apps messages come in now, and what came in them.
     ///
     /// # Errors
     ///
@@ -160,22 +175,28 @@ impl Phone {
     pub fn look(
         &self,
         files: &dyn LeasedFiles,
+        chats: &dyn Chats,
         app: &str,
         view: &str,
         now: &Now,
     ) -> Result<Screen, PhoneError> {
-        let app = self.app(files, app)?;
+        let app = self.app(files, chats, app)?;
 
-        self.screen(files, &app, view_of(&app, view)?, now)
+        self.screen(files, chats, &app, view_of(&app, view)?, now)
     }
 
-    /// What she has in front on her phone and what she last did on it.
+    /// What she has in front on her phone and what she last did on it,
+    /// among her apps as `chats` says which carry her messages now.
     ///
     /// # Errors
     ///
     /// The store's, when it fails.
-    pub fn state(&self, files: &dyn LeasedFiles) -> Result<PhoneState, StoreError> {
-        PhoneState::read(files, &self.apps(files)?.apps)
+    pub fn state(
+        &self,
+        files: &dyn LeasedFiles,
+        chats: &dyn Chats,
+    ) -> Result<PhoneState, StoreError> {
+        PhoneState::read(files, &self.apps(files, chats)?.apps)
     }
 
     /// Takes `app`'s `action` on `input`, once its contract admits it, and
@@ -190,7 +211,9 @@ impl Phone {
     /// `exchanges`, those of its runs before. A run that asks for what none
     /// answers yet ends there, keeping nothing, and the call asks for it:
     /// its caller makes the request or asks the question and takes the
-    /// action again, at the same `now`, with what came of it.
+    /// action again, at the same `now`, with what came of it. `chats` says
+    /// which apps messages come in now, and what came in them, for the
+    /// screen after it.
     ///
     /// # Errors
     ///
@@ -200,16 +223,21 @@ impl Phone {
     /// before, answers what the phone does not take or would keep more than
     /// it holds, or when the store fails. A call the phone refuses or the
     /// app fails saves nothing.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "an action is one call: her phone's files, her messages, the app, the action, its input, what its runs asked and the moment"
+    )]
     pub fn act(
         &self,
         files: &mut dyn LeasedFiles,
+        chats: &dyn Chats,
         app: &str,
         action: &str,
         input: &Map<String, Value>,
         exchanges: &[Exchange],
         now: &Now,
     ) -> Result<Acting, PhoneError> {
-        let app = self.app(files, app)?;
+        let app = self.app(files, chats, app)?;
         let action = app
             .actions()
             .iter()
@@ -267,12 +295,15 @@ impl Phone {
 
                 (answer, host.kept())
             }
-            Runs::Store => store::show(&kept, &self.apps(files)?.apps, input).map_err(|words| {
-                PhoneError::Refused {
-                    app: app.name().to_owned(),
-                    words,
-                }
-            })?,
+            Runs::Store => {
+                store::show(&kept, &self.listed(files)?.apps, input).map_err(|words| {
+                    PhoneError::Refused {
+                        app: app.name().to_owned(),
+                        words,
+                    }
+                })?
+            }
+            Runs::Chat => unreachable!("an app messages come in has no action"),
         };
 
         if after != kept {
@@ -288,7 +319,7 @@ impl Phone {
         Ok(Acting::Acted(Acted {
             answer,
             view: action.view().clone(),
-            screen: self.screen(files, &app, action.view(), now),
+            screen: self.screen(files, chats, &app, action.view(), now),
             unkept,
         }))
     }
@@ -302,7 +333,7 @@ impl Phone {
     ///
     /// The store's, when it fails.
     pub fn rings(&self, files: &dyn LeasedFiles) -> Result<Vec<SetRing>, StoreError> {
-        let on_phone = self.apps(files)?;
+        let on_phone = self.listed(files)?;
         let mut set = Vec::new();
 
         for app in on_phone
@@ -346,7 +377,11 @@ impl Phone {
         let mut failures = Vec::new();
 
         for told in rings {
-            let app = match self.app(files, told.app.as_str()) {
+            let app = match self.compiled(told.app.as_str()) {
+                Some(app) => Ok(Arc::clone(app)),
+                None => self.installed(files, told.app.as_str()),
+            };
+            let app = match app {
                 Err(PhoneError::NoApp(_)) => continue,
                 Err(PhoneError::Store(error)) => return Err(error),
                 app => app,
@@ -388,20 +423,33 @@ impl Phone {
         app
     }
 
-    /// What `app`'s `view` shows, as `files` keep it, by a call that only
-    /// reads.
+    /// The app of `id` compiled into the daemon, or the App Store.
+    fn compiled(&self, id: &str) -> Option<&Arc<App>> {
+        self.bundled
+            .iter()
+            .chain(iter::once(&self.store))
+            .find(|app| app.id().as_str() == id)
+    }
+
+    /// What `app`'s `view` shows, as `files` keep it and, for an app
+    /// messages come in, as `chats` says what came in it, by a call that
+    /// only reads.
     fn screen(
         &self,
         files: &dyn LeasedFiles,
+        chats: &dyn Chats,
         app: &App,
         view: &Identifier,
         now: &Now,
     ) -> Result<Screen, PhoneError> {
-        let kept = Kept::read(files, app.id())?;
-
         match app.runs() {
             Runs::Script { text, .. } => {
-                let host = Host::new(kept, now.clone(), Access::ReadOnly, None);
+                let host = Host::new(
+                    Kept::read(files, app.id())?,
+                    now.clone(),
+                    Access::ReadOnly,
+                    None,
+                );
 
                 engine::call(text, &host, "screen", &Value::from(view.as_str()))
                     .map_err(|failure| failed(app, failure))?
@@ -411,7 +459,11 @@ impl Phone {
                         problem,
                     })
             }
-            Runs::Store => Ok(store::screen(&kept, &self.apps(files)?.apps)),
+            Runs::Store => Ok(store::screen(
+                &Kept::read(files, app.id())?,
+                &self.listed(files)?.apps,
+            )),
+            Runs::Chat => chat::screen(chats, app, now),
         }
     }
 }

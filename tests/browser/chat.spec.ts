@@ -78,6 +78,25 @@ async function allowOn(card: Locator): Promise<void> {
 const near = 0.5;
 
 /**
+ * The desktop app as the page in its main window meets it, put on the page
+ * before it loads: an `invoke` that keeps every call and is granted the
+ * system's permission, and the window's focus, as the test says it.
+ */
+const desktopApp = `
+  window.asked = [];
+  window.inFront = true;
+  window.__TAURI_INTERNALS__ = {
+    invoke: (command, args) => {
+      window.asked.push(args === undefined ? [command] : [command, args]);
+      return Promise.resolve(
+        command === 'plugin:notification|request_permission' ? 'granted' : null,
+      );
+    },
+  };
+  document.hasFocus = () => window.inFront;
+`;
+
+/**
  * Where the card in front sits against her last line, the message box,
  * the dock that holds it and the window, and whether its end is under its
  * words; none while it is not there.
@@ -229,6 +248,67 @@ test("page.chat-drafts-and-second-tab: the printed address opens the page and th
   ]);
 });
 
+test("page.chat-apps: a line from the page and her answer, then a line from Telegram and hers, read as a messaging app's: Telegram's name stands above the time where the conversation moved there, the person's Telegram bubble is in Telegram's colour, and her name stands above none of her bubbles", async ({
+  page,
+}) => {
+  const {model, daemon, wire} = await miraHome();
+  const fromTelegram = await sender(wire);
+
+  model.answer(reply('Hello to you.'), reply('Hello from here too.'));
+  await page.goto(daemon.url);
+  await send(page, 'Hello.');
+  await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
+    'Hello to you.',
+  ]);
+
+  const {conversationId} = await conversationOf(wire, 'mira');
+
+  await fromTelegram({
+    conversationId,
+    text: 'Now from Telegram.',
+    source: 'telegram:mira_bot',
+    clientMessageId: 'telegram-1',
+  });
+  await expect(page.locator('.bubble-text')).toHaveText([
+    'Hello.',
+    'Hello to you.',
+    'Now from Telegram.',
+    'Hello from here too.',
+  ]);
+
+  const {messages} = (await wire.history(conversationId)) as {
+    readonly messages: readonly unknown[];
+  };
+  const named = page.locator('.divider-app');
+  const time = page.locator('.divider', {has: named}).locator('time');
+
+  await expect(named).toHaveText(['Telegram']);
+  // The time is the Telegram line's, as the daemon keeps it.
+  expect(messages).toContainEqual(
+    expect.objectContaining({
+      clientMessageId: 'telegram-1',
+      sentAt: await time.getAttribute('datetime'),
+    }),
+  );
+
+  const [name, when] = await Promise.all([
+    named.boundingBox(),
+    time.boundingBox(),
+  ]);
+
+  expect(
+    name !== null && when !== null && name.y + name.height <= when.y + near,
+  ).toBe(true);
+  await expect(
+    page.locator('.bubble-own').filter({hasText: 'Now from Telegram.'}),
+  ).toHaveCSS('background-color', 'rgb(15, 127, 176)');
+  // Her name is said to a reader of the screen, and not drawn.
+  await expect(page.locator('.bubble-theirs .visually-hidden')).toHaveText([
+    'Mira:',
+    'Mira:',
+  ]);
+});
+
 test("page.own-turn: a moment of hers in which she says nothing shows nothing, one whose model fails raises no notice, and her message in a moment of her own appears in the open thread with no 'is writing' line before her first draft", async ({
   context,
   page,
@@ -337,6 +417,38 @@ test("page.unseen-dot: with two characters, a message one writes while the other
     'Thinking of you.',
   ]);
   await expect(dotOf('Mira')).toHaveCount(0);
+});
+
+test("page.notification: in the desktop app, a message of hers while the window is in front asks the app for nothing; with the window out of focus, her next asks it for the system's permission, then for one notification with her name and her words", async ({
+  page,
+}) => {
+  const {model, daemon, wire} = await miraHome();
+  const replies = page.locator('.bubble-theirs .bubble-text');
+
+  await page.addInitScript(desktopApp);
+  model.answer(reply('Hello to you.'), reply('I found the tea you like.'));
+  await page.goto(daemon.url);
+  await expect(composerFor(page)).toBeVisible();
+
+  const say = await converse(wire, 'mira');
+
+  await say('Hello.', 'hello');
+  await expect(replies).toHaveText(['Hello to you.']);
+  await page.evaluate('window.inFront = false');
+  await say('Any news?', 'news');
+  await expect(replies).toHaveText([
+    'Hello to you.',
+    'I found the tea you like.',
+  ]);
+  await expect
+    .poll(() => page.evaluate<unknown>('window.asked'))
+    .toEqual([
+      ['plugin:notification|request_permission'],
+      [
+        'plugin:notification|notify',
+        {options: {title: 'Mira', body: 'I found the tea you like.'}},
+      ],
+    ]);
 });
 
 test('page.reconnect-same-address: once the daemon stops the page says Connecting… and keeps the thread; once another starts on the home it is back on the same address by itself, and the next line is answered without a click', async ({

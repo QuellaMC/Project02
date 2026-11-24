@@ -90,7 +90,7 @@
       </p>
 
       <pre><code>{
-  "protocolVersion": 14,
+  "protocolVersion": 17,
   "token": "…",
   "port": 41925,
   "running": {"pid": 12345, "startedAt": "2026-09-24T10:14:07.311Z"}
@@ -573,7 +573,10 @@
               chronological within the page, with <code>earlier</code> when
               older messages remain. <code>limit</code> is held to 1..500
               (default 100); <code>before</code> is the opaque cursor from a
-              previous page.
+              previous page. Every message carries <code>sentAt</code>, when
+              it was sent, and the <code>app</code> it is in, and each of the
+              person's its stamps; a message of hers an earlier build kept is
+              in the app of the person's line before it.
             </td>
           </tr>
           <tr>
@@ -766,6 +769,25 @@ Content-Type: application/json
       </p>
 
       <p>
+        The <code>source</code> also says the app the line came in, which the
+        character is told above it with the time it was sent: the part before
+        its first <code>:</code>, <code>telegram</code> for
+        <code>telegram:&lt;bot&gt;</code>, or <code>messages</code>, the app's
+        own chat, for a stamp without one, as <code>web</code>. A line counts
+        as sent when the daemon queues it, however long it waits; each of her
+        messages when it is committed.
+      </p>
+
+      <p>
+        Each of her messages goes in an app she has: <code>messages</code>
+        always, and a connector's app while the connector holds a bot of hers
+        that is on. While she has more than one, she may name the app a
+        message goes in. A message that names none answers in the app its
+        line came in; one of her own goes in the app the person last wrote
+        in, while she has it, and else in <code>messages</code>.
+      </p>
+
+      <p>
         A character also has turns of her own, while she is ready: her
         heartbeat gives her a moment every so often while the person is
         quiet, as her own settings say, and a ring on her phone that comes
@@ -796,7 +818,7 @@ Content-Type: application/json
 
       <pre><code>id: 5f1c9a02b7e4d310-61
 event: ready
-data: {"protocolVersion":16,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
+data: {"protocolVersion":17,"health":{…},"confirmations":[…],"pairings":[…],"turns":[…]}
 
 id: 5f1c9a02b7e4d310-62
 event: turn_progress
@@ -877,9 +899,12 @@ data: {…}</code></pre>
             <td><code>turn_progress</code></td>
             <td>
               A turn's progress: both committed roles —
-              <code>user_message</code> (with <code>source</code> and
-              <code>clientMessageId</code>) and <code>visible_reply</code>,
-              which names the <code>draftId</code> it replaces — and its rounds'
+              <code>user_message</code> (with <code>sentAt</code>, its
+              <code>app</code>, <code>source</code> and
+              <code>clientMessageId</code>) and <code>visible_reply</code>
+              (with <code>sentAt</code> and the <code>app</code> it went in),
+              which names the <code>draftId</code> it replaces — and its
+              rounds'
               tool calls: <code>tool_calls_requested</code> with the
               <code>toolNames</code> a round called, then a
               <code>tool_call_completed</code> for each call as it came back,
@@ -1151,10 +1176,12 @@ data: {…}</code></pre>
         <code>clientMessageId</code>, so a message Telegram hands on again is
         the line it was. It hands each line to her inbox and asks Telegram past
         the message only once the line is queued. It answers private chats
-        only, keeps nothing between runs — each starts from the record, its
-        <code>ready</code> and its config read — and edits a draft's message in
-        each chat at most every 1.5 seconds, to her turn as the daemon last
-        said it. <code>crates/p02-telegram/README.md</code> has the rest.
+        only, and keeps nothing between runs — each starts from the record, its
+        <code>ready</code> and its config read. While a turn a line from a chat
+        began runs, that chat shows her typing; each message of hers whose
+        <code>app</code> is <code>telegram</code> is posted whole, once
+        committed, in every paired chat, and nothing else of the conversation
+        is. <code>crates/p02-telegram/README.md</code> has the rest.
       </p>
 
       <h2>Her phone</h2>
@@ -1167,12 +1194,17 @@ data: {…}</code></pre>
       <p>
         <code>GET /api/characters/:id/phone</code> reads her phone from her
         data, whether she runs or not. Her <code>apps</code> come in her
-        phone's order, those it comes with, then those installed on it by
-        name, and last the App Store, each with its <code>id</code>,
-        <code>name</code>, the <code>summary</code> she knows it by, its
-        <code>version</code>, where it came from as its
+        phone's order: the apps messages come in, <code>messages</code>
+        first, and a connector's app, as <code>telegram</code>, while it
+        carries her messages; then those it comes with, then those
+        installed on it by name, and last the App Store, each with its
+        <code>id</code>, <code>name</code>, the <code>summary</code> she
+        knows it by, its <code>version</code>, where it came from as its
         <code>source</code> (<code>built_in</code>, <code>catalog</code>,
-        <code>file</code>), the <code>icon</code> and the
+        <code>file</code>), whether she and the person write to each other
+        in it, <code>messaging</code>, which a client draws as their
+        conversation, what went through that app of the scrollback and the
+        stream, the <code>icon</code> and the
         <code>tint</code> of its tile — names of the page's own set, which
         falls back for one it does not know — whether it says it
         <code>wakes</code> her and whether the person lets it,
@@ -1203,7 +1235,12 @@ data: {…}</code></pre>
         home screen. <code>did</code> is what she last did on it: the
         <code>appId</code>, a few <code>words</code> in the past tense —
         <code>Opened Clock</code>, or an action's own, such as
-        <code>Set an alarm</code> — and the moment <code>at</code>.
+        <code>Set an alarm</code> — and the moment <code>at</code>. An app
+        messages come in shows her, on its one view,
+        <code>conversation</code>, the newest twenty messages that went
+        through it as bubbles, a <code>note</code> of the day and the time
+        where time has passed, and has no action: a message is sent one
+        way, as she sends any.
         <code>ringing</code> is empty but while a moment of hers that a ring
         began runs, and then holds each ring it tells: its
         <code>appName</code>, <code>title</code>, <code>body</code> when it

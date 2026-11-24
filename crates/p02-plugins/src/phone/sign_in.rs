@@ -7,12 +7,14 @@
 //! connection still connected, and one with none of the person's
 //! connections connected are refused unasked.
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use p02_contracts::{
     Confirmation, EvidenceKind, EvidenceNote, EvidenceStatus, HookContext, PluginError,
     PreparedEffect, ProvidedTool, ToolCall, ToolCallOutcome, ToolPreparation,
 };
-use p02_phone::{Listed, OnPhone, Phone, PhoneError, SignedIn};
+use p02_phone::{Chats, Listed, OnPhone, Phone, PhoneError, SignedIn};
 use p02_shared::{Identifier, sentence};
 use p02_wire::AppConnection;
 use serde::Deserialize;
@@ -57,10 +59,12 @@ pub(super) fn tool_of() -> Result<ProvidedTool, PluginError> {
     .with_confirmation(Confirmation::Required))
 }
 
-/// Prepares the sign-in `call` asks for on `phone`, with the first of the
-/// person's `connections` connected now, or refuses it unasked.
+/// Prepares the sign-in `call` asks for on `phone`, among her apps as
+/// `chats` says which carry her messages, with the first of the person's
+/// `connections` connected now, or refuses it unasked.
 pub(super) async fn prepare(
     phone: &'static Phone,
+    chats: Arc<dyn Chats>,
     connections: &dyn Connections,
     call: &ToolCall,
     context: &HookContext,
@@ -68,7 +72,8 @@ pub(super) async fn prepare(
     let SigningIn { app: id } = admitted(call)?;
     let person = context.turn()?.person.clone();
     let store = store(context)?;
-    let on_phone = blocking(move || store.with_lease(|files| phone.apps(files))).await??;
+    let on_phone =
+        blocking(move || store.with_lease(|files| phone.apps(files, chats.as_ref()))).await??;
     let (app, account) = match on_phone.signing_in(&id) {
         Ok(found) => found,
         Err(refusal) => return Ok(refused(&on_phone, &refusal)),

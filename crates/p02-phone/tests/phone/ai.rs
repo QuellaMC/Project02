@@ -7,7 +7,7 @@ use std::slice;
 use p02_phone::{Acting, Answer, Ask, Exchange, Fetched, Phone, PhoneError, Question};
 use serde_json::{Value, json};
 
-use crate::support::{Files, actions, app, input, now};
+use crate::support::{Files, actions, app, input, now, quiet};
 
 /// Advice, which reaches Open-Meteo's host and asks a model through the
 /// person's ChatGPT, with these `fields` beside them and `script` beside a
@@ -43,7 +43,15 @@ fn run(
     given: &Value,
     exchanges: &[Exchange],
 ) -> Result<Acting, PhoneError> {
-    phone.act(files, "advice", action, &input(given), exchanges, &now())
+    phone.act(
+        files,
+        &quiet(),
+        "advice",
+        action,
+        &input(given),
+        exchanges,
+        &now(),
+    )
 }
 
 /// The question Advice's `ask` asks of its host on `given`.

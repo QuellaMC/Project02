@@ -14,10 +14,20 @@ import {
   type Answer,
 } from './harness/model-server.ts';
 import {bearer, exchange} from './harness/http.ts';
-import {conversationOf, converse, saveConfig, wireOf} from './harness/wire.ts';
+import {
+  conversationOf,
+  converse,
+  saveConfig,
+  sender,
+  wireOf,
+} from './harness/wire.ts';
 
 const fixedReplies = {PROJECT02_TEST_PROVIDER: 'deterministic'};
 const mira = {scope: 'character', characterId: 'mira'} as const;
+/** When a message was sent, by its shape. */
+const sentAt = expect.stringMatching(
+  /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u,
+) as string;
 
 function dataOf(frame: Frame | undefined): unknown {
   return JSON.parse(frame?.data ?? 'null');
@@ -59,7 +69,7 @@ it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, th
   const events = await openEvents(daemon);
 
   expect(dataOf(await events.next(() => true))).toEqual({
-    protocolVersion: 16,
+    protocolVersion: 17,
     health: await wire.health(),
     confirmations: await wire.pending(),
     pairings: await wire.pendingPairings(),
@@ -213,21 +223,29 @@ it('stream.running-turns: a stream opened mid-reply finds the running turn in re
   ).toMatchObject({turns: []});
 });
 
-it("stream.sync-rule: the person's line rides the stream as user_message, stamped, once it is on disk, and the reply follows", async () => {
+it("stream.sync-rule: the person's line rides the stream as user_message, stamped, with when it was sent and the app it came in, once it is on disk, and the reply follows", async () => {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({project02: model.settings}),
   });
   const daemon = await startDaemon(home);
   const wire = wireOf(daemon);
-  const say = await converse(wire, 'mira');
+
+  await wire.start('mira');
+
+  const send = await sender(wire);
   const {conversationId} = await conversationOf(wire, 'mira');
   const events = await openEvents(daemon);
 
   model.hold();
 
   // Answered by the kill, so its handler is on from the start.
-  const turn = say('Hello there.', 'sync').then(
+  const turn = send({
+    conversationId,
+    text: 'Hello there.',
+    source: 'telegram:mira_bot',
+    clientMessageId: 'sync',
+  }).then(
     () => 'answered',
     () => 'cut off',
   );
@@ -247,7 +265,9 @@ it("stream.sync-rule: the person's line rides the stream as user_message, stampe
       speakerId: 'local-user',
       speakerName: 'You',
       text: 'Hello there.',
-      source: 'web',
+      sentAt,
+      app: 'telegram',
+      source: 'telegram:mira_bot',
       clientMessageId: 'sync',
     },
   });
@@ -269,7 +289,7 @@ it("stream.sync-rule: the person's line rides the stream as user_message, stampe
   });
 });
 
-it('stream.drafts: a turn reaches the stream as its line, then the turn running with each of its replies drafted in order under a draft id of its own, whole each time it grows, then each commit naming the draft it replaces and the turn without that draft, then turn_completed', async () => {
+it('stream.drafts: a turn reaches the stream as its line, sent in Messages, then the turn running with each of its replies drafted in order under a draft id of its own, whole each time it grows, then each commit naming the draft it replaces and when it was sent, and the turn without that draft, then turn_completed', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
@@ -312,15 +332,15 @@ it('stream.drafts: a turn reaches the stream as its line, then the turn running 
         return progress ?? (drafts === undefined ? {kind} : {kind, drafts});
       }),
   ).toMatchObject([
-    {kind: 'user_message', text: 'Two things?'},
+    {kind: 'user_message', text: 'Two things?', sentAt, app: 'messages'},
     {kind: 'turn_running', drafts: []},
     {kind: 'turn_running', drafts: [{draftId: '1.0', text: 'First'}]},
     {kind: 'turn_running', drafts: [first]},
     {kind: 'turn_running', drafts: [first, {draftId: '1.1', text: 'Then'}]},
     {kind: 'turn_running', drafts: [first, then]},
-    {kind: 'visible_reply', ...first},
+    {kind: 'visible_reply', ...first, sentAt},
     {kind: 'turn_running', drafts: [then]},
-    {kind: 'visible_reply', ...then},
+    {kind: 'visible_reply', ...then, sentAt},
     {kind: 'turn_running', drafts: []},
     {kind: 'turn_completed'},
   ]);

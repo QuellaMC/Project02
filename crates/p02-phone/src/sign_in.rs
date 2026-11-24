@@ -122,7 +122,7 @@ impl Phone {
         id: &str,
         signed_in: Option<SignedIn>,
     ) -> Result<(), PhoneError> {
-        let on_phone = self.apps(files)?;
+        let on_phone = self.listed(files)?;
         let (app, _) = on_phone.signing_in(id)?;
         let mut sign_ins = on_phone.sign_ins.clone();
 

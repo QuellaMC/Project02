@@ -6,7 +6,7 @@
 use p02_phone::{Acting, Answer, Ask, Exchange, Phone, Question, Source, it_may};
 use serde_json::{Value, json};
 
-use crate::support::{Files, at, input, took};
+use crate::support::{Files, at, input, quiet, took};
 
 /// ChatGPT as the catalog serves it.
 const CHATGPT: &str = include_str!("../../catalog/chatgpt.js");
@@ -35,7 +35,7 @@ fn installed() -> Files {
     let mut files = Files::default();
 
     phone()
-        .install(&mut files, CHATGPT, Source::Catalog)
+        .install(&mut files, &quiet(), CHATGPT, Source::Catalog)
         .unwrap();
     files
 }
@@ -56,6 +56,7 @@ fn ask(
     loop {
         match phone().act(
             files,
+            &quiet(),
             "chatgpt",
             "ask",
             &input(&json!({"question": given})),
@@ -84,7 +85,7 @@ fn ask(
 fn look(files: &Files) -> Value {
     serde_json::to_value(
         phone()
-            .look(files, "chatgpt", "chatgpt", &at(NOON))
+            .look(files, &quiet(), "chatgpt", "chatgpt", &at(NOON))
             .unwrap(),
     )
     .unwrap()
@@ -107,7 +108,7 @@ fn no_questions() -> Value {
 #[test]
 fn chatgpt_is_taken_from_its_file_and_asks_a_model_through_a_connection_of_the_persons() {
     let installed = phone()
-        .install(&mut Files::default(), CHATGPT, Source::Catalog)
+        .install(&mut Files::default(), &quiet(), CHATGPT, Source::Catalog)
         .unwrap();
 
     assert_eq!(
