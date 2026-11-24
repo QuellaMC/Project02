@@ -1,10 +1,16 @@
 /**
  * The tab's one client and one stream, and the verbs a page calls. Every
  * event and every outcome passes through the store's reducers, and the
- * page reads the store, never the client. The address is the page's own,
- * so this runs only in a browser: the browser suite is its cover.
+ * page reads the store, never the client. In the desktop app's main
+ * window, each event also passes through the rule of when the app shows a
+ * notification. The address is the page's own, so this runs only in a
+ * browser: the browser suite is its cover.
  */
-import type {Answer, PendingConfirmation} from '@project02/wire/contract';
+import type {
+  Answer,
+  GatewayEvent,
+  PendingConfirmation,
+} from '@project02/wire/contract';
 import {
   GatewayClientError,
   type GatewayClient,
@@ -12,6 +18,7 @@ import {
 } from '@project02/wire/client';
 import {settingAskOf} from './ask-words.ts';
 import {dockStepped, dockWaited, herSettingsRead} from './dock.ts';
+import {notificationFor} from './notifications.ts';
 import {followHerPhone, openHerPhone} from './phone-link.ts';
 import {
   createSettingsVerbs,
@@ -47,6 +54,7 @@ import {
   type WebState,
 } from './store.ts';
 import {clientFor, createValue, follow, problem} from './surface.ts';
+import {notifierOf} from './window-calls.ts';
 
 export type Session = SettingsVerbs & {
   readonly getState: () => WebState;
@@ -180,7 +188,7 @@ export function createSession(address: string): Session {
   };
 
   follow(client, {
-    event: event => {
+    event: notifying(event => {
       apply(current => applyEvent(current, event));
       openTheOnlyCharacter();
 
@@ -206,7 +214,7 @@ export function createSession(address: string): Session {
       if (event.kind === 'phone_changed') {
         void settings.phoneChanged(event.characterId);
       }
-    },
+    }),
     ready: async snapshot => {
       // The thread is set aside for the page read next, so no read
       // already in flight for it says what it shows any more.
@@ -410,6 +418,37 @@ function readsHerSettings({
         }
       })
       .catch(() => undefined);
+  };
+}
+
+/**
+ * `handle`, and after it, in the desktop app, the notification the event
+ * asks for by the rule in `notifications.ts`, shown by the app; in a
+ * browser tab, which has no such call, `handle` alone. Her phone's window,
+ * the same page in another mode, has a session of its own, which never
+ * notifies.
+ */
+function notifying(
+  handle: (event: GatewayEvent) => void,
+): (event: GatewayEvent) => void {
+  const notify = notifierOf(window);
+
+  if (notify === undefined) {
+    return handle;
+  }
+
+  let notified: ReadonlySet<string> = new Set();
+
+  return event => {
+    handle(event);
+
+    const asked = notificationFor(notified, event, document.hasFocus());
+
+    if (asked !== undefined) {
+      notified = asked.notified;
+      // One the app does not show says nothing.
+      void notify(asked.notification).catch(() => undefined);
+    }
   };
 }
 

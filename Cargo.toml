@@ -51,6 +51,7 @@ socket2 = "0.6.5"
 subtle = { version = "2.6.1", default-features = false }
 tauri-build = "2.7.4"
 tauri-plugin-dialog = "2.8.3"
+tauri-plugin-notification = "2.8.1"
 tauri-plugin-opener = "2.7.2"
 tauri-plugin-single-instance = "2.5.4"
 tempfile = "3.27.0"

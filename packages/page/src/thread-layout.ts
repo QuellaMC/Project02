@@ -82,7 +82,7 @@ type App = {readonly name: string; readonly colour: string};
 type CalendarDay = {readonly year: number; readonly day: number};
 
 /** The app's own chat, which every line of the page's is sent in. */
-const messagesApp = 'messages';
+export const messagesApp = 'messages';
 
 /** The page's own blue: the holder's own bubbles in Messages, and in any app the page does not know. */
 const pageBlue = 'var(--link)';

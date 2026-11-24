@@ -72,6 +72,14 @@ and its end raises no notice. A reply of hers committed to a chat that
 is not on screen, whatever began her turn, puts a dot after her name in
 the roster until her chat opens: one dot however many wait, the tab's
 own, so a reload starts without.
+In the desktop app, a message of hers the stream commits in Messages
+while the main window does not have the focus has the app show a
+notification, her name over her words, once for each message, by the
+rule of `notifications.ts`, pure and tested in Node: none for her drafts,
+a page of the scrollback or a snapshot, for what she sends in Telegram,
+or while the window is in front. The first asks the system's permission,
+once, and a no is final and silent. Her phone's window never notifies,
+and a browser tab, which has no such call, shows none.
 Her chat's head has a Her Phone button unless the daemon says she has no
 phone. It opens her phone in the one window every character's phone
 shares, and closes it, and is pressed while that window shows hers: the
@@ -247,9 +255,10 @@ is said in the daemon's sentence where her phone would be.
 iPhone, with nothing painted around it, so a window that can show what is
 behind it does. `window-calls.ts` tells, from the page's `window` and
 importing nothing of the app, whether a page is in the desktop app and what
-its window answers. The app's window for her phone has no frame of its own
-and answers four window calls: there the bar moves the window, a pin keeps
-it on top of other windows as the window says it does, and closing it, from
-the bar or when the chat asks, is the app's. A browser's popup, which has a
-title bar of its own, answers none: it gets no pin and no moving bar, and
-closes as a window a script opened.
+its window answers, and has the app show a notification. The app's window
+for her phone has no frame of its own and answers four window calls: there
+the bar moves the window, a pin keeps it on top of other windows as the
+window says it does, and closing it, from the bar or when the chat asks, is
+the app's. A browser's popup, which has a title bar of its own, answers
+none: it gets no pin and no moving bar, and closes as a window a script
+opened.

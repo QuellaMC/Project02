@@ -3,8 +3,8 @@
 The app a person installs: the daemon and the Telegram connector in its own
 process, a window on the daemon's page and one for her phone, and a tray
 that keeps them running while the main window is closed. It depends on
-p02-shared, p02-telegram and project02, and on Tauri 2 for the windows and
-the tray.
+p02-shared, p02-telegram and project02, and on Tauri 2 for the windows, the
+tray and the notifications.
 
 It builds only where a webview's development files are: on Linux, the
 packages the gate's Linux job installs (`pkg-config`,
@@ -42,9 +42,21 @@ Xcode's command line tools.
   Tauri's window calls, on 127.0.0.1, where the daemon serves, and nowhere
   else: whether it stays on top, keeping it on top, starting a drag and
   closing it, with which its page moves it by its bar, pins it and closes
-  it. The main window's page reaches nothing of Tauri. However it is
-  closed, it closes and does not hide; Quit hides it with the main window
-  before the stop order.
+  it. However it is closed, it closes and does not hide; Quit hides it with
+  the main window before the stop order.
+- **A notification** is the system's own, through Tauri's notification
+  plugin, and the main window's page asks for one for each message of hers
+  in Messages while that window does not have the focus: closed, minimised
+  or behind another window. Its title is her name and its body her words.
+  The capability `main-window` gives that window, labelled `main`, on
+  127.0.0.1 alone, two of the plugin's calls and nothing else of Tauri:
+  asking the system's permission, which its page does once, the first time
+  it has one to show, and showing one. On every desktop the plugin answers
+  that permission yes without asking the person. On Windows a notification
+  shows under the app's name and icon once the app is installed, since the
+  installer gives its shortcuts the app's identifier; a build run from
+  `target` shows as PowerShell. What a click on one does is the system's:
+  the app listens for none.
 - **What the app remembers** of her phone's window is in
   `phone-window.json`, in the app's config folder
   (`io.github.quellamc.project02` under the system's), written whole when

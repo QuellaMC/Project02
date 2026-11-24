@@ -12,9 +12,9 @@ targets = [
 yanked = "deny"
 ignore = [
     { id = "RUSTSEC-2024-0370", reason = "a maintenance notice on proc-macro-error, which Tauri depends on through gtk-rs 0.18 on Linux" },
-    { id = "RUSTSEC-2026-0370", reason = "a maintenance notice on zvariant, which Tauri's opener and single-instance plugins depend on through zbus 5" },
-    { id = "RUSTSEC-2026-0371", reason = "a maintenance notice on zbus_names, which Tauri's opener and single-instance plugins depend on through zbus 5" },
-    { id = "RUSTSEC-2026-0372", reason = "a maintenance notice on zvariant_derive, which Tauri's opener and single-instance plugins depend on through zbus 5" },
+    { id = "RUSTSEC-2026-0370", reason = "a maintenance notice on zvariant, which Tauri's opener, single-instance and notification plugins depend on through zbus 5" },
+    { id = "RUSTSEC-2026-0371", reason = "a maintenance notice on zbus_names, which Tauri's opener, single-instance and notification plugins depend on through zbus 5" },
+    { id = "RUSTSEC-2026-0372", reason = "a maintenance notice on zvariant_derive, which Tauri's opener, single-instance and notification plugins depend on through zbus 5" },
 ]
 
 [licenses]

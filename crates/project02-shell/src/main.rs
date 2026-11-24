@@ -30,10 +30,11 @@ use tauri::{
 };
 use tauri_plugin_dialog::{DialogExt as _, MessageDialogKind};
 
-/// The label of the main window.
+/// The label of the main window, which the capability `main-window` in
+/// `tauri.conf.json` names.
 const WINDOW: &str = "main";
 
-/// The label of her phone's window, which the capability in
+/// The label of her phone's window, which the capability `phone-window` in
 /// `tauri.conf.json` names. There is one: another character's phone takes
 /// it to her address.
 const PHONE: &str = "phone";
@@ -65,6 +66,9 @@ fn main() -> ExitCode {
         // First, so a second launch reaches this one before anything starts.
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)))
         .plugin(tauri_plugin_dialog::init())
+        // The system's notification the main window's page asks for when
+        // she writes while it is not in front.
+        .plugin(tauri_plugin_notification::init())
         // The tray's menu and a Mac's application menu, which share Quit.
         .on_menu_event(|app, event| match event.id().as_ref() {
             "open" => show(app),
@@ -180,8 +184,9 @@ fn open_when_served(app: &AppHandle, address: &Receiver<String>) {
 }
 
 /// The main window, on the daemon's page at `address`, and her phone's
-/// window again when the app last ended with it open. No capability names
-/// the main window, so its page gets nothing of Tauri.
+/// window again when the app last ended with it open. The main window's
+/// page gets nothing of Tauri but a notification and the system's
+/// permission for one.
 fn open(app: &AppHandle, address: &str) -> tauri::Result<()> {
     let daemon: Url = address.parse().map_err(tauri::Error::InvalidUrl)?;
     let opener = app.clone();

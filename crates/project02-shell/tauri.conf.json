@@ -10,6 +10,19 @@
       "csp": null,
       "capabilities": [
         {
+          "identifier": "main-window",
+          "description": "The main window, on the daemon's page: it asks the system's permission to show a notification, and shows one when she writes while it is not in front.",
+          "windows": ["main"],
+          "local": false,
+          "remote": {
+            "urls": ["http://127.0.0.1:*"]
+          },
+          "permissions": [
+            "notification:allow-request-permission",
+            "notification:allow-notify"
+          ]
+        },
+        {
           "identifier": "phone-window",
           "description": "Her phone's window, on the daemon's page: its bar moves it, its pin keeps it on top of other windows, and it closes.",
           "windows": ["phone"],

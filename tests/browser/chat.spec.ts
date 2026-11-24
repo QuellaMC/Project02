@@ -78,6 +78,25 @@ async function allowOn(card: Locator): Promise<void> {
 const near = 0.5;
 
 /**
+ * The desktop app as the page in its main window meets it, put on the page
+ * before it loads: an `invoke` that keeps every call and is granted the
+ * system's permission, and the window's focus, as the test says it.
+ */
+const desktopApp = `
+  window.asked = [];
+  window.inFront = true;
+  window.__TAURI_INTERNALS__ = {
+    invoke: (command, args) => {
+      window.asked.push(args === undefined ? [command] : [command, args]);
+      return Promise.resolve(
+        command === 'plugin:notification|request_permission' ? 'granted' : null,
+      );
+    },
+  };
+  document.hasFocus = () => window.inFront;
+`;
+
+/**
  * Where the card in front sits against her last line, the message box,
  * the dock that holds it and the window, and whether its end is under its
  * words; none while it is not there.
@@ -398,6 +417,38 @@ test("page.unseen-dot: with two characters, a message one writes while the other
     'Thinking of you.',
   ]);
   await expect(dotOf('Mira')).toHaveCount(0);
+});
+
+test("page.notification: in the desktop app, a message of hers while the window is in front asks the app for nothing; with the window out of focus, her next asks it for the system's permission, then for one notification with her name and her words", async ({
+  page,
+}) => {
+  const {model, daemon, wire} = await miraHome();
+  const replies = page.locator('.bubble-theirs .bubble-text');
+
+  await page.addInitScript(desktopApp);
+  model.answer(reply('Hello to you.'), reply('I found the tea you like.'));
+  await page.goto(daemon.url);
+  await expect(composerFor(page)).toBeVisible();
+
+  const say = await converse(wire, 'mira');
+
+  await say('Hello.', 'hello');
+  await expect(replies).toHaveText(['Hello to you.']);
+  await page.evaluate('window.inFront = false');
+  await say('Any news?', 'news');
+  await expect(replies).toHaveText([
+    'Hello to you.',
+    'I found the tea you like.',
+  ]);
+  await expect
+    .poll(() => page.evaluate<unknown>('window.asked'))
+    .toEqual([
+      ['plugin:notification|request_permission'],
+      [
+        'plugin:notification|notify',
+        {options: {title: 'Mira', body: 'I found the tea you like.'}},
+      ],
+    ]);
 });
 
 test('page.reconnect-same-address: once the daemon stops the page says Connecting… and keeps the thread; once another starts on the home it is back on the same address by itself, and the next line is answered without a click', async ({
