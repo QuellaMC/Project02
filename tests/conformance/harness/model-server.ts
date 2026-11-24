@@ -61,15 +61,13 @@ export type Held = {
 };
 
 /**
- * A streamed answer the test writes piece by piece, so a draft grows at the
- * test's pace. The headers go out with the first piece, and an empty piece
- * sends them alone.
+ * A streamed answer the test writes piece by piece, at its own pace. The
+ * headers go out with the first piece, and an empty piece sends them
+ * alone.
  */
 export type Driven = {
   readonly arrived: () => Promise<ModelRequest>;
   readonly write: (chunks: readonly unknown[]) => void;
-  /** These bytes as they are: a frame, or a character, may end in the next piece. */
-  readonly send: (bytes: Uint8Array) => void;
   /** Ends the answer as its protocol does: chat completions with `[DONE]`, a response or a message with its last event. */
   readonly end: () => void;
 };
@@ -245,7 +243,7 @@ export async function startModelServer(): Promise<ModelServer> {
       const arrival = Promise.withResolvers<ModelRequest>();
       let response: ServerResponse | undefined;
       let last = '';
-      let pending: (string | Uint8Array)[] = [];
+      let pending: string[] = [];
       let ended = false;
       const flush = (): void => {
         if (response === undefined) {
@@ -284,10 +282,6 @@ export async function startModelServer(): Promise<ModelServer> {
           ),
         write: chunks => {
           pending.push(eventStream(chunks));
-          flush();
-        },
-        send: bytes => {
-          pending.push(bytes);
           flush();
         },
         end: () => {
@@ -371,14 +365,14 @@ function give(
 }
 
 /** Each event as the Responses and the Messages protocols stream it: an `event:` line naming it, and a `data:` line of its JSON. */
-export function responseStream(events: readonly ResponseEvent[]): string {
+function responseStream(events: readonly ResponseEvent[]): string {
   return events
     .map(event => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`)
     .join('');
 }
 
 /** Each chunk a `data:` line: an object as its JSON, a string as written. */
-export function eventStream(chunks: readonly unknown[]): string {
+function eventStream(chunks: readonly unknown[]): string {
   return chunks
     .map(
       chunk =>

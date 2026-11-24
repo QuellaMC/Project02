@@ -94,6 +94,8 @@ impl RoleModelAdapter for Scripted {
 }
 
 /// A turn that keeps a line for everything the loop asks of it, in order.
+/// When a round begins and ends is what the runtime announces, and its
+/// tests hold it.
 #[derive(Debug, Default)]
 struct Recording {
     log: Mutex<Vec<String>>,
@@ -168,6 +170,10 @@ impl TurnSink for Recording {
             DraftEvent::Withdrawn { draft } => format!("withdrawn {draft}"),
         });
     }
+
+    fn round_began(&self) {}
+
+    fn round_ended(&self) {}
 }
 
 /// The turn's rounds, one after another, to their end.

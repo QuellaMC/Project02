@@ -845,15 +845,6 @@ code {
   margin-top: -6px;
 }
 
-.bubble-draft {
-  outline: 1px dashed var(--chevron);
-}
-
-.bubble-draft .bubble-text::after {
-  content: '▌';
-  opacity: 0.6;
-}
-
 /* A line of the person's on its way, faint until the daemon has it. */
 .bubble-sending {
   opacity: 0.55;
@@ -884,8 +875,34 @@ button.bubble {
   color: var(--red-ink);
 }
 
-/* What she is doing before her reply begins: writing it, or using her phone. */
+/* Her typing where her next message will be: her bubble's look, three dots. */
 .typing {
+  align-self: flex-start;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0;
+  padding: 13px 14px;
+  border-radius: 18px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+
+.typing-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--secondary);
+  opacity: 0.45;
+}
+
+/* The middle one stronger, as the design draws it. */
+.typing-dot:nth-child(2) {
+  opacity: 0.75;
+}
+
+/* She is using her phone, where her next message will be. */
+.phoning {
   margin: 0;
   display: flex;
   align-items: center;

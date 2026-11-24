@@ -687,7 +687,6 @@ describe("her phone's window", () => {
       progress: {
         kind: 'visible_reply',
         ...said('m4', 'character', 'telegram', 'Mira'),
-        draftId: '1.0',
       },
     };
 

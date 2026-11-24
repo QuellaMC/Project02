@@ -42,9 +42,7 @@ pub use conversation::{
     OpenOutcome, OpenRefusal, StorageFailure, SubmitOutcome, TurnRefusal,
 };
 pub use diagnostic::{Code, Diagnostic, Severity};
-pub use event::{
-    Event, Ready, RunningDraft, RunningTurn, ToolCallStatus, TurnProgress, TurnStatus,
-};
+pub use event::{Event, Ready, RunningTurn, ToolCallStatus, TurnProgress, TurnStatus};
 pub use health::{
     CharacterState, CharacterSummary, ConfigHealth, ConnectorPresence, Health, MaintenanceFailure,
     PackageReport, PackagesHealth, PersonAccount, RosterState, StartOutcome, StartRefusal,

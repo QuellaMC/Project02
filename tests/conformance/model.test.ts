@@ -1,33 +1,16 @@
 import {expect, it} from 'vitest';
 
 import {startDaemon} from './harness/daemon.ts';
-import {frameOf, openEvents, type Frame} from './harness/events.ts';
+import {frameOf, openEvents} from './harness/events.ts';
 import {configJson, createHome, sessionLog} from './harness/home.ts';
 import {
   content,
-  eventStream,
   finish,
   reply,
   startModelServer,
-  toolCall,
-  usage,
   visibleReply,
 } from './harness/model-server.ts';
 import {conversationOf, converse, wireOf} from './harness/wire.ts';
-
-/** The drafts of each state of a running turn the stream told, in order. */
-function draftsOf(
-  frames: readonly Frame[],
-): (readonly {readonly draftId: string; readonly text: string}[])[] {
-  return frames.filter(frameOf('turn_running')).map(
-    frame =>
-      (
-        JSON.parse(frame.data ?? '') as {
-          drafts: readonly {readonly draftId: string; readonly text: string}[];
-        }
-      ).drafts,
-  );
-}
 
 it('model.provider-request-body: a round asks the model for a streamed completion with usage, automatic and parallel tool calls, and thinking on', async () => {
   const model = await startModelServer();
@@ -83,86 +66,6 @@ it('model.provider-base-url: with nvidiaBaseUrl set, rounds go to its /chat/comp
   ]);
 });
 
-it('model.provider-streaming: an answer cut anywhere, inside a frame or a character, reads back whole, its tool calls taken by their index, past reasoning chunks, comments and the usage chunk', async () => {
-  const model = await startModelServer();
-  const daemon = await startDaemon(
-    createHome({'config.json': configJson({project02: model.settings})}),
-  );
-  const say = await converse(wireOf(daemon), 'mira');
-  const events = await openEvents(daemon);
-  const [first, firstRest] = toolCall(
-    {
-      index: 0,
-      id: 'call_first',
-      name: 'send_message',
-      arguments: '{"text":"First 🌱."}',
-    },
-    12,
-  );
-  const [second, secondRest] = toolCall(
-    {
-      index: 1,
-      id: 'call_second',
-      name: 'send_message',
-      arguments: '{"text":"Second."}',
-    },
-    13,
-  );
-  const text = `: ping\n\n${eventStream([
-    {
-      choices: [
-        {
-          index: 0,
-          delta: {role: 'assistant', reasoning_content: 'Thinking it over.'},
-          finish_reason: null,
-        },
-      ],
-    },
-    ...content('Café '),
-    first,
-    second,
-    firstRest,
-    ...content('au lait.'),
-    secondRest,
-    finish('tool_calls'),
-    usage({prompt_tokens: 12, completion_tokens: 34}),
-  ])}`;
-  const bytes = new TextEncoder().encode(text);
-  const byteOffset = (marker: string, past: number) =>
-    new TextEncoder().encode(text.slice(0, text.indexOf(marker))).length + past;
-  // Every cut falls inside a frame, the first inside the é and the third
-  // inside the 🌱, and each piece after the first completes a frame of a
-  // reply, whose draft shows the daemon has read that far.
-  const cuts = [
-    byteOffset('Café', 4),
-    byteOffset('Seco', 2),
-    byteOffset('🌱', 2),
-    byteOffset('nd.', 1),
-    bytes.length,
-  ];
-  const driven = model.stream();
-  const turn = say('Two things?', 'split');
-
-  await driven.arrived();
-
-  for (const [index, end] of cuts.entries()) {
-    driven.send(bytes.slice(cuts[index - 1] ?? 0, end));
-
-    if (index > 0) {
-      await events.next(
-        frame =>
-          frameOf('turn_running')(frame) && draftsOf([frame])[0]?.length !== 0,
-      );
-    }
-  }
-
-  driven.end();
-  expect(await turn).toMatchObject({
-    status: 'completed',
-    messages: [{}, {text: 'First 🌱.'}, {text: 'Second.'}],
-  });
-});
-
 it("model.provider-retries: a rate limit is tried again and the turn completes, while a 401 is not tried again and fails the round provider_error in the provider's words", async () => {
   const model = await startModelServer();
   const say = await converse(
@@ -191,7 +94,7 @@ it("model.provider-retries: a rate limit is tried again and the turn completes, 
   expect(model.requests).toHaveLength(3);
 });
 
-it('model.provider-errors: an error the provider sends mid-stream fails the round provider_error, the reply drafted so far withdrawn and kept nowhere, the key it names redacted on the stream and on disk', async () => {
+it('model.provider-errors: an error the provider sends mid-stream fails the round provider_error, the reply begun shown and kept nowhere, the key it names redacted on the stream and on disk', async () => {
   const model = await startModelServer();
   const home = createHome({
     'config.json': configJson({project02: model.settings}),
@@ -228,16 +131,7 @@ it('model.provider-errors: an error the provider sends mid-stream fails the roun
     ) as string,
   });
   expect(carried.data).not.toContain(model.settings.nvidiaApiKey);
-  expect(draftsOf(events.frames)).toEqual([
-    [],
-    [{draftId: '1.0', text: 'Half a thought'}],
-    [],
-  ]);
-  expect(
-    events.frames.filter(
-      frameOf('turn_progress', {progress: {kind: 'visible_reply'}}),
-    ),
-  ).toEqual([]);
+  expect(JSON.stringify(events.frames)).not.toContain('Half a thought');
   await expect(wire.history(conversationId)).resolves.toMatchObject({
     messages: [{role: 'user', text: 'Go on.'}],
   });
@@ -296,7 +190,7 @@ it('model.provider-timeout: a provider that never answers fails the round provid
   });
 });
 
-it('model.reasoning-blocks: a leaked think or reasoning block is scrubbed from the reply before anything shows it, whole in plain content or split across the pieces of a streamed send_message: never drafted, committed or read back', async () => {
+it('model.reasoning-blocks: a leaked think or reasoning block is scrubbed from the reply before anything shows it, in plain content or in a send_message: never on the stream, committed or read back', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
@@ -305,8 +199,6 @@ it('model.reasoning-blocks: a leaked think or reasoning block is scrubbed from t
   const say = await converse(wire, 'mira');
   const {conversationId} = await conversationOf(wire, 'mira');
   const events = await openEvents(daemon);
-  const leaked = '<think>a secret plan</think>Hello there.';
-  const args = JSON.stringify({text: leaked});
 
   model.answer(
     {
@@ -317,12 +209,7 @@ it('model.reasoning-blocks: a leaked think or reasoning block is scrubbed from t
     },
     {
       chunks: [
-        ...visibleReply(
-          leaked,
-          args.indexOf('ink>'),
-          args.indexOf('cret'),
-          args.indexOf('/think') + 3,
-        ),
+        ...visibleReply('<think>a secret plan</think>Hello there.'),
         finish('tool_calls'),
       ],
     },
@@ -331,20 +218,12 @@ it('model.reasoning-blocks: a leaked think or reasoning block is scrubbed from t
     status: 'completed',
     messages: [{}, {text: 'Plain hello.'}],
   });
-  expect(await say('Split?', 'split')).toMatchObject({
+  expect(await say('Sent?', 'sent')).toMatchObject({
     status: 'completed',
     messages: [{}, {text: 'Hello there.'}],
   });
-  await events.next(frameOf('turn_completed', {clientMessageId: 'split'}));
-  const drafted = draftsOf(events.frames).flatMap(drafts =>
-    drafts.map(draft => draft.text),
-  );
-
-  expect(drafted.at(-1)).toBe('Hello there.');
-
-  for (const text of drafted) {
-    expect('Hello there.'.startsWith(text)).toBe(true);
-  }
+  await events.next(frameOf('turn_completed', {clientMessageId: 'sent'}));
+  expect(JSON.stringify(events.frames)).not.toContain('secret');
   expect(JSON.stringify(await wire.history(conversationId))).not.toContain(
     'secret',
   );

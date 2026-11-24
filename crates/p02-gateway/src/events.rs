@@ -192,8 +192,7 @@ impl Streams {
     /// frame: the daemon's health and the confirmations and pairings
     /// waiting, read with the hub let go and read again while anything
     /// they show changed under the read, so they hold exactly what the
-    /// frames before it told, and the turns running with their drafts as
-    /// of that frame.
+    /// frames before it told, and the turns running as of that frame.
     async fn ready(&self) -> Option<(Bytes, MutexGuard<'_, Hub>)> {
         let shared = &self.0;
 
@@ -393,8 +392,8 @@ struct Waits {
 /// ends once its queue is closed and every frame of it written. A client
 /// that has not taken a frame within the grace is not slow, it is gone:
 /// its connection is closed and nothing more is queued for it, however
-/// long its queue, which says nothing about the client, since a reply
-/// spoken in one breath queues hundreds.
+/// long its queue, which says nothing about the client, since a burst of
+/// events queues many at once.
 async fn write(
     mut queued: mpsc::UnboundedReceiver<Bytes>,
     body: mpsc::Sender<Bytes>,

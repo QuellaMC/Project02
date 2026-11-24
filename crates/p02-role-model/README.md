@@ -18,7 +18,9 @@ the time, and of what rang when her phone's ringing began it, and the
 system messages read the same whichever began the turn.
 
 Each round is judged once, by what began its turn and the apps she has
-now, and recorded before anything it decided happens. While she has more
+now, and recorded before anything it decided happens. The turn hears it
+begin as its request goes out, and end once what it said is committed,
+before the calls it made run. While she has more
 than one app, `send_message` offers them by name; each message she says
 goes in the one she names. Naming none, an answer goes in the app its
 line came in, and a message of her own in the one the person last wrote

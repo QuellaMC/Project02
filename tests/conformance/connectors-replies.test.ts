@@ -226,7 +226,7 @@ it('connectors.telegram-page-line: a line from the page that she answers naming 
   });
 });
 
-it('connectors.telegram-line: a line from Telegram that she answers naming no app is answered there: its chat shows her typing, kept up while her turn runs, then gets her message whole, once, and the stream and the scrollback say Telegram', async () => {
+it('connectors.telegram-line: a line from Telegram that she answers naming no app is answered there: its chat shows her typing, kept up while she writes, then gets her message whole, once, and the stream and the scrollback say Telegram', async () => {
   const model = await startModelServer();
   const home = miraHome(model, [alice]);
   const daemon = await startDaemon(home);
@@ -241,8 +241,8 @@ it('connectors.telegram-line: a line from Telegram that she answers naming no ap
 
   telegram.push(miraBot.token, messageFrom(alice, 1, 'Are you there?'));
   await held.arrived();
-  // Telegram lets a typing mark go after about five seconds: while her
-  // turn runs, the chat is shown it again.
+  // Telegram lets a typing mark go after about five seconds: while she
+  // writes, the chat is shown it again.
   await telegram.called(miraBot.token, calls =>
     calls.filter(
       call =>

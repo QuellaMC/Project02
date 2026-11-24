@@ -120,7 +120,7 @@ it("heartbeat.moment: after a person's turn and a heartbeat of quiet a turn of h
 
   expect(dataOf(await events.next(own('turn_running')))).toMatchObject({
     conversationId: expect.any(String) as string,
-    drafts: [],
+    writing: false,
   });
   expect(performance.now() - spoke).toBeGreaterThanOrEqual(heartbeat / 2);
   expect(dataOf(await events.next(own('turn_completed')))).toMatchObject({
@@ -156,7 +156,7 @@ it("heartbeat.moment: after a person's turn and a heartbeat of quiet a turn of h
   expect(performance.now() - spokeAgain).toBeGreaterThanOrEqual(heartbeat / 2);
 });
 
-it('heartbeat.quiet: a moment answered with plain text or with nothing commits no message: the stream holds only its start and its end, her log keeps the thought, and no later prompt replays it; one whose provider fails ends rejected, leaves her ready, and her next moment comes on time', async () => {
+it('heartbeat.quiet: a moment answered with plain text or with nothing commits no message: the stream holds only its start, that she writes and then no longer does, and its end, her log keeps the thought, and no later prompt replays it; one whose provider fails ends rejected, leaves her ready, and her next moment comes on time', async () => {
   const model = await startModelServer();
   const home = heartbeatHome(model);
   const daemon = await startDaemon(home, shortened);
@@ -185,12 +185,15 @@ it('heartbeat.quiet: a moment answered with plain text or with nothing commits n
   ]) {
     const moment = await nextMoment(events);
 
-    expect(moment.map(frame => frame.event)).toEqual([
-      'turn_running',
-      'turn_completed',
+    expect(
+      moment.map(frame => [frame.event, dataOf(frame)['writing']]),
+    ).toEqual([
+      ['turn_running', false],
+      ['turn_running', true],
+      ['turn_running', false],
+      ['turn_completed', undefined],
     ]);
-    expect(dataOf(moment[0])).toMatchObject({drafts: []});
-    expect(dataOf(moment[1])).toMatchObject(ended);
+    expect(dataOf(moment.at(-1))).toMatchObject(ended);
   }
 
   const failed = performance.now();

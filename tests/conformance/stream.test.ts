@@ -6,7 +6,9 @@ import {startDaemon} from './harness/daemon.ts';
 import {type Frame, frameOf, openEvents} from './harness/events.ts';
 import {chmod, configJson, createHome} from './harness/home.ts';
 import {
+  calling,
   finish,
+  reply,
   startModelServer,
   toolCall,
   undecided,
@@ -33,27 +35,28 @@ function dataOf(frame: Frame | undefined): unknown {
   return JSON.parse(frame?.data ?? 'null');
 }
 
-/** A send_message of this many characters, its arguments streamed in 64 KiB pieces. */
-function longReply(characters: number): unknown[] {
-  const piece = 64 * 1024;
-
-  return visibleReply(
-    'x'.repeat(characters),
-    ...Array.from(
-      {length: Math.floor(characters / piece)},
-      (_, at) => (at + 1) * piece,
-    ),
-  );
-}
-
 /**
- * Several times more draft than the daemon's bounded send buffer, its
- * response's own buffer and a client's receive buffer hold together, which
- * the model then breaks off: frames enough to stall a client that stops
- * reading, of which the daemon keeps nothing.
+ * A message of hers longer than the daemon's bounded send buffer, its
+ * response's own buffer and a client's receive buffer hold together, its
+ * arguments streamed in 4 KiB pieces: the one frame that carries it stalls
+ * a client that stops reading.
  */
-function overflowingDraft(): Answer {
-  return {chunks: longReply(2 * 1024 * 1024), end: 'cut'};
+function overflowingMessage(): Answer {
+  const characters = 4 * 1024 * 1024;
+  const piece = 4 * 1024;
+
+  return {
+    chunks: [
+      ...visibleReply(
+        'x'.repeat(characters),
+        ...Array.from(
+          {length: characters / piece},
+          (_, at) => (at + 1) * piece,
+        ),
+      ),
+      finish('tool_calls'),
+    ],
+  };
 }
 
 it('stream.ready-snapshot: a stream without a Last-Event-ID opens with ready, the daemon snapshot of health, waiting confirmations and pairings and running turns', async () => {
@@ -158,7 +161,7 @@ it('stream.slow-client-drop: a client that stops taking frames is dropped within
 
   const submitted = performance.now();
 
-  model.answer(overflowingDraft());
+  model.answer(overflowingMessage());
   await say('Talk a lot.', 'long');
 
   const answered = performance.now();
@@ -167,9 +170,9 @@ it('stream.slow-client-drop: a client that stops taking frames is dropped within
 
   const dropped = performance.now();
 
-  // The grace of one second runs from the stall, which the burst brings on
-  // at once, then the drop; a machine slow to turn the draft into frames
-  // stalls the client later, and at the latest a grace after the turn ends.
+  // The grace of one second runs from the stall, which her message brings
+  // on as it is committed, then the drop: at the latest a grace after the
+  // turn ends.
   expect(dropped - submitted).toBeGreaterThanOrEqual(900);
   expect(dropped - answered).toBeLessThan(5_000);
   stalled.resume();
@@ -177,7 +180,7 @@ it('stream.slow-client-drop: a client that stops taking frames is dropped within
   expect(stalled.body()).not.toContain('event: turn_completed');
 });
 
-it('stream.running-turns: a stream opened mid-reply finds the running turn in ready with its draft so far, a later one a longer draft, and one opened after the turn ends none', async () => {
+it('stream.running-turns: a stream opened while she writes finds her turn in ready, writing, and one opened after the turn ends none', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
@@ -185,38 +188,24 @@ it('stream.running-turns: a stream opened mid-reply finds the running turn in re
   const wire = wireOf(daemon);
   const say = await converse(wire, 'mira');
   const {conversationId} = await conversationOf(wire, 'mira');
-  const watching = await openEvents(daemon);
-  const driven = model.stream();
+  const held = model.hold();
   const turn = say('Hello?', 'running');
-  // The arguments cut after "Hello" and after "there,".
-  const [head, middle, tail] = visibleReply('Hello there, friend.', 14, 21);
-  const running = (text: string) => ({
+
+  await held.arrived();
+  expect(
+    dataOf(await (await openEvents(daemon)).next(frameOf('ready'))),
+  ).toMatchObject({
     turns: [
       {
         conversationId,
         source: 'web',
         clientMessageId: 'running',
         characterId: 'mira',
-        drafts: [{draftId: '1.0', text}],
+        writing: true,
       },
     ],
   });
-  const drafted = (text: string) =>
-    watching.next(frameOf('turn_running', {drafts: [{text}]}));
-
-  await driven.arrived();
-  driven.write([head]);
-  await drafted('Hello');
-  expect(
-    dataOf(await (await openEvents(daemon)).next(frameOf('ready'))),
-  ).toMatchObject(running('Hello'));
-  driven.write([middle]);
-  await drafted('Hello there,');
-  expect(
-    dataOf(await (await openEvents(daemon)).next(frameOf('ready'))),
-  ).toMatchObject(running('Hello there,'));
-  driven.write([tail, finish('tool_calls')]);
-  driven.end();
+  held.release(reply('Hello there, friend.'));
   await expect(turn).resolves.toMatchObject({status: 'completed'});
   expect(
     dataOf(await (await openEvents(daemon)).next(frameOf('ready'))),
@@ -299,64 +288,73 @@ it("stream.sync-rule: the person's line rides the stream as user_message, stampe
   });
 });
 
-it('stream.drafts: a turn reaches the stream as its line, sent in Messages, then the turn running with each of its replies drafted in order under a draft id of its own, whole each time it grows, then each commit naming the draft it replaces and when it was sent, and the turn without that draft, then turn_completed', async () => {
+it("stream.writing: a line's turn reaches the stream as its line, sent in Messages, then the turn running, not writing; each round of hers says she writes as its request goes out, then each message it said, whole as it is committed, with when it was sent, then that she no longer writes, before the calls it made run; then turn_completed", async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
   );
   const say = await converse(wireOf(daemon), 'mira');
   const events = await openEvents(daemon);
-  const replyCall = (index: number, text: string, cut: number) =>
-    toolCall(
-      {
-        index,
-        id: `call_${String(index)}`,
-        name: 'send_message',
-        arguments: JSON.stringify({text}),
-      },
-      cut,
-    );
-  const first = {draftId: '1.0', text: 'First, this.'};
-  const then = {draftId: '1.1', text: 'Then that.'};
+  const replyCall = (index: number, text: string) =>
+    toolCall({
+      index,
+      id: `call_${String(index)}`,
+      name: 'send_message',
+      arguments: JSON.stringify({text}),
+    });
 
-  model.answer({
-    chunks: [
-      // Each cut falls after the reply's first word.
-      ...replyCall(0, 'First, this.', 14),
-      ...replyCall(1, 'Then that.', 13),
-      finish('tool_calls'),
-    ],
-  });
+  model.answer(
+    {
+      chunks: [
+        ...replyCall(0, 'First, this.'),
+        ...replyCall(1, 'Then that.'),
+        finish('tool_calls'),
+      ],
+    },
+    calling(['character_state_patch', {mood: 'curious'}]),
+    reply('Noted.'),
+  );
   await say('Two things?', 'two');
-  await events.next(frameOf('turn_completed', {clientMessageId: 'two'}));
+  await say('Note my mood?', 'mood');
+  await events.next(frameOf('turn_completed', {clientMessageId: 'mood'}));
   expect(
     events.frames
       .filter(frame => frame.event?.startsWith('turn_') === true)
       .map(frame => {
-        const {kind, progress, drafts} = dataOf(frame) as {
+        const {kind, progress, writing} = dataOf(frame) as {
           readonly kind: string;
           readonly progress?: object;
-          readonly drafts?: unknown;
+          readonly writing?: boolean;
         };
 
-        return progress ?? (drafts === undefined ? {kind} : {kind, drafts});
+        return progress ?? (writing === undefined ? {kind} : {kind, writing});
       }),
   ).toMatchObject([
     {kind: 'user_message', text: 'Two things?', sentAt, app: 'messages'},
-    {kind: 'turn_running', drafts: []},
-    {kind: 'turn_running', drafts: [{draftId: '1.0', text: 'First'}]},
-    {kind: 'turn_running', drafts: [first]},
-    {kind: 'turn_running', drafts: [first, {draftId: '1.1', text: 'Then'}]},
-    {kind: 'turn_running', drafts: [first, then]},
-    {kind: 'visible_reply', ...first, sentAt},
-    {kind: 'turn_running', drafts: [then]},
-    {kind: 'visible_reply', ...then, sentAt},
-    {kind: 'turn_running', drafts: []},
+    {kind: 'turn_running', writing: false},
+    {kind: 'turn_running', writing: true},
+    {kind: 'visible_reply', text: 'First, this.', sentAt},
+    {kind: 'visible_reply', text: 'Then that.', sentAt},
+    {kind: 'turn_running', writing: false},
+    {kind: 'turn_completed'},
+    {kind: 'user_message', text: 'Note my mood?'},
+    {kind: 'turn_running', writing: false},
+    {kind: 'turn_running', writing: true},
+    {kind: 'turn_running', writing: false},
+    {kind: 'tool_calls_requested', toolNames: ['character_state.patch']},
+    {
+      kind: 'tool_call_completed',
+      status: 'accepted',
+      toolName: 'character_state.patch',
+    },
+    {kind: 'turn_running', writing: true},
+    {kind: 'visible_reply', text: 'Noted.', sentAt},
+    {kind: 'turn_running', writing: false},
     {kind: 'turn_completed'},
   ]);
 });
 
-it('stream.drafts-withdrawn: the drafts of a round whose answer is refused, or that the budget refuses, are withdrawn before the round moves on, and the next round drafts afresh', async () => {
+it('stream.refused-round-unsaid: what she says in a round whose answer is refused, or that the budget refuses, is never on the stream: each round says only that she writes, then that she no longer does, and the next begins afresh', async () => {
   const model = await startModelServer();
   const daemon = await startDaemon(
     createHome({'config.json': configJson({project02: model.settings})}),
@@ -407,36 +405,22 @@ it('stream.drafts-withdrawn: the drafts of a round whose answer is refused, or t
   });
   await events.next(frameOf('turn_completed', {clientMessageId: 'tea'}));
 
-  // Each state of the turn as it ran, its drafts as `<draftId> <text>`.
-  const states = events.frames.filter(frameOf('turn_running')).map(frame =>
-    (
-      dataOf(frame) as {
-        readonly drafts: readonly {
-          readonly draftId: string;
-          readonly text: string;
-        }[];
-      }
-    ).drafts.map(({draftId, text}) => `${draftId} ${text}`),
-  );
+  // Whether she writes, each time the turn changed: its line, then each of
+  // its hundred rounds.
+  const writing = events.frames
+    .filter(frameOf('turn_running'))
+    .map(frame => (dataOf(frame) as {readonly writing: boolean}).writing);
 
-  expect(states.slice(0, 5)).toEqual([
-    [],
-    ['1.0 Let me look.'],
-    [],
-    ['2.0 Let me look again.'],
-    ['2.0 Let me look again.', '2.1 And again.'],
+  expect(writing).toEqual([
+    false,
+    ...Array.from({length: 100}, () => [true, false]).flat(),
   ]);
-  // Both drafts of the second round go, in whichever order, before
-  // anything of a later round.
-  expect([['2.0 Let me look again.'], ['2.1 And again.']]).toContainEqual(
-    states[5],
-  );
-  expect(states.slice(6)).toEqual([[], ['100.0 One last look.'], []]);
   expect(
     events.frames.filter(
       frameOf('turn_progress', {progress: {kind: 'visible_reply'}}),
     ),
   ).toEqual([]);
+  expect(JSON.stringify(events.frames)).not.toMatch(/look|again/u);
 });
 
 it('stream.maintenance-failed: a segment rotation that fails behind a completed turn leaves the turn completed and the character ready, is told on the stream as maintenance_failed and in her health entry, and switching her off and on clears it', async () => {

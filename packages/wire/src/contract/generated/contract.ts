@@ -821,20 +821,21 @@ export type RoleModelProvider = "chatgpt" | "openai" | "anthropic" | "nvidia";
 export type RosterState = "not_started" | "starting" | "ready" | "needs_model" | "stopping" | "stopped" | "failed";
 
 /**
- * A reply she is still writing: its text so far, under its draft's id.
- */
-export type RunningDraft = { draftId: string, text: string, };
-
-/**
  * A turn as it runs: her character, her thread, the stamps of the line
- * that began it, both or neither, and her drafts so far, each its whole
- * text, in the order they opened.
+ * that began it, both or neither, and whether she is writing.
  */
 export type RunningTurn = { characterId: Identifier, conversationId: ConversationId, 
 /**
  * Absent for a turn of her own, which no line began.
  */
-source?: ClientStamp, clientMessageId?: ClientStamp, drafts: ReadonlyArray<RunningDraft>, };
+source?: ClientStamp, clientMessageId?: ClientStamp, 
+/**
+ * Whether a round of hers is under way: from its request to her model
+ * until its answer is judged and what it said is committed. Never
+ * while her tools run, the plugins prepare or the work after her turn
+ * goes on.
+ */
+writing: boolean, };
 
 /**
  * A finding about the settings: its weight, its code, a sentence for a
@@ -1128,11 +1129,7 @@ app: string, source: ClientStamp, clientMessageId: ClientStamp, } | { "kind": "v
 /**
  * The id of the app it went in, as `messages` or `telegram`.
  */
-app: string, 
-/**
- * The draft this message replaces.
- */
-draftId: string, } | { "kind": "tool_calls_requested", round: number, toolNames: ReadonlyArray<Identifier>, } | { "kind": "tool_call_completed", round: number, status: ToolCallStatus, 
+app: string, } | { "kind": "tool_calls_requested", round: number, toolNames: ReadonlyArray<Identifier>, } | { "kind": "tool_call_completed", round: number, status: ToolCallStatus, 
 /**
  * The plugin that provides the tool, or `undeclared.<tool>` for a
  * tool the turn did not offer.

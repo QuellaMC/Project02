@@ -24,9 +24,9 @@ export type Clock = {
 export type Pending = readonly [string, PendingLine];
 
 /**
- * What the thread shows, in order: its messages; then her drafts and the
- * line about what she is doing, which are no messages, while `between`
- * says either stands there; then the person's lines not yet committed.
+ * What the thread shows, in order: its messages; then what she is doing,
+ * typing or using her phone, which is no message, while `between` says it
+ * stands there; then the person's lines not yet committed.
  */
 export type Shown = {
   readonly messages: readonly Message[];

@@ -15,7 +15,7 @@ import type {DesktopNotification} from './window-calls.ts';
  * notified once it is asked for: a message of hers committed in Messages
  * while the window does not have the focus, which `notified` does not hold
  * yet, titled with her name as the message carries it, its body her words,
- * whole. Anything else asks for none: the person's own line, her drafts, a
+ * whole. Anything else asks for none: the person's own line, her writing, a
  * message of hers in another app, one while the window has the focus, and
  * one notified already.
  */

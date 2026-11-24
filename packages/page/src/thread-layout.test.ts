@@ -180,7 +180,7 @@ describe('thread layout', () => {
     expect(inMessages.messages[0]?.colour).toBe('var(--link)');
   });
 
-  it('joins a message to the one directly above it when the same sender wrote both and no divider stands between, and never to what stands under her drafts or what she is doing', () => {
+  it('joins a message to the one directly above it when the same sender wrote both and no divider stands between, and never to what stands under what she is doing', () => {
     const messages = [
       mine(nyc('2026-11-24T09:00')),
       mine(nyc('2026-11-24T09:01')),

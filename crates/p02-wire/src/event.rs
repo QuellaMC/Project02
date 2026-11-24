@@ -156,8 +156,6 @@ pub enum TurnProgress {
         sent_at: Timestamp,
         /// The id of the app it went in, as `messages` or `telegram`.
         app: String,
-        /// The draft this message replaces.
-        draft_id: String,
     },
     ToolCallsRequested {
         round: NonZeroU32,
@@ -182,8 +180,7 @@ pub enum ToolCallStatus {
 }
 
 /// A turn as it runs: her character, her thread, the stamps of the line
-/// that began it, both or neither, and her drafts so far, each its whole
-/// text, in the order they opened.
+/// that began it, both or neither, and whether she is writing.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -195,15 +192,11 @@ pub struct RunningTurn {
     pub source: Option<ClientStamp>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub client_message_id: Option<ClientStamp>,
-    pub drafts: Vec<RunningDraft>,
-}
-
-/// A reply she is still writing: its text so far, under its draft's id.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema, TS)]
-#[serde(rename_all = "camelCase")]
-pub struct RunningDraft {
-    pub draft_id: String,
-    pub text: String,
+    /// Whether a round of hers is under way: from its request to her model
+    /// until its answer is judged and what it said is committed. Never
+    /// while her tools run, the plugins prepare or the work after her turn
+    /// goes on.
+    pub writing: bool,
 }
 
 /// The first frame of a stream that cannot be caught up: the state every

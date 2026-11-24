@@ -85,10 +85,12 @@ with an outcome of p02-wire, never an error.
   on disk, each with when it was sent and the app it is in, and the
   person's line with when she read it, the moment her turn took it, as the
   scrollback reads them, where a message of hers an earlier build kept is
-  in the app of the person's line before it, the turn as it runs now, her
-  drafts whole, whenever that changes, and then its completion, which
-  says whether its line is in the log. A turn of her own carries no line's
-  stamps, and is said running as it begins.
+  in the app of the person's line before it, the turn as it runs now,
+  whenever that changes: whether she is writing, from each round's request
+  to her model until what it said is committed, and then its completion,
+  which says whether its line is in the log. Nothing she has not committed
+  reaches it. A turn of her own carries no line's stamps, and is said
+  running as it begins.
 - **Settings** change one way, a client's change or her own plugin's,
   through p02-config; health, which says the accounts of a key her phone
   knows, each with whether the home's settings hold it, then goes to every

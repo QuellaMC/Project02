@@ -210,14 +210,13 @@ async function asksForTone(wire: Wire, tone: string): Promise<Answer> {
   ]);
 }
 
-test("page.chat-drafts-and-second-tab: the printed address opens the page and the one character opens herself; a sent line is the person's bubble, the reply is drafted ahead of its commit and replaced whole by it, and a second tab shows the same thread", async ({
+test("page.chat-typing-and-second-tab: the printed address opens the page and the one character opens herself; a sent line is the person's bubble, her typing shows as three dots in a bubble of hers while her answer is held back and gives way to her whole message, and a second tab shows the same thread", async ({
   context,
   page,
 }) => {
   const {model, daemon} = await miraHome();
-  const driven = model.stream();
-  // The arguments cut after "The".
-  const [head, tail] = visibleReply('The sea is wide.', 12);
+  const held = model.hold();
+  const typing = page.locator('.typing');
 
   await page.goto(daemon.url);
   await expect(page.getByRole('button', {name: /^Mira\b/u})).toContainText(
@@ -228,15 +227,15 @@ test("page.chat-drafts-and-second-tab: the printed address opens the page and th
   await expect(page.locator('.bubble-own .bubble-text')).toHaveText(
     'Tell me about the sea.',
   );
-  await driven.arrived();
-  driven.write([head]);
-  await expect(page.locator('[data-draft] .bubble-text')).toHaveText('The');
-  driven.write([tail, finish('tool_calls')]);
-  driven.end();
+  await held.arrived();
+  await expect(typing).toHaveText('Mira is typing');
+  await expect(typing.locator('.typing-dot')).toHaveCount(3);
+  await expect(page.locator('.bubble-theirs')).toHaveCount(0);
+  held.release(reply('The sea is wide.'));
   await expect(page.locator('.bubble-theirs .bubble-text')).toHaveText([
     'The sea is wide.',
   ]);
-  await expect(page.locator('[data-draft]')).toHaveCount(0);
+  await expect(typing).toHaveCount(0);
   await expect(page.locator('[data-pending]')).toHaveCount(0);
 
   const second = await context.newPage();
@@ -309,7 +308,7 @@ test("page.chat-apps: a line from the page and her answer, then a line from Tele
   ]);
 });
 
-test("page.own-turn: a moment of hers in which she says nothing shows nothing, one whose model fails raises no notice, and her message in a moment of her own appears in the open thread with no 'is writing' line before her first draft", async ({
+test('page.own-turn: a moment of hers in which she says nothing shows nothing, one whose model fails raises no notice, and her message in a moment of her own appears in the open thread with no dots while she writes it', async ({
   context,
   page,
 }) => {
@@ -330,8 +329,6 @@ test("page.own-turn: a moment of hers in which she says nothing shows nothing, o
         !(frame.data ?? '').includes('"clientMessageId"'),
     );
   const texts = page.locator('.bubble-text');
-  // The arguments cut after "The".
-  const [head, tail] = visibleReply('The sea is calm today.', 12);
 
   model.answer(reply('Tea first.'), reply('I hope the tea was good.'));
   await page.goto(daemon.url);
@@ -341,11 +338,11 @@ test("page.own-turn: a moment of hers in which she says nothing shows nothing, o
   await ownEnd('completed');
   await ownEnd('rejected');
 
-  const driven = model.stream();
+  const held = model.hold();
 
-  await driven.arrived();
+  await held.arrived();
 
-  // A tab opened while her moment runs, before she drafts, installs it.
+  // A tab opened while she writes in her moment installs it, writing.
   const second = await context.newPage();
 
   await second.goto(daemon.url);
@@ -354,21 +351,19 @@ test("page.own-turn: a moment of hers in which she says nothing shows nothing, o
     'Tea first.',
   ]);
   await expect(second.locator('.typing')).toHaveCount(0);
-  driven.write([head]);
+  held.release({
+    chunks: [...visibleReply('The sea is calm today.'), finish('tool_calls')],
+  });
 
   for (const tab of [page, second]) {
-    await expect(tab.locator('[data-draft] .bubble-text')).toHaveText('The');
+    await expect(tab.locator('.bubble-text')).toHaveText([
+      'Morning.',
+      'Tea first.',
+      'The sea is calm today.',
+    ]);
+    await expect(tab.locator('.typing')).toHaveCount(0);
   }
 
-  driven.write([tail, finish('tool_calls')]);
-  driven.end();
-  await expect(texts).toHaveText([
-    'Morning.',
-    'Tea first.',
-    'The sea is calm today.',
-  ]);
-  await expect(page.locator('[data-draft]')).toHaveCount(0);
-  await expect(page.locator('.typing')).toHaveCount(0);
   await expect(page.locator('main > .notice')).toHaveCount(0);
 });
 

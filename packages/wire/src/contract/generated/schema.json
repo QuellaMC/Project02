@@ -3410,22 +3410,6 @@
       ],
       "description": "Where an installed character stands as health reports her: her\nruntime's state, or `not_started` until the daemon built it."
     },
-    "RunningDraft": {
-      "type": "object",
-      "properties": {
-        "draftId": {
-          "type": "string"
-        },
-        "text": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "draftId",
-        "text"
-      ],
-      "description": "A reply she is still writing: its text so far, under its draft's id."
-    },
     "RunningTurn": {
       "type": "object",
       "properties": {
@@ -3442,19 +3426,17 @@
         "clientMessageId": {
           "$ref": "#/$defs/ClientStamp"
         },
-        "drafts": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/RunningDraft"
-          }
+        "writing": {
+          "type": "boolean",
+          "description": "Whether a round of hers is under way: from its request to her model\nuntil its answer is judged and what it said is committed. Never\nwhile her tools run, the plugins prepare or the work after her turn\ngoes on."
         }
       },
       "required": [
         "characterId",
         "conversationId",
-        "drafts"
+        "writing"
       ],
-      "description": "A turn as it runs: her character, her thread, the stamps of the line\nthat began it, both or neither, and her drafts so far, each its whole\ntext, in the order they opened."
+      "description": "A turn as it runs: her character, her thread, the stamps of the line\nthat began it, both or neither, and whether she is writing."
     },
     "RuntimeConfigDiagnostic": {
       "type": "object",
@@ -4551,10 +4533,6 @@
               "type": "string",
               "description": "The id of the app it went in, as `messages` or `telegram`."
             },
-            "draftId": {
-              "type": "string",
-              "description": "The draft this message replaces."
-            },
             "kind": {
               "type": "string",
               "const": "visible_reply"
@@ -4567,8 +4545,7 @@
             "speakerName",
             "text",
             "sentAt",
-            "app",
-            "draftId"
+            "app"
           ]
         },
         {

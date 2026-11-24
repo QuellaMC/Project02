@@ -442,6 +442,8 @@ pub(crate) fn told(progress: &[Progress]) -> Vec<String> {
             }
             Progress::ReplyDelta { draft, text } => format!("reply_delta {draft} {text}"),
             Progress::ReplyWithdrawn { draft } => format!("reply_withdrawn {draft}"),
+            Progress::RoundBegan => "round_began".to_owned(),
+            Progress::RoundEnded => "round_ended".to_owned(),
             Progress::ToolCallsRequested { round, tool_names } => {
                 let names: Vec<&str> = tool_names.iter().map(Identifier::as_str).collect();
 

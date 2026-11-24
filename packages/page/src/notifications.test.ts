@@ -21,7 +21,6 @@ function hers(messageId: string, text: string, app = 'messages'): GatewayEvent {
       text,
       sentAt,
       app,
-      draftId: '1.1',
     },
   };
 }
@@ -42,7 +41,7 @@ describe('when the desktop app shows a notification', () => {
     ).toEqual({title: 'Mira', body: 'Still up?'});
   });
 
-  it("shows none for her message while the window has the focus, nor for one she sent in Telegram, the person's own line, her draft, or how her turn ended", () => {
+  it("shows none for her message while the window has the focus, nor for one she sent in Telegram, the person's own line, her writing, or how her turn ended", () => {
     const quiet: readonly (readonly [GatewayEvent, boolean])[] = [
       [hers('m1', 'Hello.'), true],
       [hers('m2', 'Hello on Telegram.', 'telegram'), false],
@@ -73,7 +72,7 @@ describe('when the desktop app shows a notification', () => {
           conversationId,
           source: 'web',
           clientMessageId: 'line-1',
-          drafts: [{draftId: '1.1', text: 'Hello th'}],
+          writing: true,
         },
         false,
       ],

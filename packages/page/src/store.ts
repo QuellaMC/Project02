@@ -290,15 +290,14 @@ export type WebState = Asking & {
   readonly composers: ReadonlyMap<string, string>;
   /**
    * Conversation id → the turn in progress there, for every conversation
-   * and not only the one on screen, as the daemon last said it: the typing
-   * indicator until her first draft or the end, for a turn a line began,
-   * and each draft's text so far.
+   * and not only the one on screen, as the daemon last said it: whose turn
+   * it is, and whether she is writing.
    */
   readonly turns: ReadonlyMap<string, RunningTurn>;
   /**
    * The conversations whose turn has her using her phone: a round of it
-   * called a tool of her phone, and her next reply has not begun. The page
-   * works it out from the stream alone, so a snapshot starts without.
+   * called a tool of her phone, and her next message has not come. The
+   * page works it out from the stream alone, so a snapshot starts without.
    */
   readonly phoning: ReadonlySet<string>;
   /** Whose phone her phone's window shows, as it last said; none once it said it went. */
@@ -369,6 +368,30 @@ export function composerText(state: WebState): string {
   return state.thread === undefined
     ? ''
     : (state.composers.get(state.thread.conversationId) ?? '');
+}
+
+/** What she is doing that a thread shows where her next message will be. */
+export type Doing = 'phoning' | 'typing';
+
+/**
+ * What she is doing in `conversationId` that its thread shows: using her
+ * phone, in a turn of her own as in a line's; else typing, while she
+ * writes in a turn a line began. Her writing in a turn of her own shows
+ * nothing: nobody waits on it.
+ */
+export function doingIn(
+  state: WebState,
+  conversationId: string,
+): Doing | undefined {
+  if (state.phoning.has(conversationId)) {
+    return 'phoning';
+  }
+
+  const turn = state.turns.get(conversationId);
+
+  return turn?.clientMessageId !== undefined && turn.writing
+    ? 'typing'
+    : undefined;
 }
 
 /**
@@ -449,11 +472,11 @@ export function streamResumed<State extends Connected>(state: State): State {
  * The address will never work again: the page stops taking new lines,
  * and every confirmation and pairing request waiting, the card that said
  * how one ended and every turn in progress go, since an answer would never
- * reach the daemon and a draft would never be finished. A line already
- * sent stays as it is, with the id it was sent under — a token dies when
- * a daemon restarts, and a line it committed just before is one the log
- * can still be asked about. Turning it back into ordinary text would lose
- * the only name it can be recognised by.
+ * reach the daemon, nor a turn's end the page. A line already sent stays
+ * as it is, with the id it was sent under — a token dies when a daemon
+ * restarts, and a line it committed just before is one the log can still
+ * be asked about. Turning it back into ordinary text would lose the only
+ * name it can be recognised by.
  */
 export function connectionRefused(state: WebState, message: string): WebState {
   return {
@@ -1065,20 +1088,14 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
     case 'turn_progress':
       return progressed(state, event);
     case 'turn_running': {
-      // The daemon's word on the turn replaces the tab's copy whole. A
-      // round's drafts end before its tool calls run, so a draft now is
-      // her next reply begun.
+      // The daemon's word on the turn replaces the tab's copy whole, and
+      // her writing again is her going on.
       const running = {
         ...state,
         turns: new Map(state.turns).set(event.conversationId, runningOf(event)),
       };
 
-      return event.drafts.length === 0
-        ? running
-        : sheWentOn(
-            withoutPhoning(running, event.conversationId),
-            event.characterId,
-          );
+      return running;
     }
     case 'turn_completed': {
       const ended = sheWentOn(
@@ -1141,9 +1158,9 @@ function progressed(
 
 /**
  * She is using her phone from a call of one of its tools in a turn of hers
- * the tab holds, whatever began the turn, until her next reply begins: a
- * reply committed is one begun. Her phone's tools are known by the plugin
- * that provides them, as the daemon names it.
+ * the tab holds, whatever began the turn, until her next message comes.
+ * Her phone's tools are known by the plugin that provides them, as the
+ * daemon names it.
  */
 function phoneUse(
   state: WebState,
@@ -1161,7 +1178,7 @@ function phoneUse(
     : state;
 }
 
-/** Her next reply began, or her turn ended: she is not using her phone in it any more. */
+/** Her next message came, or her turn ended: she is not using her phone in it any more. */
 function withoutPhoning(state: WebState, conversationId: string): WebState {
   if (!state.phoning.has(conversationId)) {
     return state;
@@ -1224,7 +1241,7 @@ function runningOf(
     ...(event.clientMessageId === undefined
       ? {}
       : {clientMessageId: event.clientMessageId}),
-    drafts: event.drafts,
+    writing: event.writing,
   };
 }
 

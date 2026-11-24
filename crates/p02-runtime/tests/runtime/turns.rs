@@ -28,7 +28,9 @@ fn texts(turn: &CompletedTurn) -> Vec<&str> {
 
 /// A first line through a fresh thread lands its records in the gate's
 /// order, sent when its client sent it, and is announced before the model
-/// is asked, each message only once its record is on disk.
+/// is asked, each message only once its record is on disk; the round is
+/// announced as its request goes out, and as it ends, after the message it
+/// said.
 #[tokio::test]
 async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
     let mut chat = Chat::new(&[]);
@@ -79,12 +81,14 @@ async fn a_first_line_lands_in_order_and_is_announced_as_it_lands() {
         told(&progress),
         [
             "user_message Hello?",
+            "round_began",
             "reply_delta 1.0 Hel",
             "reply_delta 1.0 lo.",
-            "visible_reply 1.0 Hello."
+            "visible_reply 1.0 Hello.",
+            "round_ended"
         ]
     );
-    assert_eq!(moments, [(0, 1), (1, 1), (1, 1), (1, 2)]);
+    assert_eq!(moments, [(0, 1), (0, 1), (1, 1), (1, 1), (1, 2), (1, 2)]);
     assert!(matches!(
         &progress[0],
         Progress::UserMessage { message, source, client_message_id, .. }
@@ -124,11 +128,13 @@ async fn a_draft_its_model_lets_go_is_withdrawn_and_the_next_takes_its_place() {
         chat.heard.take(),
         [
             "user_message Hello?",
+            "round_began",
             "reply_delta 1.0 Half a",
             "reply_withdrawn 1.0",
             "reply_delta 1.0 Who",
             "reply_delta 1.0 le.",
-            "visible_reply 1.0 Whole."
+            "visible_reply 1.0 Whole.",
+            "round_ended"
         ]
     );
 }
@@ -171,7 +177,8 @@ async fn a_blank_text_is_refused_and_the_next_line_completes() {
 /// A round of tool calls starts each in the model's order, finishes each as
 /// its plugin answered or, for a tool the turn never offered, as the
 /// refusal of it, shows the model the results in its next round, and
-/// announces them.
+/// announces them, once the round that called them ended and before the
+/// next begins.
 #[tokio::test]
 async fn a_tool_round_runs_its_calls_in_order_and_shows_the_model_their_results() {
     let notes = Toy::new("notes")
@@ -249,11 +256,15 @@ async fn a_tool_round_runs_its_calls_in_order_and_shows_the_model_their_results(
         chat.heard.take(),
         [
             "user_message Remember tea and cake.",
+            "round_began",
+            "round_ended",
             "tool_calls_requested 1 notes.add notes.burn notes.add",
             "tool_call_completed 1 notes.add accepted",
             "tool_call_completed 1 notes.burn rejected",
             "tool_call_completed 1 notes.add accepted",
+            "round_began",
             "visible_reply 2.0 Noted.",
+            "round_ended",
         ]
     );
 }

@@ -41,7 +41,8 @@ use crate::conversation::{Character, Delivery, Disk, Mind, Submission, on_disk};
 /// is on disk, so the stream never says more than the log; a draft, a reply
 /// the model is still writing, is the one exception and says so by its
 /// kind, and every draft ends exactly once, in the reply that names it or
-/// in its withdrawal.
+/// in its withdrawal. Each round is announced as it begins and as it ends,
+/// what it said between the two and the calls it made after.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Progress {
     /// The person's line, committed, with the stamps its client put on it
@@ -63,6 +64,11 @@ pub enum Progress {
     ReplyDelta { draft: DraftId, text: String },
     /// A draft that ended unsaid.
     ReplyWithdrawn { draft: DraftId },
+    /// A round began: her model is asked for it.
+    RoundBegan,
+    /// The round ended: its answer judged and what it said committed,
+    /// before anything else it decided goes on.
+    RoundEnded,
     /// A round's tool calls, recorded as started, in the model's order.
     ToolCallsRequested {
         round: NonZeroU32,
@@ -894,6 +900,14 @@ impl TurnSink for Round<'_, '_> {
             DraftEvent::Delta { draft, text } => Progress::ReplyDelta { draft, text },
             DraftEvent::Withdrawn { draft } => Progress::ReplyWithdrawn { draft },
         });
+    }
+
+    fn round_began(&self) {
+        (self.turn.listener)(Progress::RoundBegan);
+    }
+
+    fn round_ended(&self) {
+        (self.turn.listener)(Progress::RoundEnded);
     }
 }
 

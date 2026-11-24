@@ -105,7 +105,7 @@ it('model.decision-parse-failure-fed-back: a round of empty content, a blank rep
   ).toEqual([]);
 });
 
-it("model.note-never-shown: the model's note beside its calls never reaches the person: it is no message, no draft and no line of history", async () => {
+it("model.note-never-shown: the model's note beside its calls never reaches the person: it is no message, nothing on the stream and no line of history", async () => {
   const model = await startModelServer();
   const home = listingHome(model);
   const daemon = await startDaemon(home);

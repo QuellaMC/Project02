@@ -57,10 +57,12 @@ async fn a_thread_reopened_after_a_failed_write_reads_back_and_goes_on() {
         chat.heard.take(),
         [
             "user_message hello there",
+            "round_began",
             "reply_delta 1.1 Fou",
             "reply_delta 1.1 nd it.",
             "visible_reply 1.0 Let me look.",
             "reply_withdrawn 1.1",
+            "round_ended",
         ]
     );
     assert_eq!(chat.reopen().await, None);

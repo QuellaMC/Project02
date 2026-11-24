@@ -25,7 +25,6 @@ import {
 import {
   headed,
   reply,
-  responseStream,
   startModelServer,
   type ModelRequest,
   type ModelServer,
@@ -34,7 +33,6 @@ import {
   erred,
   functionCall,
   inputOf,
-  planEvents,
   planResponded,
   replying,
   unauthorized,
@@ -376,34 +374,6 @@ it("chatgpt.plan-turn: a home on a ChatGPT plan answers a turn through the plan'
         text: expect.stringMatching(headed('Hello?')) as string,
       },
     ],
-  });
-});
-
-it('chatgpt.plan-drafts: her reply through a ChatGPT plan is drafted as the model writes its arguments, and committed whole once the response ends, though the event that ends it carries none of it', async () => {
-  const {model, wire, events} = await onPlan();
-  const say = await converse(wire, 'mira');
-  const words = 'Hello there, you.';
-  // The arguments' first piece ends inside her words: `{"text":"Hello`.
-  const streamed = planEvents(replying(words, 14));
-  const bytes = (part: typeof streamed) =>
-    new TextEncoder().encode(responseStream(part));
-  const driven = model.stream();
-  const turn = say('Hi?', 'drafted');
-
-  await driven.arrived();
-  // The response created, the call's item added, its first piece.
-  driven.send(bytes(streamed.slice(0, 3)));
-  await events.next(
-    frameOf('turn_running', {
-      clientMessageId: 'drafted',
-      drafts: [{text: 'Hello'}],
-    }),
-  );
-  driven.send(bytes(streamed.slice(3)));
-  driven.end();
-  expect(await turn).toMatchObject({
-    status: 'completed',
-    messages: [{}, {text: words}],
   });
 });
 

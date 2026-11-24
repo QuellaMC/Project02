@@ -32,10 +32,10 @@ use p02_wire::{
     PairingRefusal, PairingRequest, PairingRequestBody, PairingSubject, PendingConfirmation,
     PersonAccount, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRefusal, PhoneRing,
     PlanAccount, ProtocolVersion, Ready, Refusal, RemoveCharacterOutcome, RemoveCharacterRefusal,
-    RoleModelProvider, RosterState, RunningDraft, RunningTurn, Screen, ScreenCell, ScreenItem,
-    ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow, ScreenTile, Settlement, StartOutcome,
-    StartRefusal, StorageFailure, StoreApp, StoreAppStatus, StoreOutcome, SubmitOutcome,
-    ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
+    RoleModelProvider, RosterState, RunningTurn, Screen, ScreenCell, ScreenItem, ScreenOutcome,
+    ScreenRange, ScreenRefusal, ScreenRow, ScreenTile, Settlement, StartOutcome, StartRefusal,
+    StorageFailure, StoreApp, StoreAppStatus, StoreOutcome, SubmitOutcome, ToolCallStatus,
+    TurnProgress, TurnRefusal, TurnStamp, TurnStatus, ViewRefusal,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -470,16 +470,13 @@ fn written() -> Vec<(&'static str, Value)> {
         conversation_id: conversation.clone(),
         source: Some(stamp("web")),
         client_message_id: Some(stamp("line-1")),
-        drafts: vec![RunningDraft {
-            draft_id: "1.1".to_owned(),
-            text: "Hel".to_owned(),
-        }],
+        writing: true,
     };
     // A turn of her own, which no line began.
     let own = RunningTurn {
         source: None,
         client_message_id: None,
-        drafts: Vec::new(),
+        writing: false,
         ..running.clone()
     };
     let (clock, screen) = phone();
