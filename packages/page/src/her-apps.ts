@@ -1,5 +1,5 @@
 /**
- * Her apps in the settings window: what her page's Apps group, an app's
+ * Her apps in the settings window: what her page's Phone group, an app's
  * page with the person's account it uses or how it signs in, Get More
  * Apps and an app's file show, from what the daemon last said of her
  * phone and of the App Store's apps for her, and how each read and each
@@ -127,7 +127,7 @@ export function catalogCharacterOf(
 }
 
 /**
- * What her Apps group shows where its icons are: her apps but the App
+ * What her Phone group shows where its icons are: her apps but the App
  * Store, which has nothing to set; or why her phone could not be read, in
  * the daemon's words.
  */
@@ -135,7 +135,7 @@ export type Strip =
   | {readonly kind: 'apps'; readonly apps: readonly PhoneApp[]}
   | {readonly kind: 'unread'; readonly message: string};
 
-/** Her Apps group's icons from her phone as last read; nothing before it was. */
+/** Her Phone group's icons from her phone as last read; nothing before it was. */
 export function stripOf(phone: PhoneOutcome | undefined): Strip | undefined {
   if (phone === undefined) {
     return undefined;
@@ -146,7 +146,7 @@ export function stripOf(phone: PhoneOutcome | undefined): Strip | undefined {
     : {kind: 'unread', message: phone.message};
 }
 
-/** The line under her Apps group: where apps come from, and, while she may ask, that she finds them and asks first. */
+/** The line under her Phone group: where apps come from, and, while she may ask, that she finds them and asks first. */
 export function appsFooter(mayAsk: boolean): string {
   return mayAsk
     ? 'Apps come from the App Store. She can find them herself, and asks before installing one.'

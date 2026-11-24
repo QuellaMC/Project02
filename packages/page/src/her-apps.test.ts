@@ -135,7 +135,7 @@ const herPage: SettingsPage = {kind: 'character', characterId: 'mira'};
 const mira = {characterId: 'mira', name: 'Mira'};
 
 describe('her apps in the settings window', () => {
-  it("draws her Apps group: an icon for each app on her phone but the App Store, in her phone's order, why her phone could not be read in the daemon's words, nothing before it was read, and where apps come from, saying that she asks first only while she may", () => {
+  it("draws her Phone group: an icon for each app on her phone but the App Store, in her phone's order, why her phone could not be read in the daemon's words, nothing before it was read, and where apps come from, saying that she asks first only while she may", () => {
     expect(stripOf(phone)).toEqual({
       kind: 'apps',
       apps: [clock, reminders, notes],

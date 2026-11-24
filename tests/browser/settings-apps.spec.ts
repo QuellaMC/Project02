@@ -431,7 +431,7 @@ test("page.apps-from-file: an app from a file shows what it is and may do and th
   ]);
 });
 
-test('page.apps-ask-to-install: her Ask to Install Apps is among her permissions, beside A Gift from You, off for Mira, whose package has her phone simply hers, and her phone is no connection of the sidebar; switched off, her Apps group no longer says she asks, and she is offered no tool to install an app at her next request', async ({
+test('page.apps-ask-to-install: her Ask to Install Apps is among her permissions, A Gift from You is with her apps, off for Mira, whose package has her phone simply hers, and her phone is no connection of the sidebar; switched off, her Phone group no longer says she asks, and she is offered no tool to install an app at her next request', async ({
   page,
 }) => {
   const model = await startModelServer();

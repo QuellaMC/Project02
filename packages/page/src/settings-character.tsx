@@ -323,7 +323,7 @@ function CharacterCards({
 /**
  * What she may ask the person for: each plugin placed among her
  * permissions, a switch of hers, and while her settings give her a phone,
- * her phone's own fields, Ask to Install Apps and beside it A Gift from You.
+ * her phone's Ask to Install Apps.
  */
 function HerPermissions({
   ctx,
@@ -337,10 +337,9 @@ function HerPermissions({
   const target = characterTarget(characterId);
   const permissions = featuresPlaced(view, 'permission');
   const install = herPhoneRow(characterId, 'askToInstall');
-  const gift = herPhoneRow(characterId, 'gift');
-  const phone = hasPhone(view);
-  const installField = phone ? fieldAt(view, install.place) : undefined;
-  const giftField = phone ? fieldAt(view, gift.place) : undefined;
+  const installField = hasPhone(view)
+    ? fieldAt(view, install.place)
+    : undefined;
 
   return permissions.length === 0 && installField === undefined ? null : (
     <Group
@@ -368,14 +367,6 @@ function HerPermissions({
           row={install}
           field={installField}
           leading={<Tile icon="download" tint="gray" />}
-        />
-      )}
-      {giftField === undefined ? null : (
-        <FieldRow
-          ctx={ctx}
-          row={gift}
-          field={giftField}
-          leading={<Tile icon="phone" tint="gray" />}
         />
       )}
     </Group>

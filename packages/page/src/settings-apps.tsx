@@ -1,6 +1,6 @@
 /**
  * Her apps in the settings window, as the approved design draws them: the
- * Apps group on her page, an app's page, Get More Apps, and an app from a
+ * Phone group on her page, an app's page, Get More Apps, and an app from a
  * file. Each draws what the daemon last said of her phone and of the App
  * Store's apps for her, as the rules of her apps work it out, and every
  * act goes to the session.
@@ -35,7 +35,7 @@ import {
   Switch,
   Tile,
 } from './settings-controls.tsx';
-import type {Ctx} from './settings-fields.tsx';
+import {FieldRow, type Ctx} from './settings-fields.tsx';
 import {valueNow} from './settings-model.ts';
 import {fieldAt, type OkView} from './settings.ts';
 import {characterName, type SettingsPage} from './store.ts';
@@ -43,9 +43,10 @@ import {characterName, type SettingsPage} from './store.ts';
 type AppPageShown = Extract<SettingsPage, {kind: 'app'}>;
 
 /**
- * Her Apps group, while her settings give her a phone: an icon for each
- * app on it but the App Store, each opening its page, or why her phone
- * could not be read; Get More Apps; and where apps come from.
+ * Her Phone group, while her settings give her a phone: A Gift from You,
+ * her phone's own field; an icon for each app on it but the App Store,
+ * each opening its page, or why her phone could not be read; Get More
+ * Apps; and where apps come from.
  */
 export function HerApps({
   ctx,
@@ -67,9 +68,19 @@ export function HerApps({
   const field = fieldAt(view, ask.place);
   const mayAsk =
     field !== undefined && valueNow(settings, ask, field) === 'true';
+  const gift = herPhoneRow(characterId, 'gift');
+  const giftField = fieldAt(view, gift.place);
 
   return (
-    <Group title="Apps" footer={appsFooter(mayAsk)}>
+    <Group title="Phone" footer={appsFooter(mayAsk)}>
+      {giftField === undefined ? null : (
+        <FieldRow
+          ctx={ctx}
+          row={gift}
+          field={giftField}
+          leading={<Tile icon="phone" tint="gray" />}
+        />
+      )}
       {strip?.kind === 'unread' ? (
         <p className="panel-empty panel-problem">{strip.message}</p>
       ) : strip === undefined || strip.apps.length === 0 ? null : (
