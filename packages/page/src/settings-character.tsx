@@ -544,8 +544,8 @@ function HerLanguage({
       title="Language"
       footer={
         language.value === undefined
-          ? 'She answers in the language you write. Choose one for her, and your words reach her in it and hers show with a translation.'
-          : 'Her words show with a translation under them, and yours reach her in her language. She never sees any of it.'
+          ? 'She answers in whatever language you write. Choose a language to have her speak it: you still write in yours, and her words show with a translation.'
+          : 'She speaks this language. You still write in yours, and her words show with a translation under them. She never sees any of it.'
       }
     >
       <MenuRow
