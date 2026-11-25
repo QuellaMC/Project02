@@ -1,11 +1,13 @@
 //! Her translator, for a character whose package names her language: one
-//! plain completion of the model she speaks with puts the person's line
-//! into her language, or her message into the person's, and its answer
-//! comes to the translation, the message as it was, or why none came.
+//! plain completion of a model puts the person's line into her language,
+//! or her message into the person's, as her settings say how, and its
+//! answer comes to the translation, the message as it was, or why none
+//! came.
 
 use std::borrow::Cow;
 use std::num::NonZeroUsize;
 
+use p02_config::{HostSettings, TranslationWord};
 use p02_contracts::{RoleModelAdapter, TextCompletion, TextCompletionRequest};
 use p02_core::{BlankTextError, LanguageTag, SpeakerName, VisibleMessageRole, VisibleText};
 use p02_role_model::Person;
@@ -29,27 +31,44 @@ const UNSUPPORTED: &str = "this AI model cannot translate.";
 /// by until then would read as the translator itself.
 const UNNAMED: &str = "User";
 
-/// Who a translation is between, as its request names them, and her
-/// language as her package writes its tag.
+/// Who a translation is between, as its request names them, her language
+/// as her package writes its tag, the language the person reads when they
+/// chose one, and her notes: how some of her words are put, and how she
+/// sounds.
 #[derive(Debug)]
 pub(crate) struct Between {
     person: String,
     her: SpeakerName,
     language: LanguageTag,
+    theirs: Option<LanguageTag>,
+    words: Vec<TranslationWord>,
+    tone: Option<String>,
 }
 
 impl Between {
-    /// Between the person, by the name they go by, `person`, and `her`, by
-    /// her display name, who speaks `language`.
-    pub(crate) fn new(person: &SpeakerName, her: SpeakerName, language: LanguageTag) -> Self {
-        Self {
-            person: match Person::of(person) {
-                Person::Named(name) => name.to_string(),
-                Person::Unnamed => UNNAMED.to_owned(),
-            },
+    /// Between the person and `her`, by her display name, who speaks
+    /// `language`, as `host`, her settings, have them: the person by the
+    /// name they go by, reading the language they chose, if they did, and
+    /// her notes. None when the language they chose is hers, the two tags
+    /// equal but for case: nobody translates.
+    pub(crate) fn of(host: &HostSettings, her: SpeakerName, language: LanguageTag) -> Option<Self> {
+        let theirs = host.user_language.clone();
+
+        if theirs
+            .as_ref()
+            .is_some_and(|theirs| theirs.as_str().eq_ignore_ascii_case(language.as_str()))
+        {
+            return None;
+        }
+
+        Some(Self {
+            person: called(&host.user_display_name),
             her,
             language,
-        }
+            theirs,
+            words: host.translation_words.clone(),
+            tone: host.translation_tone.clone(),
+        })
     }
 
     /// The person's `line`, after `before`, put into her language by
@@ -66,9 +85,10 @@ impl Between {
         )
     }
 
-    /// Her `message`, after `before`, put by `model` into the language of
-    /// the person's newest message as they wrote it, `newest`, or into
-    /// English, the app's own, while they never wrote.
+    /// Her `message`, after `before`, put by `model` into the language the
+    /// person chose, else into that of their newest message as they wrote
+    /// it, `newest`, or into English, the app's own, while they never
+    /// wrote.
     pub(crate) async fn for_person(
         &self,
         model: &dyn RoleModelAdapter,
@@ -98,13 +118,19 @@ impl Between {
             person,
             her,
             language,
+            ..
         } = self;
+        let words = self.words(&format!(
+            "Words {her} uses, and how each is put for {person}. Where {person}'s message means \
+             one of them, write her word:"
+        ));
 
         self.request(
             &format!(
                 "Put {person}'s message into {her}'s language, the one with the language tag \
                  \"{language}\"."
             ),
+            words,
             self.input(before, None, VisibleMessageRole::User, line),
         )
     }
@@ -115,40 +141,95 @@ impl Between {
         before: &[Said<'_>],
         newest: Option<&VisibleText>,
     ) -> TextCompletionRequest {
-        let Self { person, her, .. } = self;
-        let into = match newest {
-            Some(_) => format!(
-                "Put {her}'s message into the language {person} writes in, which {person}'s \
-                 newest message shows."
+        let Self {
+            person,
+            her,
+            theirs,
+            tone,
+            ..
+        } = self;
+        let (into, newest) = match (theirs, newest) {
+            (Some(theirs), _) => (
+                format!(
+                    "Put {her}'s message into {person}'s language, the one with the language tag \
+                     \"{theirs}\"."
+                ),
+                None,
             ),
-            None => format!("Put {her}'s message into English."),
+            (None, Some(newest)) => (
+                format!(
+                    "Put {her}'s message into the language {person} writes in, which {person}'s \
+                     newest message shows."
+                ),
+                Some(format!(
+                    "{person}'s newest message:\n\n{}",
+                    cut(newest.as_str())
+                )),
+            ),
+            (None, None) => (format!("Put {her}'s message into English."), None),
         };
-        let newest =
-            newest.map(|newest| format!("{person}'s newest message:\n\n{}", cut(newest.as_str())));
+        let words = self.words(&format!(
+            "How some of her words are to be put. On the left what she writes, on the right how \
+             {person} is to read it, or what it means:"
+        ));
+        let tone = tone.as_ref().map(|tone| format!("How she sounds: {tone}"));
 
         self.request(
             &into,
+            words.into_iter().chain(tone),
             self.input(before, newest, VisibleMessageRole::Character, message),
         )
     }
 
     /// A request to put a message into another language as `into` says,
-    /// the translator reading `input`.
-    fn request(&self, into: &str, input: String) -> TextCompletionRequest {
+    /// after which `notes` say how to put her, each a paragraph, the
+    /// translator reading `input`.
+    fn request(
+        &self,
+        into: &str,
+        notes: impl IntoIterator<Item = String>,
+        input: String,
+    ) -> TextCompletionRequest {
         let Self { person, her, .. } = self;
-
-        TextCompletionRequest {
-            instructions: format!(
+        let paragraphs: Vec<String> = [
+            format!(
                 "You translate one message in a private conversation between two people, \
                  {person} and {her}. They write in different languages, and each reads the other \
-                 through you. Neither of them sees you.\n\n{into}\n\nTranslate all of it and \
-                 nothing else: add nothing, leave nothing out, explain nothing, and do not answer \
-                 it. Keep its line breaks, its emoji and its tone.\n\nIf the message is already in \
-                 that language, give it back unchanged. Answer with the translation alone."
+                 through you. Neither of them sees you."
             ),
+            into.to_owned(),
+            "Translate all of it and nothing else: add nothing, leave nothing out, explain \
+             nothing, and do not answer it. Keep its line breaks, its emoji and its tone."
+                .to_owned(),
+        ]
+        .into_iter()
+        .chain(notes)
+        .chain([
+            "If the message is already in that language, give it back unchanged. Answer with the \
+             translation alone."
+                .to_owned(),
+        ])
+        .collect();
+
+        TextCompletionRequest {
+            instructions: paragraphs.join("\n\n"),
             input,
             max_output_chars: MAX_OUTPUT_CHARS,
         }
+    }
+
+    /// Her words under `heading`, a line each, what she writes and then how
+    /// it is put; none while she has none.
+    fn words(&self, heading: &str) -> Option<String> {
+        (!self.words.is_empty()).then(|| {
+            let lines: Vec<String> = self
+                .words
+                .iter()
+                .map(|word| format!("- {} → {}", word.hers, word.shown))
+                .collect();
+
+            format!("{heading}\n{}", lines.join("\n"))
+        })
     }
 
     /// What the translator reads, a part with nothing to say left out: the
@@ -195,6 +276,15 @@ impl Between {
     }
 }
 
+/// What a request calls the person who goes by `name`: [`UNNAMED`] while
+/// they have chosen no name.
+fn called(name: &SpeakerName) -> String {
+    match Person::of(name) {
+        Person::Named(name) => name.to_string(),
+        Person::Unnamed => UNNAMED.to_owned(),
+    }
+}
+
 /// `text` whole while it holds at most [`CONTEXT_CHARS`] characters, else
 /// its first [`CONTEXT_CHARS`] and an ellipsis.
 fn cut(text: &str) -> Cow<'_, str> {
@@ -233,13 +323,22 @@ mod tests {
         VisibleText::normalize(text).unwrap()
     }
 
-    /// Between Sam and Kana, who speaks Japanese.
+    /// Between the person who goes by `person` and Kana, who speaks
+    /// Japanese, nothing chosen or noted of how she is put.
+    fn between_with(person: &str) -> Between {
+        Between {
+            person: called(&name(person)),
+            her: name("Kana"),
+            language: LanguageTag::parse("ja").unwrap(),
+            theirs: None,
+            words: Vec::new(),
+            tone: None,
+        }
+    }
+
+    /// Between Sam and Kana, as [`between_with`] has them.
     fn between() -> Between {
-        Between::new(
-            &name("Sam"),
-            name("Kana"),
-            LanguageTag::parse("ja").unwrap(),
-        )
+        between_with("Sam")
     }
 
     /// A message of the person's, as written.
@@ -259,8 +358,8 @@ mod tests {
     }
 
     /// The instructions of a request, putting a message into another
-    /// language as `into` says.
-    fn instructions(into: &str) -> String {
+    /// language as `into` says, then saying `notes` of how to put her.
+    fn instructions(into: &str, notes: &[&str]) -> String {
         [
             "You translate one message in a private conversation between two people, Sam and \
              Kana. They write in different languages, and each reads the other through you. \
@@ -268,9 +367,14 @@ mod tests {
             into,
             "Translate all of it and nothing else: add nothing, leave nothing out, explain \
              nothing, and do not answer it. Keep its line breaks, its emoji and its tone.",
+        ]
+        .into_iter()
+        .chain(notes.iter().copied())
+        .chain([
             "If the message is already in that language, give it back unchanged. Answer with the \
              translation alone.",
-        ]
+        ])
+        .collect::<Vec<_>>()
         .join("\n\n")
     }
 
@@ -288,19 +392,15 @@ mod tests {
         let first = between().line_request(&line, &[]);
         let answered = between().message_request(&answer, &before, Some(&line));
         let unprompted = between().message_request(&answer, &[], None);
-        let unnamed = Between::new(
-            &name("You"),
-            name("Kana"),
-            LanguageTag::parse("ja").unwrap(),
-        )
-        .message_request(&answer, &before, Some(&line));
+        let unnamed = between_with("You").message_request(&answer, &before, Some(&line));
 
         assert_eq!(
             first,
             TextCompletionRequest {
                 instructions: instructions(
                     "Put Sam's message into Kana's language, the one with the language tag \
-                     \"ja\"."
+                     \"ja\".",
+                    &[]
                 ),
                 input: "The message to translate, from Sam:\n\nTea?\nNow?".to_owned(),
                 max_output_chars: NonZeroUsize::new(16_384).unwrap(),
@@ -310,7 +410,8 @@ mod tests {
             answered.instructions,
             instructions(
                 "Put Kana's message into the language Sam writes in, which Sam's newest message \
-                 shows."
+                 shows.",
+                &[]
             )
         );
         assert_eq!(
@@ -321,7 +422,7 @@ mod tests {
         );
         assert_eq!(
             unprompted.instructions,
-            instructions("Put Kana's message into English.")
+            instructions("Put Kana's message into English.", &[])
         );
         assert_eq!(
             unprompted.input,
@@ -331,7 +432,8 @@ mod tests {
             unnamed.instructions,
             instructions(
                 "Put Kana's message into the language User writes in, which User's newest \
-                 message shows."
+                 message shows.",
+                &[]
             )
             .replace("Sam and Kana", "User and Kana")
         );
@@ -340,6 +442,67 @@ mod tests {
             "The conversation so far, for context only:\n\nUser: Tea?\nNow?\nKana: \
              いただきます。\n\nUser's newest message:\n\nTea?\nNow?\n\nThe message to translate, \
              from Kana:\n\nいただきます。"
+        );
+    }
+
+    /// With a language chosen, her message is put into it by its tag, and
+    /// the person's newest message is not read. Her words go into both
+    /// requests after what to translate, a line each, and how she sounds
+    /// into her message's alone, after her words: each a paragraph, left
+    /// out when there is nothing to say.
+    #[test]
+    fn her_notes_and_a_language_chosen_are_said_word_for_word() {
+        let (line, answer) = (text("Tea?"), text("ダーリン、いただきます。"));
+        let word = |hers: &str, shown: &str| TranslationWord {
+            hers: hers.to_owned(),
+            shown: shown.to_owned(),
+        };
+        let noted = Between {
+            theirs: Some(LanguageTag::parse("de").unwrap()),
+            words: vec![word("ダーリン", "Darling"), word("叫竜", "Klaxosaur")],
+            tone: Some("Playful and teasing, never formal.".to_owned()),
+            ..between()
+        };
+        let sounding = Between {
+            tone: Some("Quiet.".to_owned()),
+            ..between()
+        };
+        let message = noted.message_request(&answer, &[theirs(&line)], Some(&line));
+
+        assert_eq!(
+            message.instructions,
+            "You translate one message in a private conversation between two people, Sam and \
+             Kana. They write in different languages, and each reads the other through you. \
+             Neither of them sees you.\n\nPut Kana's message into Sam's language, the one with \
+             the language tag \"de\".\n\nTranslate all of it and nothing else: add nothing, leave \
+             nothing out, explain nothing, and do not answer it. Keep its line breaks, its emoji \
+             and its tone.\n\nHow some of her words are to be put. On the left what she writes, \
+             on the right how Sam is to read it, or what it means:\n- ダーリン → Darling\n- 叫竜 \
+             → Klaxosaur\n\nHow she sounds: Playful and teasing, never formal.\n\nIf the message \
+             is already in that language, give it back unchanged. Answer with the translation \
+             alone."
+        );
+        assert_eq!(
+            message.input,
+            "The conversation so far, for context only:\n\nSam: Tea?\n\nThe message to \
+             translate, from Kana:\n\nダーリン、いただきます。"
+        );
+        assert_eq!(
+            noted.line_request(&line, &[]).instructions,
+            instructions(
+                "Put Sam's message into Kana's language, the one with the language tag \"ja\".",
+                &[
+                    "Words Kana uses, and how each is put for Sam. Where Sam's message means one \
+                   of them, write her word:\n- ダーリン → Darling\n- 叫竜 → Klaxosaur"
+                ]
+            )
+        );
+        assert_eq!(
+            sounding.message_request(&answer, &[], None).instructions,
+            instructions(
+                "Put Kana's message into English.",
+                &["How she sounds: Quiet."]
+            )
         );
     }
 

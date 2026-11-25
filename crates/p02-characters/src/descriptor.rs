@@ -13,8 +13,8 @@ pub(crate) const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
 /// A character as her package defines her: who she is, one line about her
 /// when it gives one, the language she speaks when it names one, the
-/// persona the model is given, the version of that content, and the
-/// plugins she expects.
+/// persona the model is given, the version of that content, the plugins
+/// she expects, and her translation notes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CharacterDefinition {
     pub profile: CharacterProfile,
@@ -28,6 +28,7 @@ pub struct CharacterDefinition {
     pub persona: Persona,
     pub version: CharacterVersion,
     pub plugins: PluginExpectations,
+    pub translation: TranslationNotes,
 }
 
 /// A character's persona: one section or more, in order, none blank.
@@ -118,6 +119,27 @@ impl PluginExpectations {
     }
 }
 
+/// Her translation notes as her package gives them, each when it does: how
+/// some of her words are put for the person, and how she sounds. Shape
+/// only: her settings judge them when they become hers.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TranslationNotes {
+    words: Option<Value>,
+    tone: Option<Value>,
+}
+
+impl TranslationNotes {
+    #[must_use]
+    pub fn words(&self) -> Option<&Value> {
+        self.words.as_ref()
+    }
+
+    #[must_use]
+    pub fn tone(&self) -> Option<&Value> {
+        self.tone.as_ref()
+    }
+}
+
 /// The first rule a descriptor breaks, in the order they are checked.
 #[derive(Debug, thiserror::Error)]
 pub enum ParseDescriptorError {
@@ -191,6 +213,9 @@ impl ParseDescriptorError {
             Self::NotAnObject("meta") | Self::InvalidVersion => {
                 "This file does not give its version as three numbers, such as 1.0.0."
             }
+            Self::NotAnObject("translation") => {
+                "This file gives the character's translation notes in a way the app cannot read."
+            }
             Self::NotAnObject(_)
             | Self::InvalidPluginList(_)
             | Self::ConfigNotAnObject
@@ -228,6 +253,7 @@ impl CharacterDefinition {
             persona: persona(descriptor)?,
             version: version(descriptor)?,
             plugins: plugins(descriptor)?,
+            translation: translation(descriptor)?,
         })
     }
 }
@@ -363,6 +389,21 @@ fn plugin_config(
         .collect()
 }
 
+/// Her translation notes, read as a plugin's values are: each kept as
+/// written.
+fn translation(descriptor: &Map<String, Value>) -> Result<TranslationNotes, ParseDescriptorError> {
+    if descriptor.get("translation").is_none() {
+        return Ok(TranslationNotes::default());
+    }
+
+    let notes = object(descriptor.get("translation"), "translation")?;
+
+    Ok(TranslationNotes {
+        words: notes.get("words").cloned(),
+        tone: notes.get("tone").cloned(),
+    })
+}
+
 /// The object `value` holds, or the refusal naming `part`.
 fn object<'a>(
     value: Option<&'a Value>,
@@ -442,6 +483,10 @@ mod tests {
                 "/plugins/config",
                 json!({"zeta-plugin": {"b": 1, "a": [true]}, "alpha-plugin": {"z": null, "y": 2}}),
             ),
+            (
+                "/translation",
+                json!({"words": [{"hers": "ダーリン"}], "tone": 42, "voice": "low"}),
+            ),
         ]);
         let definition = CharacterDefinition::from_descriptor(&bytes).unwrap();
         let config = definition.plugins.config();
@@ -480,6 +525,13 @@ mod tests {
             [["z", "y"], ["b", "a"]]
         );
         assert_eq!(
+            (
+                definition.translation.words(),
+                definition.translation.tone()
+            ),
+            (Some(&json!([{"hers": "ダーリン"}])), Some(&json!(42)))
+        );
+        assert_eq!(
             CharacterDefinition::from_descriptor(&without("plugins"))
                 .unwrap()
                 .plugins,
@@ -489,6 +541,7 @@ mod tests {
 
         assert_eq!(plain.about, None);
         assert_eq!(plain.language, None);
+        assert_eq!(plain.translation, TranslationNotes::default());
     }
 
     #[test]
@@ -563,6 +616,10 @@ mod tests {
             (
                 with(&[("/plugins/config", json!({"alpha": "warm"}))]),
                 "plugins.config[\"alpha\"] must be an object",
+            ),
+            (
+                with(&[("/translation", json!(["ダーリン", "Darling"]))]),
+                "translation must be an object",
             ),
         ];
 

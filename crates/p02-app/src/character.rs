@@ -258,10 +258,12 @@ fn not_ready(id: &Identifier, health: &CharacterHealth) -> String {
 /// What she is built of, from her package and her settings as they were
 /// when she was built: who she is, the language she speaks when her
 /// package names one, her data, the name the person goes by, the model she
-/// answers with, or what she needs for one, the plugins she answers with,
-/// her model's window, and those settings and the home's sign-in to the
-/// plan she thinks with, if she does, which her next request compares with
-/// what they are then.
+/// answers with, or what she needs for one, the model her translator asks
+/// when her settings choose it a service of its own, or what it needs for
+/// one, the plugins she answers with, her model's window, and those
+/// settings and the home's sign-in to the plan she or her translator
+/// thinks with, if either does, which her next request compares with what
+/// they are then.
 #[derive(Debug)]
 struct Built {
     character: Character,
@@ -270,6 +272,7 @@ struct Built {
     person: SpeakerName,
     context_window: NonZeroU64,
     model: Result<Arc<dyn RoleModelAdapter>, String>,
+    translator: Option<Result<Arc<dyn RoleModelAdapter>, String>>,
     host: PluginHost,
     settings: CharacterSettings,
     signed_in: Option<PlanAccount>,
@@ -1112,7 +1115,8 @@ impl Her {
 
 /// Her parts as a turn runs on them, brought up to date with her settings
 /// before each of its requests after the first, the model it runs on, and
-/// her translator on it, while her package names her language.
+/// her translator, while her package names her language and the person
+/// reads another.
 struct Current<'a> {
     her: &'a Her,
     built: &'a mut Built,
@@ -1133,27 +1137,32 @@ impl<'a> Current<'a> {
     }
 }
 
-/// Her translator as her turn has her: who it is between, on the model she
-/// speaks with, and her, on whom a message of hers it could not put into
-/// the person's language is noted as it happens.
+/// Her translator as her turn has her: who it is between, the model it
+/// asks, or what that model needs, which fails every translation saying
+/// so, and her, on whom a message of hers it could not put into the
+/// person's language is noted as it happens.
 struct HerTranslator<'a> {
     her: &'a Her,
-    model: Arc<dyn RoleModelAdapter>,
+    model: Result<Arc<dyn RoleModelAdapter>, String>,
     between: Between,
 }
 
 impl<'a> HerTranslator<'a> {
-    /// Hers as `built` has her, on `model`, while her package names her
-    /// language.
+    /// Hers as `built` has her, while her package names her language and
+    /// the person reads another: on the model her settings choose it, else
+    /// on `model`, the one she speaks with.
     fn of(her: &'a Her, built: &Built, model: &Arc<dyn RoleModelAdapter>) -> Option<Self> {
         Some(Self {
             her,
-            model: Arc::clone(model),
-            between: Between::new(
-                &built.person,
+            model: built
+                .translator
+                .clone()
+                .unwrap_or_else(|| Ok(Arc::clone(model))),
+            between: Between::of(
+                built.settings.host(),
                 built.character.profile.display_name.clone(),
                 built.language.clone()?,
-            ),
+            )?,
         })
     }
 }
@@ -1161,9 +1170,10 @@ impl<'a> HerTranslator<'a> {
 #[async_trait]
 impl Translator for HerTranslator<'_> {
     async fn for_her(&self, line: &VisibleText, before: &[Said<'_>]) -> Translation {
-        self.between
-            .for_her(self.model.as_ref(), line, before)
-            .await
+        match &self.model {
+            Ok(model) => self.between.for_her(model.as_ref(), line, before).await,
+            Err(needed) => Translation::Failed(needed.clone()),
+        }
     }
 
     async fn for_person(
@@ -1172,10 +1182,14 @@ impl Translator for HerTranslator<'_> {
         before: &[Said<'_>],
         newest: Option<&VisibleText>,
     ) -> Translation {
-        let translation = self
-            .between
-            .for_person(self.model.as_ref(), message, before, newest)
-            .await;
+        let translation = match &self.model {
+            Ok(model) => {
+                self.between
+                    .for_person(model.as_ref(), message, before, newest)
+                    .await
+            }
+            Err(needed) => Translation::Failed(needed.clone()),
+        };
 
         if let Translation::Failed(reason) = &translation {
             self.her.note_maintenance(self.between.untranslated(reason));
@@ -1371,6 +1385,10 @@ fn assemble(
     )
     .map_err(|error| unmaterialized(id, error))?;
     let signed_in = plan_sign_in(world, settings.host());
+    let translator = settings
+        .host()
+        .translator()
+        .map(|own| model(world, &daemon, &own, signed_in.as_ref()));
     let model = model(world, &daemon, settings.host(), signed_in.as_ref());
     let cautions: Vec<&str> = resolution.cautions().map(Diagnostic::message).collect();
     let connections = PersonConnections::new(Arc::clone(world), daemon.clone(), stop);
@@ -1412,6 +1430,7 @@ fn assemble(
             person: settings.host().user_display_name.clone(),
             context_window: settings.host().context_window_tokens,
             model,
+            translator,
             host,
             settings,
             signed_in,
@@ -1420,9 +1439,11 @@ fn assemble(
 }
 
 /// Whom the home is signed in to a ChatGPT plan as, while `host` chooses
-/// the plan: what her model depends on beyond her settings.
+/// the plan for her or for her translator: what their models depend on
+/// beyond her settings.
 fn plan_sign_in(world: &World, host: &HostSettings) -> Option<PlanAccount> {
-    (host.role_model_provider == Some(RoleModelProvider::Chatgpt))
+    [host.role_model_provider, host.translator_provider]
+        .contains(&Some(RoleModelProvider::Chatgpt))
         .then(|| world.chatgpt.account())
         .flatten()
 }

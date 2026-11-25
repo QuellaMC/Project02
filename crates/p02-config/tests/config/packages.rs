@@ -32,9 +32,13 @@ fn start(world: &World, character: &str) -> Result<CharacterData, MaterializeErr
     )
 }
 
+/// Her package's notes become her own, and nothing else of the host's: a
+/// package that names a host field sets none.
 #[test]
-fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_has() {
+fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_has_and_her_notes()
+{
     let world = World::new();
+    let darling = json!([{"hers": "ダーリン", "shown": "Darling"}]);
 
     world
         .write_home(&document(
@@ -43,9 +47,13 @@ fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_
         .package(
             "nova",
             &json!({
-                "required": ["reply-style", "session-history"],
-                "recommended": ["ghost"],
-                "config": {"reply-style": {"tone": "warm"}, "ghost": {"apiKey": "sk-shipped"}},
+                "plugins": {
+                    "required": ["reply-style", "session-history"],
+                    "recommended": ["ghost"],
+                    "config": {"reply-style": {"tone": "warm"}, "ghost": {"apiKey": "sk-shipped"}},
+                },
+                "translation": {"words": darling, "tone": "Playful and teasing."},
+                "project02": {"userDisplayName": "Stranger"},
             }),
             "1.0.0",
         );
@@ -60,6 +68,7 @@ fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_
     assert_eq!(
         overlay_of(&world, "nova"),
         document(json!({
+            "project02": {"translationWords": darling, "translationTone": "Playful and teasing."},
             "plugins": {
                 "reply-style": {"enabled": true, "config": {"tone": "warm"}},
                 "session-history": {"enabled": true},
@@ -79,18 +88,24 @@ fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_
     );
 }
 
+/// Her words emptied are hers, as any value she set: a new version of her
+/// package brings none back.
 #[test]
 fn a_new_version_of_her_package_fills_in_only_what_her_overlay_lacks() {
     let world = World::new();
-    let package = |config: Value, version: &str| {
+    let darling = json!([{"hers": "ダーリン", "shown": "Darling"}]);
+    let package = |config: Value, translation: Value, version: &str| {
         world.package(
             "nova",
-            &json!({"recommended": ["reply-style"], "config": {"reply-style": config}}),
+            &json!({
+                "plugins": {"recommended": ["reply-style"], "config": {"reply-style": config}},
+                "translation": translation,
+            }),
             version,
         );
     };
 
-    package(json!({"tone": "warm"}), "1.0.0");
+    package(json!({"tone": "warm"}), json!({"words": darling}), "1.0.0");
     start(&world, "nova").unwrap();
     world.save(
         &of("nova"),
@@ -103,14 +118,26 @@ fn a_new_version_of_her_package_fills_in_only_what_her_overlay_lacks() {
         &of("nova"),
         json!({"kind": "section_enabled", "namespace": "plugins", "id": "reply-style"}),
     );
+    world.save(
+        &of("nova"),
+        json!({"kind": "set", "path": "project02.translationWords", "value": []}),
+    );
 
     let edited = std::fs::read(world.overlay("nova")).unwrap();
 
-    package(json!({"tone": "formal", "signoff": "Same."}), "1.0.0");
+    package(
+        json!({"tone": "formal", "signoff": "Same."}),
+        json!({"tone": "Same."}),
+        "1.0.0",
+    );
     start(&world, "nova").unwrap();
     assert_eq!(std::fs::read(world.overlay("nova")).unwrap(), edited);
 
-    package(json!({"tone": "formal", "signoff": "Upgraded."}), "2.0.0");
+    package(
+        json!({"tone": "formal", "signoff": "Upgraded."}),
+        json!({"words": darling, "tone": "Upgraded."}),
+        "2.0.0",
+    );
 
     let data = start(&world, "nova").unwrap();
 
@@ -122,6 +149,7 @@ fn a_new_version_of_her_package_fills_in_only_what_her_overlay_lacks() {
     assert_eq!(
         overlay_of(&world, "nova"),
         document(json!({
+            "project02": {"translationWords": [], "translationTone": "Upgraded."},
             "plugins": {
                 "reply-style": {"config": {"tone": "playful", "signoff": "Upgraded."}, "enabled": true},
             },
@@ -136,10 +164,10 @@ fn a_change_on_her_screen_before_she_starts_is_made_in_her_settings_as_her_start
     let package = |tone: &str, signoff: &str, version: &str| {
         world.package(
             "nova",
-            &json!({
+            &json!({"plugins": {
                 "recommended": ["reply-style"],
                 "config": {"reply-style": {"tone": tone, "signoff": signoff}},
-            }),
+            }}),
             version,
         );
     };
@@ -177,7 +205,7 @@ fn an_overlay_value_that_is_no_object_is_left_for_its_diagnostic_to_name() {
     world
         .package(
             "nova",
-            &json!({"config": {"reply-style": {"tone": "warm"}}}),
+            &json!({"plugins": {"config": {"reply-style": {"tone": "warm"}}}}),
             "1.0.0",
         )
         .write_overlay("nova", &hers);
@@ -241,14 +269,14 @@ fn a_package_never_sets_a_credential_or_a_server_she_starts_without_them() {
 
     world.package(
         "nova",
-        &json!({
+        &json!({"plugins": {
             "recommended": ["courier"],
             "config": {"courier": {
                 "mode": "express",
                 "baseUrl": "https://collector.example.test",
                 "apiKey": "sk-shipped",
             }},
-        }),
+        }}),
         "1.0.0",
     );
     start(&world, "nova").unwrap();
@@ -266,26 +294,38 @@ fn a_package_never_sets_a_credential_or_a_server_she_starts_without_them() {
     );
 }
 
+/// Her notes are judged as her screen judges them: a pair of her words
+/// that holds more than her word and how it is shown is no pair.
 #[test]
 fn a_package_value_her_screen_could_not_set_is_skipped_and_the_rest_merged() {
     let world = World::new();
 
     world.package(
         "nova",
-        &json!({"config": {"reply-style": {"tone": 42, "volume": 11, "signoff": "Yours."}}}),
+        &json!({
+            "plugins": {"config": {"reply-style": {"tone": 42, "volume": 11, "signoff": "Yours."}}},
+            "translation": {
+                "words": [{"hers": "ダーリン", "shown": "Darling", "note": "Hers alone."}],
+                "tone": "Playful.",
+            },
+        }),
         "1.0.0",
     );
     start(&world, "nova").unwrap();
 
     assert_eq!(
         overlay_of(&world, "nova"),
-        document(json!({"plugins": {"reply-style": {"config": {"signoff": "Yours."}}}}))
+        document(json!({
+            "project02": {"translationTone": "Playful."},
+            "plugins": {"reply-style": {"config": {"signoff": "Yours."}}},
+        }))
     );
     assert_eq!(
         skipped(&world, "nova"),
         [
             "plugins.reply-style.config.tone".to_owned(),
             "plugins.reply-style.config.volume".to_owned(),
+            "translation.words".to_owned(),
         ]
     );
 }

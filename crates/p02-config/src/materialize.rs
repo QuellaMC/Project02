@@ -5,7 +5,7 @@ use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::time::Duration;
 
-use p02_characters::{CharacterDefinition, CharacterVersion, PluginExpectations};
+use p02_characters::{CharacterDefinition, CharacterVersion};
 use p02_contracts::ConfigField;
 use p02_shared::Identifier;
 use p02_store::{CharacterData, Home, StorageError};
@@ -99,7 +99,7 @@ pub(crate) fn merged_overlay(
     recorded: Option<&CharacterVersion>,
 ) -> (Overlay, Vec<Diagnostic>) {
     let id = &character.profile.id;
-    let (package, skipped) = package_document(sections, id, &character.plugins);
+    let (package, skipped) = package_document(sections, character);
     let pending = absent || recorded != Some(&character.version);
     let read = if pending {
         Document::parse(merge_package(written.raw(), &package))
@@ -120,17 +120,18 @@ pub(crate) fn merged_overlay(
 }
 
 /// What her package contributes to her settings, as an overlay holding
-/// only that: each plugin of this build it expects switched on, and the
-/// values it gives, each made as a change on her own screen would make it.
-/// A plugin this build lacks configures nothing. A value her screen could
-/// not set is skipped, as is a credential, a server or a path: a package
-/// may come from a stranger, and those are the person's to choose.
+/// only that: each plugin of this build it expects switched on, the values
+/// it gives, and her translation notes, each made as a change on her own
+/// screen would make it. A plugin this build lacks configures nothing. A
+/// value her screen could not set is skipped, as is a credential, a server
+/// or a path: a package may come from a stranger, and those are the
+/// person's to choose.
 pub(crate) fn package_document(
     sections: &Sections,
-    character: &Identifier,
-    expectations: &PluginExpectations,
+    character: &CharacterDefinition,
 ) -> (Map<String, Value>, Vec<Diagnostic>) {
-    let target = Target::Character(character.clone());
+    let target = Target::Character(character.profile.id.clone());
+    let expectations = &character.plugins;
     let switched_on: BTreeSet<&Identifier> = expectations
         .required()
         .iter()
@@ -185,19 +186,50 @@ pub(crate) fn package_document(
                 .and_then(|edit| edit.apply(&mut document));
 
             if let Err(why) = made {
-                skipped.push(
-                    Diagnostic::warning(
-                        Code::PackageValueSkipped,
-                        format!("Her package's {path} is not used. {why}"),
-                    )
-                    .at(path)
-                    .in_section(Namespace::Plugins, id.as_str()),
-                );
+                skipped.push(unused(&path, &why).in_section(Namespace::Plugins, id.as_str()));
             }
         }
     }
 
+    let notes = [
+        (
+            "translation.words",
+            "translationWords",
+            character.translation.words(),
+        ),
+        (
+            "translation.tone",
+            "translationTone",
+            character.translation.tone(),
+        ),
+    ];
+
+    for (place, name, value) in notes {
+        let Some(value) = value else {
+            continue;
+        };
+        let set = Operation::Set {
+            path: format!("project02.{name}"),
+            value: value.clone(),
+        };
+        let made = Edit::new(sections, &target, &set).and_then(|edit| edit.apply(&mut document));
+
+        if let Err(why) = made {
+            skipped.push(unused(place, &why));
+        }
+    }
+
     (document, skipped)
+}
+
+/// The warning that what `path` names in her package is not used, for
+/// `why`.
+fn unused(path: &str, why: &str) -> Diagnostic {
+    Diagnostic::warning(
+        Code::PackageValueSkipped,
+        format!("Her package's {path} is not used. {why}"),
+    )
+    .at(path)
 }
 
 /// Whether a package may give `field` a value: never a credential, a
@@ -211,15 +243,25 @@ fn package_may_set(field: &ConfigField) -> bool {
 }
 
 /// Her overlay with her package's settings filled in where she has none:
-/// the package's stanza of a plugin she has none for, and in a stanza of
-/// hers its switch and each field she leaves unset. Nothing she set
-/// changes, and a stanza or a config of hers that is no object is left as
-/// it is, for its diagnostic to name.
+/// each host value she leaves unset, the package's stanza of a plugin she
+/// has none for, and in a stanza of hers its switch and each field she
+/// leaves unset. Nothing she set changes, and what of hers that holds them
+/// is no object is left as it is, for its diagnostic to name.
 pub(crate) fn merge_package(
     overlay: &Map<String, Value>,
     package: &Map<String, Value>,
 ) -> Map<String, Value> {
     let mut merged = overlay.clone();
+
+    if let Some(Value::Object(offered)) = package.get("project02")
+        && let Value::Object(host) = merged
+            .entry("project02")
+            .or_insert_with(|| Value::Object(Map::new()))
+    {
+        for (name, value) in offered {
+            host.entry(name).or_insert_with(|| value.clone());
+        }
+    }
 
     if let Some(Value::Object(offered)) = package.get("plugins")
         && let Value::Object(plugins) = merged

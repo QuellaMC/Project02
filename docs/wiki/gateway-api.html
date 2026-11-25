@@ -1613,20 +1613,24 @@ data: {…}</code></pre>
       <p>
         A character whose package names the language she speaks
         (<code>identity.language</code>, a tag such as <code>ja</code>) and
-        the person read each other through her own model, which puts each
-        message into the other's language. The person's line is committed as
+        the person read each other through her own model, or the service and
+        model the home's settings choose for translating, which puts each
+        message into the other's language, keeping her words and how she
+        sounds as her settings note them. The person's line is committed as
         she reads it, in her language, as <code>text</code>, with what they
         wrote as <code>written</code>; each message of hers keeps the same
-        words in the language of the person's newest message, or English
-        while they never wrote, as <code>translation</code>, and she is
-        <code>writing</code> until both are there. A message already in the
-        other's language has <code>text</code> alone. A line that cannot be put
-        into her language never reaches her: its turn ends
+        words in the language the person chose to read, else that of their
+        newest message, or English while they never wrote, as
+        <code>translation</code>, and she is <code>writing</code> until both
+        are there. A message already in the other's language has
+        <code>text</code> alone. A line that cannot be put into her language,
+        or whose translator cannot be built, never reaches her: its turn ends
         <code>rejected</code> with <code>committed: false</code>, the reason
         <code>line_not_translated</code> and a message saying why. A message
         of hers that cannot be put into the person's is committed in her words
         alone, and <code>maintenance_failed</code> says so. A character whose
-        package names no language is never translated.
+        package names no language, or the one the person chose to read, is
+        never translated.
       </p>
 
       <h2>What a client never has to notice</h2>

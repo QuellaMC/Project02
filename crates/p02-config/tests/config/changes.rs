@@ -197,7 +197,11 @@ fn a_host_value_its_rule_refuses_is_refused_and_the_refusal_never_repeats_it() {
         ("project02.userDisplayName", json!("x".repeat(129))),
         ("project02.userDisplayName", json!("Two\nlines")),
         ("project02.userDisplayName", json!("   ")),
+        ("project02.userLanguage", json!(format!("{marker}_JP"))),
+        ("project02.userLanguage", json!(["ja"])),
         ("project02.roleModelProvider", json!("deterministic")),
+        ("project02.translatorProvider", json!("deterministic")),
+        ("project02.translatorModel", json!("   ")),
         (
             "project02.nvidiaBaseUrl",
             json!(format!("ftp://{marker}.example.test/v1")),
@@ -234,14 +238,61 @@ fn a_host_value_its_rule_refuses_is_refused_and_the_refusal_never_repeats_it() {
         assert!(!format!("{outcome:?}").contains(marker), "{outcome:?}");
     }
 
+    for (path, value) in [
+        ("project02.userDisplayName", json!("x".repeat(128))),
+        ("project02.nvidiaBaseUrl", json!("http://127.0.0.1:1234/v1")),
+        ("project02.userLanguage", json!("zh-Hant-TW")),
+        ("project02.translatorProvider", json!("anthropic")),
+        ("project02.translatorModel", json!("claude-haiku-5-5")),
+    ] {
+        world.save(
+            &home(),
+            json!({"kind": "set", "path": path, "value": value}),
+        );
+    }
+}
+
+/// Her words are at most 100 pairs, each exactly her word and how it is
+/// shown, each one line of 1 to 200 characters with no blank space at
+/// either end; how she sounds is 1 to 1,000 characters with none at either
+/// end, lines and all.
+#[test]
+fn her_translation_notes_are_refused_past_their_rules_and_taken_at_their_edges() {
+    let world = World::new();
+    let pair = |hers: &str, shown: &str| json!({"hers": hers, "shown": shown});
+    let words =
+        |value: Value| json!({"kind": "set", "path": "project02.translationWords", "value": value});
+    let tone =
+        |value: Value| json!({"kind": "set", "path": "project02.translationTone", "value": value});
+
+    for operation in [
+        words(json!("ダーリン")),
+        words(json!([{"hers": "ダーリン"}])),
+        words(json!([{"hers": "ダーリン", "shown": "Darling", "note": "Hers."}])),
+        words(json!([pair(" ダーリン", "Darling")])),
+        words(json!([pair("ダーリン\nmore", "Darling")])),
+        words(json!([pair("", "Darling")])),
+        words(json!([pair(&"語".repeat(201), "Darling")])),
+        words(json!(vec![pair("ダーリン", "Darling"); 101])),
+        tone(json!("Playful.\n")),
+        tone(json!("x".repeat(1001))),
+        tone(json!("")),
+    ] {
+        assert_eq!(
+            refusal(&world.change(&of("mira"), operation.clone())),
+            Some(ChangeRefusal::Invalid),
+            "{operation}"
+        );
+    }
+
     world
         .save(
-            &home(),
-            json!({"kind": "set", "path": "project02.userDisplayName", "value": "x".repeat(128)}),
+            &of("mira"),
+            words(json!(vec![pair(&"語".repeat(200), &"w".repeat(200)); 100])),
         )
         .save(
-            &home(),
-            json!({"kind": "set", "path": "project02.nvidiaBaseUrl", "value": "http://127.0.0.1:1234/v1"}),
+            &of("mira"),
+            tone(json!(format!("{}\n{}", "a".repeat(499), "b".repeat(500)))),
         );
 }
 

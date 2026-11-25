@@ -537,9 +537,11 @@ fn inspect_reports_where_the_settings_come_from_the_host_values_and_each_connect
 
     world.write_home(&document(json!({
         "project02": {
+            "userLanguage": "de",
             "roleModelProvider": "openai",
             "openaiApiKey": "sk-home",
             "nvidiaApiKey": "nvapi-home",
+            "translatorProvider": "anthropic",
             "contextWindowTokens": 4096,
         },
         "connectors": {"telegram": {"config": {
@@ -564,11 +566,13 @@ fn inspect_reports_where_the_settings_come_from_the_host_values_and_each_connect
             "character": "mira",
             "enabled": true,
             "userDisplayName": "You",
+            "userLanguage": "de",
             "roleModelProvider": "openai",
             "openaiApiKey": "[redacted]",
             "openaiModel": "gpt-6-luna",
             "anthropicModel": "claude-opus-5-5",
             "nvidiaApiKey": "[redacted]",
+            "translatorProvider": "anthropic",
             "contextWindowTokens": 4096,
             "heartbeatMinutes": 30,
         })

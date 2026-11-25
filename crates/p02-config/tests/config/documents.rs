@@ -2,7 +2,8 @@
 
 use std::num::NonZeroU32;
 
-use p02_config::{ReadSettingsError, Resolution};
+use p02_config::{ReadSettingsError, Resolution, TranslationWord};
+use p02_core::LanguageTag;
 use p02_wire::{Code, RoleModelProvider};
 use serde_json::json;
 
@@ -85,7 +86,8 @@ fn what_a_document_holds_that_the_settings_do_not_know_is_not_used_and_said() {
 }
 
 /// Her own service and model are hers, as every host value of hers is,
-/// while the home's key reaches her and the home keeps its own.
+/// while the home's key reaches her and the home keeps its own. Her
+/// translator's are the home's, put in place of her service and its model.
 #[test]
 fn a_hand_written_document_keeps_every_value_its_fields_take() {
     let world = World::new();
@@ -94,28 +96,65 @@ fn a_hand_written_document_keeps_every_value_its_fields_take() {
         .write_home(&document(json!({
             "project02": {
                 "userDisplayName": "  Robin  ",
+                "userLanguage": "de",
                 "roleModelProvider": "nvidia",
                 "openaiApiKey": "  sk-as typed  ",
                 "nvidiaApiKey": "  nvapi-as typed  ",
                 "nvidiaModel": "meta/llama",
                 "nvidiaBaseUrl": "https://nim.example.test/v1/",
+                "translatorProvider": "anthropic",
+                "translatorModel": "claude-haiku-5-5",
                 "contextWindowTokens": 4096,
             },
         })))
         .write_overlay(
             "mira",
             &document(json!({"project02": {
+                "userLanguage": "ja",
                 "enabled": false,
                 "heartbeat": "2h",
                 "roleModelProvider": "openai",
                 "openaiModel": "gpt-5.6-terra",
+                "translationWords": [{"hers": "ダーリン", "shown": "Darling"}],
+                "translationTone": "Playful and teasing,\nnever formal.",
             }})),
         );
 
     let settings = world.resolve(&of("mira")).settings();
     let host = settings.host();
     let homes = world.resolve(&home()).settings();
+    let translator = host.translator().unwrap();
 
+    assert_eq!(
+        [&host.user_language, &homes.host().user_language]
+            .map(|tag| tag.as_ref().map(LanguageTag::as_str)),
+        [Some("ja"), Some("de")]
+    );
+    assert_eq!(
+        host.translation_words,
+        [TranslationWord {
+            hers: "ダーリン".to_owned(),
+            shown: "Darling".to_owned(),
+        }]
+    );
+    assert_eq!(
+        host.translation_tone.as_deref(),
+        Some("Playful and teasing,\nnever formal.")
+    );
+    assert_eq!(
+        (
+            translator.role_model_provider,
+            translator.anthropic_model.as_str(),
+            host.role_model_provider,
+            host.anthropic_model.as_str(),
+        ),
+        (
+            Some(RoleModelProvider::Anthropic),
+            "claude-haiku-5-5",
+            Some(RoleModelProvider::Openai),
+            "claude-opus-5-5",
+        )
+    );
     assert_eq!(host.user_display_name.as_str(), "Robin");
     assert_eq!(
         (

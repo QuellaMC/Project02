@@ -38,6 +38,7 @@
   "version": "project02.config.v2",
   "project02": {
     "userDisplayName": "You",
+    "userLanguage": "en",
     "roleModelProvider": "nvidia",
     "chatgptModel": "gpt-6.1-sol",
     "openaiApiKey": "sk-…",
@@ -47,6 +48,8 @@
     "nvidiaApiKey": "nvapi-…",
     "nvidiaModel": "nvidia/nemotron-3-nano-30b-a3b",
     "nvidiaBaseUrl": "https://integrate.api.nvidia.com/v1",
+    "translatorProvider": "openai",
+    "translatorModel": "gpt-6-luna",
     "contextWindowTokens": 32768
   },
   "plugins": {
@@ -99,7 +102,7 @@
     <table>
       <thead><tr><th>Section</th><th>Owner</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><code>project02</code></td><td>Project02 host</td><td>The person's name, the service a character thinks with, <code>chatgpt</code>, <code>openai</code>, <code>anthropic</code> or <code>nvidia</code>, with each service's own fields: the ChatGPT plan's model (the first the home's plan offers unless another is chosen; the plan itself is signed in to, never set), the OpenAI API's key and model (GPT-6 Luna unless another is chosen), the Claude API's key and model (Claude Opus 5.5 unless another is chosen; a request for a model it offers asks for Anthropic's own fallback for a decline, one for an id typed in does not), and NVIDIA's key, model, and server (NVIDIA's cloud, unless a base URL names an NVIDIA NIM or another OpenAI-compatible server), the model's context window in tokens (the replayed conversation history may use half of it; a stopgap until providers report their own limit), and, in a character's own document, whether she is switched on and her heartbeat: how often she gets a moment of her own while the person is quiet, <code>off</code>, <code>15m</code>, <code>30m</code>, <code>1h</code>, <code>2h</code> or <code>4h</code>, half an hour unless she has one.</td></tr>
+        <tr><td><code>project02</code></td><td>Project02 host</td><td>The person's name and the language they read, a language tag such as <code>de</code> (Automatic, the language they write in, unless one is chosen; a character who speaks the one chosen is not translated), the service a character thinks with, <code>chatgpt</code>, <code>openai</code>, <code>anthropic</code> or <code>nvidia</code>, with each service's own fields: the ChatGPT plan's model (the first the home's plan offers unless another is chosen; the plan itself is signed in to, never set), the OpenAI API's key and model (GPT-6 Luna unless another is chosen), the Claude API's key and model (Claude Opus 5.5 unless another is chosen; a request for a model it offers asks for Anthropic's own fallback for a decline, one for an id typed in does not), and NVIDIA's key, model, and server (NVIDIA's cloud, unless a base URL names an NVIDIA NIM or another OpenAI-compatible server), in the home's document alone the service and model that translate for a character who speaks another language than the person (the model she runs on unless a service is chosen, and that service's model as her settings have it unless one is chosen for it; a model without a service has no effect), the model's context window in tokens (the replayed conversation history may use half of it; a stopgap until providers report their own limit), and, in a character's own document, whether she is switched on, her heartbeat: how often she gets a moment of her own while the person is quiet, <code>off</code>, <code>15m</code>, <code>30m</code>, <code>1h</code>, <code>2h</code> or <code>4h</code>, half an hour unless she has one, and her translation notes: <code>translationWords</code>, at most 100 pairs <code>{"hers", "shown"}</code> of what she writes and how the person reads it, each one line of at most 200 characters, and <code>translationTone</code>, how she sounds, at most 1,000 characters.</td></tr>
         <tr><td><code>plugins.&lt;id&gt;</code></td><td>Host activation plus the named plugin manifest</td><td>Explicit enablement and manifest-declared plugin fields.</td></tr>
         <tr><td><code>connectors.&lt;id&gt;</code></td><td>The named connector's built-in declaration</td><td>Explicit enablement and the declared fields a messaging connector runs on.</td></tr>
       </tbody>
@@ -107,8 +110,9 @@
 
     <p>
       The host fields are declared once, in the field registry, in the order the settings
-      page renders them: what a person decides first, then the knobs, then what is each
-      character's own, her switch and her heartbeat. Each field carries its description,
+      page renders them: what a person decides first, their name and their language, the
+      services and the translator's, then the knobs, then what is each character's own, her
+      switch, her heartbeat and her translation notes. Each field carries its description,
       value type, allowed values, default value, and whether it is a secret. Every other
       setting belongs to a declared section, kept under a namespace of
       the document — <code>plugins</code> or <code>connectors</code> — at
@@ -206,9 +210,12 @@
       it back on. An absent character field keeps
       inheriting future global changes; global values are never copied into the overlay. On
       first selection, the character package contributes only its plugin declarations and the
-      values her own settings screen could set, never a credential or a field declared
-      <code>url</code> or <code>path</code>: a package may come from a stranger, and where her
-      data goes is the person's to choose. What it cannot contribute is a warning in her view.
+      values her own settings screen could set, and her translation notes, its
+      <code>translation.words</code> and <code>translation.tone</code> as her
+      <code>translationWords</code> and <code>translationTone</code>; never a credential,
+      another host field, or a field declared <code>url</code> or <code>path</code>: a package
+      may come from a stranger, and where her data goes is the person's to choose. What it
+      cannot contribute is a warning in her view.
       On a package-version change, Project02 adds currently missing package fields and never
       changes or removes existing character values.
     </p>
@@ -253,8 +260,8 @@
       warning <code>runtime_config_authored_outside_scope</code> at its path, and blocks
       nothing. Secret fields follow their scope like any other setting.
       <code>character-state</code> and <code>reply-style</code> are character-only: each
-      belongs wholly to the character that runs it, as the host's <code>enabled</code> and
-      <code>heartbeat</code> do.
+      belongs wholly to the character that runs it, as the host's <code>enabled</code>,
+      <code>heartbeat</code> and translation notes do.
       <code>mem0</code>'s switch is layered while every field of it is global-only: the memory
       account is set up once, in the home, and each character switches her memory on or off.
     </p>

@@ -21,15 +21,19 @@ with an outcome of p02-wire, never an error.
   lets the turn in flight finish; the lines behind it wait for her next
   start.
 - **Her translator**, for a character whose package names her language,
-  is the model she speaks with, asked for a plain completion as the
+  while the person has not chosen hers as theirs, is the model she speaks
+  with, or the service and model the home's settings choose it, built
+  from her settings with those in place of hers, on the key, server and
+  sign-in in effect for her. It is asked for a plain completion as the
   summarizer asks it: it puts the person's line into her language, and her
-  message into the language of the person's newest message, or English
-  while they never wrote, reading the conversation before it, each message
-  cut to its first 500 characters. An answer that is the message as it was
-  written leaves it so; a blank answer, a failed request or a model with
-  no plain completion is none, said in a sentence, and the person is told
-  of a message of hers left untranslated in her maintenance note as it
-  happens.
+  message into the language the person chose, else that of their newest
+  message, or English while they never wrote, reading the conversation
+  before it, each message cut to its first 500 characters, and told her
+  words and how she sounds as her settings have them. An answer that is
+  the message as it was written leaves it so; a blank answer, a failed
+  request, a model with no plain completion or one that cannot be built
+  is none, said in a sentence, and the person is told of a message of hers
+  left untranslated in her maintenance note as it happens.
 - **Her heartbeat.** While she is ready and her heartbeat is not off, a
   moment of her own is due one period after she has been quiet since:
   since her thread opened in this run, her last turn ended, or her boot
@@ -143,8 +147,8 @@ with an outcome of p02-wire, never an error.
   plan, or signed out with why the last sign-in failed or ended or the
   kept one could not be read, and never a token; it goes to every surface
   whenever that changes, and a reconcile pass then builds again each
-  running character who thinks with the plan, with a model or needing
-  the person to sign in.
+  running character who thinks with the plan, or whose translator does,
+  with a model or needing the person to sign in.
 - **A connector** is on the stream while a stream of its own is open, and
   the bots it last said it runs are kept as long; health shows both, and
   goes to every surface when either changes.

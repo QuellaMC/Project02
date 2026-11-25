@@ -210,21 +210,25 @@ impl World {
         self
     }
 
-    /// Adds a character package to the home.
-    pub(crate) fn package(&self, character: &str, plugins: &Value, version: &str) -> &Self {
+    /// Adds a character package to the home, of `version`, whose descriptor
+    /// holds `parts`, such as her plugins, beside who she is.
+    pub(crate) fn package(&self, character: &str, parts: &Value, version: &str) -> &Self {
         let folder = self.root().join("characters").join(character);
+        let mut descriptor = json!({
+            "format": "project02.character.v1",
+            "identity": {"id": character, "displayName": character},
+            "persona": {"system": [format!("You are {character}.")]},
+            "meta": {"version": version},
+        });
 
+        descriptor
+            .as_object_mut()
+            .unwrap()
+            .extend(parts.as_object().unwrap().clone());
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(
             folder.join("project02.character.json"),
-            json!({
-                "format": "project02.character.v1",
-                "identity": {"id": character, "displayName": character},
-                "persona": {"system": [format!("You are {character}.")]},
-                "meta": {"version": version},
-                "plugins": plugins,
-            })
-            .to_string(),
+            descriptor.to_string(),
         )
         .unwrap();
         self

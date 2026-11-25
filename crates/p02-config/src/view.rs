@@ -20,7 +20,7 @@ use serde_json::{Map, Value};
 
 use crate::conceal::conceal;
 use crate::declaration::{Declared, Sections, Target, connector};
-use crate::host::{HostSettings, host_fields, plan_shaped, services};
+use crate::host::{HostSettings, TranslationWord, host_fields, plan_shaped, services};
 use crate::resolve::{
     Effective, Field, ReadSettingsError, Resolution, Section, Status, values_in_effect,
 };
@@ -359,6 +359,8 @@ pub struct HostReport {
     enabled: bool,
     user_display_name: SpeakerName,
     #[serde(skip_serializing_if = "Option::is_none")]
+    user_language: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     role_model_provider: Option<RoleModelProvider>,
     /// Absent until one is set: the plan's first is the sign-in's to say.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -375,10 +377,18 @@ pub struct HostReport {
     nvidia_model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     nvidia_base_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    translator_provider: Option<RoleModelProvider>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    translator_model: Option<String>,
     context_window_tokens: NonZeroU64,
     /// Absent while her heartbeat is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     heartbeat_minutes: Option<NonZeroU32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    translation_words: Vec<TranslationWord>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    translation_tone: Option<String>,
 }
 
 /// A plugin as `inspect` reports it: its kind, whether her settings run it
@@ -439,6 +449,10 @@ impl Resolution<'_> {
                     },
                     enabled: host.enabled,
                     user_display_name: host.user_display_name.clone(),
+                    user_language: host
+                        .user_language
+                        .as_ref()
+                        .map(|tag| tag.as_str().to_owned()),
                     role_model_provider: host.role_model_provider,
                     chatgpt_model: host.chatgpt_model.clone(),
                     openai_api_key: host.openai_api_key.as_ref().map(|_| "[redacted]"),
@@ -451,8 +465,12 @@ impl Resolution<'_> {
                         .nvidia_base_url
                         .as_ref()
                         .map(|base| base.as_str().to_owned()),
+                    translator_provider: host.translator_provider,
+                    translator_model: host.translator_model.clone(),
                     context_window_tokens: host.context_window_tokens,
                     heartbeat_minutes: host.heartbeat,
+                    translation_words: host.translation_words.clone(),
+                    translation_tone: host.translation_tone.clone(),
                 },
                 fingerprint: self.fingerprint().clone(),
             },

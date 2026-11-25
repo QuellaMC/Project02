@@ -8,11 +8,12 @@ use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::LazyLock;
 
 use p02_contracts::{ConfigField, ConfigScope, ConfigSection};
-use p02_core::{Participant, SpeakerName};
+use p02_core::{LanguageTag, Participant, SpeakerName};
 use p02_shared::{BASE_URL_RULE, BaseUrl};
 use p02_wire::{
     AppConnection, AppModel, FieldView, ModelService, PlanAccount, RoleModelProvider, ValueSource,
 };
+use serde::Serialize;
 use serde_json::{Map, Value, json};
 
 use crate::declaration::{Layer, expectation, outside_scope};
@@ -54,6 +55,40 @@ const USER_DISPLAY_NAME: HostSetting<SpeakerName> = HostSetting {
     must_be: Some("a non-empty single-line string of at most 128 characters"),
 };
 
+/// The languages a page offers first, each tag with its name in its own
+/// language.
+const LANGUAGES: [(&str, &str); 8] = [
+    ("en", "English"),
+    ("zh-Hans", "简体中文"),
+    ("zh-Hant", "繁體中文"),
+    ("ja", "日本語"),
+    ("ko", "한국어"),
+    ("es", "Español"),
+    ("fr", "Français"),
+    ("de", "Deutsch"),
+];
+
+const USER_LANGUAGE: HostSetting<LanguageTag> = HostSetting {
+    name: "userLanguage",
+    field: || {
+        json!({
+            "label": "Your Language",
+            "description": "The language you read, which a character who speaks another is \
+                translated into for you. Automatic when left unset: the language you write in.",
+            "secret": false,
+            "valueType": "string",
+            "suggestedValues": LANGUAGES.iter().map(|(tag, _)| *tag).collect::<Vec<_>>(),
+            "choices": LANGUAGES
+                .iter()
+                .map(|(tag, name)| ((*tag).to_owned(), Value::from(*name)))
+                .collect::<Map<String, Value>>(),
+            "redactionLabels": [],
+        })
+    },
+    read: |value| value.as_str().and_then(|tag| LanguageTag::parse(tag).ok()),
+    must_be: Some("a language tag such as \"ja\" or \"pt-BR\""),
+};
+
 const ROLE_MODEL_PROVIDER: HostSetting<RoleModelProvider> = HostSetting {
     name: "roleModelProvider",
     field: || {
@@ -66,20 +101,40 @@ const ROLE_MODEL_PROVIDER: HostSetting<RoleModelProvider> = HostSetting {
                 one is chosen.",
             "secret": false,
             "valueType": "enum",
-            "allowedValues": RoleModelProvider::ALL
-                .iter()
-                .map(|provider| provider.as_str())
-                .collect::<Vec<_>>(),
-            "choices": RoleModelProvider::ALL
-                .iter()
-                .map(|&provider| (provider.as_str().to_owned(), Value::from(service(provider).name)))
-                .collect::<Map<String, Value>>(),
+            "allowedValues": provider_ids(),
+            "choices": provider_names(),
             "redactionLabels": [],
         })
     },
-    read: |value| value.as_str().and_then(RoleModelProvider::parse),
+    read: provider,
     must_be: None,
 };
+
+/// Each service by the id a setting chooses it with, in the order a page
+/// lists them.
+fn provider_ids() -> Vec<&'static str> {
+    RoleModelProvider::ALL
+        .iter()
+        .map(|provider| provider.as_str())
+        .collect()
+}
+
+/// Each service's name, by its id.
+fn provider_names() -> Map<String, Value> {
+    RoleModelProvider::ALL
+        .iter()
+        .map(|&provider| {
+            (
+                provider.as_str().to_owned(),
+                Value::from(service(provider).name),
+            )
+        })
+        .collect()
+}
+
+fn provider(value: &Value) -> Option<RoleModelProvider> {
+    value.as_str().and_then(RoleModelProvider::parse)
+}
 
 /// The models a ChatGPT plan thinks with, best first, each id with the name
 /// a person reads and whether only a paid plan has it: every plan has the
@@ -271,6 +326,44 @@ const NVIDIA_BASE_URL: HostSetting<BaseUrl> = HostSetting {
     must_be: Some(BASE_URL_RULE),
 };
 
+const TRANSLATOR_PROVIDER: HostSetting<RoleModelProvider> = HostSetting {
+    name: "translatorProvider",
+    field: || {
+        json!({
+            "label": "Service",
+            "description": "Who translates between you and a character who speaks another \
+                language: one of the services, as roleModelProvider names them, on its settings \
+                here. The AI model she runs on translates when left unset.",
+            "scope": "global_only",
+            "secret": false,
+            "valueType": "enum",
+            "allowedValues": provider_ids(),
+            "choices": provider_names(),
+            "redactionLabels": [],
+        })
+    },
+    read: provider,
+    must_be: None,
+};
+
+const TRANSLATOR_MODEL: HostSetting<String> = HostSetting {
+    name: "translatorModel",
+    field: || {
+        json!({
+            "label": "Model",
+            "description": "The model of the translator's service to ask; that service's model \
+                as the settings have it when left unset. Without translatorProvider it has no \
+                effect.",
+            "scope": "global_only",
+            "secret": false,
+            "valueType": "string",
+            "redactionLabels": [],
+        })
+    },
+    read: text,
+    must_be: Some("a non-empty string"),
+};
+
 const CONTEXT_WINDOW_TOKENS: HostSetting<NonZeroU64> = HostSetting {
     name: "contextWindowTokens",
     field: || {
@@ -347,6 +440,93 @@ const HEARTBEAT: HostSetting<Option<NonZeroU32>> = HostSetting {
     must_be: None,
 };
 
+/// One of her words and how it is put for the person: what she writes, and
+/// how they read it, or what it means.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct TranslationWord {
+    pub hers: String,
+    pub shown: String,
+}
+
+/// The most of her words a list holds.
+const MAX_WORDS: usize = 100;
+
+/// The most characters either side of one of her words holds.
+const MAX_WORD_CHARS: usize = 200;
+
+/// The most characters how she sounds holds.
+const MAX_TONE_CHARS: usize = 1_000;
+
+const TRANSLATION_WORDS: HostSetting<Vec<TranslationWord>> = HostSetting {
+    name: "translationWords",
+    field: || {
+        json!({
+            "label": "Words and Phrases",
+            "description": "Words of hers and how each is put for you: what she writes, and how \
+                you read it or what it means. None when left unset.",
+            "scope": "character_only",
+            "secret": false,
+            "valueType": "array",
+            "redactionLabels": [],
+        })
+    },
+    read: |value| {
+        let pairs = value.as_array().filter(|pairs| pairs.len() <= MAX_WORDS)?;
+
+        pairs
+            .iter()
+            .map(|pair| {
+                let pair = pair.as_object().filter(|pair| pair.len() == 2)?;
+
+                Some(TranslationWord {
+                    hers: word(pair.get("hers")?)?,
+                    shown: word(pair.get("shown")?)?,
+                })
+            })
+            .collect()
+    },
+    must_be: Some(
+        "at most 100 pairs of \"hers\" and \"shown\", each one line of 1 to 200 characters with \
+         no blank space at either end",
+    ),
+};
+
+/// `value` as one side of one of her words: one line of 1 to 200
+/// characters, with no blank space at either end.
+fn word(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .filter(|word| {
+            (1..=MAX_WORD_CHARS).contains(&word.chars().count())
+                && word.trim() == *word
+                && !word.contains(['\n', '\r'])
+        })
+        .map(str::to_owned)
+}
+
+const TRANSLATION_TONE: HostSetting<String> = HostSetting {
+    name: "translationTone",
+    field: || {
+        json!({
+            "label": "How She Sounds",
+            "description": "How she sounds, for her translation to keep. None when left unset.",
+            "scope": "character_only",
+            "secret": false,
+            "valueType": "string",
+            "redactionLabels": [],
+        })
+    },
+    read: |value| {
+        value
+            .as_str()
+            .filter(|tone| {
+                (1..=MAX_TONE_CHARS).contains(&tone.chars().count()) && tone.trim() == *tone
+            })
+            .map(str::to_owned)
+    },
+    must_be: Some("text of 1 to 1,000 characters with no blank space at either end"),
+};
+
 fn text(value: &Value) -> Option<String> {
     value
         .as_str()
@@ -355,11 +535,13 @@ fn text(value: &Value) -> Option<String> {
 }
 
 /// The host's settings in the order the settings page shows them: what a
-/// person decides first, the service and each service's own fields in the
-/// order the services are listed, then the knobs, then what is each
-/// character's own: her switch and her heartbeat.
-static SETTINGS: [&dyn Setting; 13] = [
+/// person decides first, their name and the language they read, the service
+/// and each service's own fields in the order the services are listed, the
+/// translator's service and model, then the knobs, then what is each
+/// character's own: her switch, her heartbeat and her translation notes.
+static SETTINGS: [&dyn Setting; 18] = [
     &USER_DISPLAY_NAME,
+    &USER_LANGUAGE,
     &ROLE_MODEL_PROVIDER,
     &CHATGPT_MODEL,
     &OPENAI_API_KEY,
@@ -369,9 +551,13 @@ static SETTINGS: [&dyn Setting; 13] = [
     &NVIDIA_API_KEY,
     &NVIDIA_MODEL,
     &NVIDIA_BASE_URL,
+    &TRANSLATOR_PROVIDER,
+    &TRANSLATOR_MODEL,
     &CONTEXT_WINDOW_TOKENS,
     &ENABLED,
     &HEARTBEAT,
+    &TRANSLATION_WORDS,
+    &TRANSLATION_TONE,
 ];
 
 /// A service as the settings say it: what a page calls it, what it is and
@@ -692,6 +878,9 @@ pub(crate) fn host_field(name: &str) -> Option<&'static HostField> {
 pub struct HostSettings {
     /// The name the person goes by, trimmed.
     pub user_display_name: SpeakerName,
+    /// The language the person reads, when they chose one; none is the
+    /// language they write in.
+    pub user_language: Option<LanguageTag>,
     /// None until the person chooses one, and no character starts before.
     pub role_model_provider: Option<RoleModelProvider>,
     /// The ChatGPT plan's model, when one is set; see
@@ -706,12 +895,21 @@ pub struct HostSettings {
     pub nvidia_api_key: Option<String>,
     pub nvidia_model: Option<String>,
     pub nvidia_base_url: Option<BaseUrl>,
+    /// The service her translator asks, when one is chosen; see
+    /// [`HostSettings::translator`].
+    pub translator_provider: Option<RoleModelProvider>,
+    /// The model of that service her translator asks, when one is chosen.
+    pub translator_model: Option<String>,
     pub context_window_tokens: NonZeroU64,
     /// Whether the character is switched on.
     pub enabled: bool,
     /// How many minutes apart her moments of her own come while the person
     /// is quiet; none when her heartbeat is off.
     pub heartbeat: Option<NonZeroU32>,
+    /// How some of her words are put for the person.
+    pub translation_words: Vec<TranslationWord>,
+    /// How she sounds, for her translation to keep, when her settings say.
+    pub translation_tone: Option<String>,
 }
 
 impl HostSettings {
@@ -719,6 +917,7 @@ impl HostSettings {
     pub(crate) fn of(fields: &[Field<'_>]) -> Self {
         Self {
             user_display_name: USER_DISPLAY_NAME.value_or_default(fields),
+            user_language: USER_LANGUAGE.value(fields),
             role_model_provider: ROLE_MODEL_PROVIDER.value(fields),
             chatgpt_model: CHATGPT_MODEL.value(fields),
             openai_api_key: OPENAI_API_KEY.value(fields),
@@ -728,10 +927,37 @@ impl HostSettings {
             nvidia_api_key: NVIDIA_API_KEY.value(fields),
             nvidia_model: NVIDIA_MODEL.value(fields),
             nvidia_base_url: NVIDIA_BASE_URL.value(fields),
+            translator_provider: TRANSLATOR_PROVIDER.value(fields),
+            translator_model: TRANSLATOR_MODEL.value(fields),
             context_window_tokens: CONTEXT_WINDOW_TOKENS.value_or_default(fields),
             enabled: ENABLED.value(fields) == Some(true),
             heartbeat: HEARTBEAT.value_or_default(fields),
+            translation_words: TRANSLATION_WORDS.value(fields).unwrap_or_default(),
+            translation_tone: TRANSLATION_TONE.value(fields),
         }
+    }
+
+    /// The settings her translator's own model is built from, while they
+    /// choose it a service: hers, with that service in place of hers and,
+    /// when they choose its model, that model in place of the service's.
+    /// None while it asks the model she speaks with.
+    #[must_use]
+    pub fn translator(&self) -> Option<Self> {
+        let provider = self.translator_provider?;
+        let mut settings = self.clone();
+
+        settings.role_model_provider = Some(provider);
+
+        if let Some(model) = self.translator_model.clone() {
+            match provider {
+                RoleModelProvider::Chatgpt => settings.chatgpt_model = Some(model),
+                RoleModelProvider::Openai => settings.openai_model = model,
+                RoleModelProvider::Anthropic => settings.anthropic_model = model,
+                RoleModelProvider::Nvidia => settings.nvidia_model = Some(model),
+            }
+        }
+
+        Some(settings)
     }
 
     /// The model she asks a ChatGPT plan of `plan` for, such as `plus`: the
@@ -758,6 +984,7 @@ impl fmt::Debug for HostSettings {
         formatter
             .debug_struct("HostSettings")
             .field("user_display_name", &self.user_display_name)
+            .field("user_language", &self.user_language)
             .field("role_model_provider", &self.role_model_provider)
             .field("chatgpt_model", &self.chatgpt_model)
             .field(
@@ -776,9 +1003,13 @@ impl fmt::Debug for HostSettings {
             )
             .field("nvidia_model", &self.nvidia_model)
             .field("nvidia_base_url", &self.nvidia_base_url)
+            .field("translator_provider", &self.translator_provider)
+            .field("translator_model", &self.translator_model)
             .field("context_window_tokens", &self.context_window_tokens)
             .field("enabled", &self.enabled)
             .field("heartbeat", &self.heartbeat)
+            .field("translation_words", &self.translation_words)
+            .field("translation_tone", &self.translation_tone)
             .finish()
     }
 }
