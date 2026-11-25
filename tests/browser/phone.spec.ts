@@ -657,7 +657,7 @@ test("page.phone-bubbles: her phone's window draws a conversation as bubbles, he
   ).toEqual({runsPast: true, atEnd: true});
 });
 
-test("page.phone-messages: in her phone's window, Messages, first on her home screen, opens the conversation as it went through Messages, Sam named at its head: her message at the line's end in the page's blue, his at its start on a card, and nothing written in Telegram; a message committed there joins it", async ({
+test("page.phone-messages: in her phone's window, Messages, first on her home screen, opens the conversation as it went through Messages, Sam named at its head: her message at the line's end in the page's blue, his at its start on a card, and nothing written in Telegram; a message committed there joins it; a conversation longer than her screen scrolls on her phone, its end in sight, and the window, at the size it opens, has nothing to scroll", async ({
   page,
 }) => {
   const model = await startModelServer();
@@ -720,6 +720,40 @@ test("page.phone-messages: in her phone's window, Messages, first on her home sc
     'Are you there?',
     'Still here.',
   ]);
+
+  // Her phone's window as it opens, and messages under one of hers that is
+  // taller than her screen.
+  await page.setViewportSize({width: 372, height: 792});
+  model.answer(
+    reply(
+      Array.from({length: 60}, (_, at) => `Line ${String(at + 1)}.`).join('\n'),
+    ),
+    reply('That is all.'),
+  );
+  await say('Tell me all of it.', 'all');
+  await say('And then?', 'then');
+  await expect(said).toHaveCount(8);
+  await expect
+    .poll(() =>
+      page.evaluate(`(() => {
+        const thread = document.querySelector('.phone-thread-messages');
+        const whole = document.documentElement;
+
+        return {
+          threadRunsPast: thread.scrollHeight > thread.clientHeight,
+          threadAtItsEnd:
+            thread.scrollHeight - thread.clientHeight - thread.scrollTop <= 1,
+          windowScrolls:
+            whole.scrollHeight > whole.clientHeight ||
+            whole.scrollWidth > whole.clientWidth,
+        };
+      })()`),
+    )
+    .toEqual({
+      threadRunsPast: true,
+      threadAtItsEnd: true,
+      windowScrolls: false,
+    });
 });
 
 test("page.phone-read: in her phone's window, under her message in Messages, Delivered while the chat that shows it is not in front, and Read with the time the daemon kept once it is; a message of hers that comes while the person has scrolled away from the chat's end stays Delivered until they scroll back to it", async ({

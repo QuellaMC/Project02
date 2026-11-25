@@ -727,6 +727,16 @@ code {
   white-space: nowrap;
 }
 
+/*
+ * It is placed out of the flow, against the nearest box that is placed
+ * itself: with none, against the window, where it keeps its place in a
+ * conversation however far that has scrolled, and so stands far under the
+ * window and makes the whole window scroll. What holds it is that box.
+ */
+:where(:has(> .visually-hidden)) {
+  position: relative;
+}
+
 .thread {
   flex: 1 1 0;
   min-height: 0;
