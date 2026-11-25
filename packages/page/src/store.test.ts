@@ -56,7 +56,7 @@ const readAt = '2026-09-11T00:00:02.000Z';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 18,
+    protocolVersion: 19,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -72,7 +72,7 @@ function ready(
   turns: readonly RunningTurn[] = [],
 ): GatewayReady {
   return {
-    protocolVersion: 18,
+    protocolVersion: 19,
     health: health(mira),
     confirmations,
     pairings: [],
@@ -412,6 +412,46 @@ describe('web store', () => {
         app: 'messages',
         clientMessageId: 'line-1',
       },
+    ]);
+  });
+
+  it("shows the person's line in the words they wrote when she read it in her own, from a frame or a page, and hers in her own words", () => {
+    const written = 'Would you like some tea?';
+    const live = applyEvent(
+      opened(),
+      progress({
+        kind: 'user_message',
+        messageId: 'm-1',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'お茶はいかが？',
+        written,
+        sentAt,
+        readAt,
+        app: 'messages',
+        source: 'web',
+        clientMessageId: 'line-1',
+      }),
+    );
+    const read = historyPageRead(
+      opened(),
+      conversationId,
+      {},
+      page([
+        {...committed('m-1', 'お茶はいかが？', 'line-1'), written},
+        {
+          ...committed('m-2', 'いただきます。'),
+          translation: 'I would love some.',
+        },
+      ]),
+    );
+
+    expect(live.thread?.messages.map(message => message.text)).toEqual([
+      written,
+    ]);
+    expect(read.thread?.messages.map(message => message.text)).toEqual([
+      written,
+      'いただきます。',
     ]);
   });
 

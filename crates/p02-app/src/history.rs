@@ -373,9 +373,10 @@ impl Segments {
 }
 
 /// The messages `records`, one segment's, committed: each with when it was
-/// sent and the app it is in, and the person's lines with when she read
-/// them, the moment of the record that holds each, and the stamps they
-/// carry. A message of hers an earlier build kept names no app: it is in
+/// sent, the app it is in and its other form when it has one, and the
+/// person's lines with when she read them, the moment of the record that
+/// holds each, and the stamps they carry. A message of hers an earlier
+/// build kept names no app: it is in
 /// the app of the person's line nearest before it in the segment, which it
 /// answered, and in Messages when there is none.
 fn messages_of(records: &[LogRecord]) -> Vec<HistoryMessage> {
@@ -403,6 +404,8 @@ fn messages_of(records: &[LogRecord]) -> Vec<HistoryMessage> {
                 speaker_id: message.speaker_id,
                 speaker_name: message.speaker_name,
                 text: message.text,
+                written: commit.written().cloned(),
+                translation: commit.translation().cloned(),
                 sent_at: message.sent_at,
                 read_at,
                 app: app.to_owned(),

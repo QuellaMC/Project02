@@ -179,6 +179,56 @@ impl fmt::Display for SpeakerName {
     }
 }
 
+/// A language as a BCP 47 tag names it, such as `ja` or `pt-BR`, kept as
+/// written: at most 35 characters, subtags of ASCII letters and digits
+/// joined by `-`, the first 2 to 8 letters and each later one 1 to 8.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct LanguageTag(String);
+
+/// Why a text is not a [`LanguageTag`].
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "not a language tag: subtags of ASCII letters and digits joined by '-', the first 2 to 8 \
+     letters and each later one 1 to 8, 35 characters at most, such as ja or pt-BR"
+)]
+pub struct ParseLanguageTagError;
+
+impl LanguageTag {
+    const MAX_LEN: usize = 35;
+
+    /// # Errors
+    ///
+    /// [`ParseLanguageTagError`] when `value` is not in the pattern.
+    pub fn parse(value: &str) -> Result<Self, ParseLanguageTagError> {
+        let mut subtags = value.split('-');
+        let language = subtags.next().unwrap_or_default();
+        let in_pattern = value.len() <= Self::MAX_LEN
+            && (2..=8).contains(&language.len())
+            && language.bytes().all(|byte| byte.is_ascii_alphabetic())
+            && subtags.all(|subtag| {
+                (1..=8).contains(&subtag.len())
+                    && subtag.bytes().all(|byte| byte.is_ascii_alphanumeric())
+            });
+
+        if in_pattern {
+            Ok(Self(value.to_owned()))
+        } else {
+            Err(ParseLanguageTagError)
+        }
+    }
+
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for LanguageTag {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
+
 /// What a client stamps on a line it carries: the surface it came from, or
 /// the id it submitted the line under, which a repeat of the line reuses. An
 /// ASCII letter or digit, then up to 63 ASCII letters, digits, `:`, `.`, `_`
@@ -395,6 +445,36 @@ mod tests {
             assert_eq!(app_of(stamp.as_ref()), app, "{source:?}");
             assert_eq!(names.name(app), name, "{source:?}");
         }
+    }
+
+    #[test]
+    fn a_language_tag_is_subtags_of_letters_and_digits_its_first_of_letters_alone() {
+        let longest = ["abcdefgh"; 4].join("-");
+        let too_long = format!("{longest}-x");
+
+        for (text, accepted) in [
+            ("ja", true),
+            ("pt-BR", true),
+            ("zh-Hant-TW", true),
+            ("es-419", true),
+            ("abcdefgh-x", true),
+            (longest.as_str(), true),
+            ("j", false),
+            ("abcdefghi", false),
+            ("j4", false),
+            ("ja_JP", false),
+            ("ja-", false),
+            ("-ja", false),
+            ("ja--JP", false),
+            ("ja-abcdefghi", false),
+            ("ja-J\u{e9}", false),
+            ("", false),
+            (too_long.as_str(), false),
+        ] {
+            assert_eq!(LanguageTag::parse(text).is_ok(), accepted, "{text:?}");
+        }
+
+        assert_eq!(LanguageTag::parse("pt-BR").unwrap().as_str(), "pt-BR");
     }
 
     #[test]

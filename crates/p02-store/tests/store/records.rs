@@ -3,15 +3,20 @@
 //! record is taken as it was written, and one that fits no turn is skipped
 //! and named.
 
+use std::path::PathBuf;
+
 use p02_contracts::{DecisionResult, Rang};
 use p02_core::{ClientStamp, Timestamp};
-use p02_store::{EventReceived, LogRecord, RecordBody};
+use p02_store::{EventReceived, LogRecord, RecordBody, SessionLog};
 
 use crate::support::{World, conversation_named, lines_of, session};
 
-const TEA_RECEIVED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_event_received","payloadSummary":{"rawInput":" Tea? ","normalizedCurrentUserMessage":"Tea?"}}"#;
-/// Sam's line, sent half a minute before the turn that took it began.
-const TEA_ASKED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-1"],"visibleMessage":{"id":"conv_a.1:message-1","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Tea?","sentAt":"2026-10-21T08:59:30.000Z"},"source":"web","clientMessageId":"tea"}"#;
+/// Sam writes German, which Mira reads in English: the event keeps what he
+/// wrote.
+const TEA_RECEIVED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_event_received","payloadSummary":{"rawInput":" Tee? ","normalizedCurrentUserMessage":"Tee?"}}"#;
+/// Sam's line as Mira read it, what he wrote beside it, sent half a minute
+/// before the turn that took it began.
+const TEA_ASKED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-1"],"visibleMessage":{"id":"conv_a.1:message-1","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Tea?","sentAt":"2026-10-21T08:59:30.000Z"},"written":"Tee?","source":"web","clientMessageId":"tea"}"#;
 const TEA_ROUND_1: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"role_model_round","round":1,"output":{"toolCalls":[{"name":"character_state.patch","input":{"mood":"warm"}}],"text":"Checking."},"finishReason":"tool_calls","usage":{"promptTokens":1200,"completionTokens":14},"parsedRoleModelDecisionSnapshot":{"result":{"status":"accepted","decision":{"toolCalls":[{"name":"character_state.patch","input":{"mood":"warm"}}],"text":"Checking."}}}}"#;
 /// Round 1 as a record kept a round before rounds were lean: with its
 /// prompt, its raw output and the decision contract's version.
@@ -19,7 +24,8 @@ const TEA_ROUND_1_KEPT_BEFORE: &str = r#"{"eventId":"evt_1","traceId":"trace_1",
 const TEA_CALLED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"tool_call_started","round":1,"toolCallId":"evt_1.trace_1.round-1.1.character_state.patch","toolName":"character_state.patch","toolPluginId":"character-state","toolInput":{"mood":"warm"}}"#;
 const TEA_ANSWERED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"tool_call_finished","round":1,"toolCallId":"evt_1.trace_1.round-1.1.character_state.patch","toolName":"character_state.patch","toolPluginId":"character-state","toolResult":{"status":"accepted","output":{"mood":"warm"}},"runtimePluginEvidence":[{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","pluginId":"character-state","evidenceKind":"tool_invocation","status":"accepted","summary":"Mood set.","redactionLabels":[]}]}"#;
 const TEA_ROUND_2: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"role_model_round","round":2,"output":{"toolCalls":[],"text":"Tea, always."},"finishReason":"stop","usage":{"promptTokens":1260,"completionTokens":4},"parsedRoleModelDecisionSnapshot":{"result":{"status":"accepted","decision":{"toolCalls":[{"name":"visible_reply","input":{"text":"Tea, always."}}]}}}}"#;
-const TEA_REPLIED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-2"],"visibleMessage":{"id":"conv_a.1:message-2","role":"character","speakerId":"mira","speakerName":"Mira","text":"Tea, always.","sentAt":"2026-10-21T09:00:04.000Z"},"app":"messages","round":2}"#;
+/// Mira's reply, with the same words in Sam's German beside it.
+const TEA_REPLIED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"visible_message_committed","visibleMessageIds":["conv_a.1:message-2"],"visibleMessage":{"id":"conv_a.1:message-2","role":"character","speakerId":"mira","speakerName":"Mira","text":"Tea, always.","sentAt":"2026-10-21T09:00:04.000Z"},"translation":"Tee, immer.","app":"messages","round":2}"#;
 const TEA_COMPLETED: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"runtime_turn_completed","status":"completed","visibleMessageIds":["conv_a.1:message-1","conv_a.1:message-2"],"toolCallIds":["evt_1.trace_1.round-1.1.character_state.patch"],"round":2,"commitValidation":{"result":{"status":"accepted","acceptedVisibleReplyText":"Tea, always."}}}"#;
 const TEA_AFTER: &str = r#"{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","kind":"after_turn_committed","status":"completed_with_failures","runtimePluginEvidence":[{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","pluginId":"mem0","evidenceKind":"after_turn_committed","status":"degraded","summary":"Not queued.","redactionLabels":[]}]}"#;
 const BLANK_RECEIVED: &str = r#"{"eventId":"evt_2","traceId":"trace_2","createdAt":"2026-10-21T09:01:00.000Z","kind":"runtime_event_received","payloadSummary":{"rawInput":" \t\n "}}"#;
@@ -35,7 +41,7 @@ const MOMENT_COMPLETED: &str = r#"{"eventId":"evt_4","traceId":"trace_4","create
 const RINGING_RECEIVED: &str = r#"{"eventId":"evt_6","traceId":"trace_6","createdAt":"2026-10-22T07:00:01.000Z","kind":"runtime_event_received","occasion":"moment","rang":[{"app":"Clock","title":"Alarm","body":"Wake Sam","at":"2026-10-22T07:00:00.000Z"},{"app":"Clock","title":"Timer","at":"2026-10-22T07:00:00.500Z"}]}"#;
 /// The continuation of the first segment, carrying its first turn as the
 /// model replays it.
-const CONTINUED: &str = r#"{"eventId":"evt_5","traceId":"trace_5","createdAt":"2026-10-21T09:05:00.000Z","kind":"session_continued","sessionContinuation":{"sessionId":"conv_a.2","continuedFrom":{"sessionId":"conv_a.1","lastEventId":"evt_4"},"summary":"They talked about tea.","summarizedTurnCount":1,"carriedTurns":[{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","userMessage":{"id":"conv_a.1:message-1","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Tea?","sentAt":"2026-10-21T08:59:30.000Z"},"source":"web","toolRounds":[{"round":1,"text":"Checking.","interimReplies":[],"toolCalls":[{"toolCallId":"evt_1.trace_1.round-1.1.character_state.patch","pluginId":"character-state","toolName":"character_state.patch","input":{"mood":"warm"},"result":{"status":"accepted","output":{"mood":"warm"}}}]}],"finalReplies":[{"id":"conv_a.1:message-2","role":"character","speakerId":"mira","speakerName":"Mira","text":"Tea, always.","sentAt":"2026-10-21T09:00:04.000Z"}]}],"summarizer":{"status":"fallback","reason":"The provider has no model to ask."}}}"#;
+const CONTINUED: &str = r#"{"eventId":"evt_5","traceId":"trace_5","createdAt":"2026-10-21T09:05:00.000Z","kind":"session_continued","sessionContinuation":{"sessionId":"conv_a.2","continuedFrom":{"sessionId":"conv_a.1","lastEventId":"evt_4"},"summary":"They talked about tea.","summarizedTurnCount":1,"carriedTurns":[{"eventId":"evt_1","traceId":"trace_1","createdAt":"2026-10-21T09:00:00.000Z","userMessage":{"id":"conv_a.1:message-1","role":"user","speakerId":"local-user","speakerName":"Sam","text":"Tea?","sentAt":"2026-10-21T08:59:30.000Z"},"source":"web","written":"Tee?","toolRounds":[{"round":1,"text":"Checking.","interimReplies":[],"toolCalls":[{"toolCallId":"evt_1.trace_1.round-1.1.character_state.patch","pluginId":"character-state","toolName":"character_state.patch","input":{"mood":"warm"},"result":{"status":"accepted","output":{"mood":"warm"}}}]}],"finalReplies":[{"id":"conv_a.1:message-2","role":"character","speakerId":"mira","speakerName":"Mira","text":"Tea, always.","sentAt":"2026-10-21T09:00:04.000Z"}]}],"summarizer":{"status":"fallback","reason":"The provider has no model to ask."}}}"#;
 
 /// The first segment: a turn with a tool round and the plugins' work after
 /// it, a blank text refused as no line, a turn whose provider failed, and a
@@ -61,9 +67,9 @@ const FIRST_SEGMENT: [&str; 18] = [
     MOMENT_COMPLETED,
 ];
 
-#[test]
-fn a_log_written_by_hand_reads_back_and_re_encodes_to_its_own_bytes() {
-    let world = World::new();
+/// Both segments of `conv_a` in `world`, written by hand: the first, then
+/// its continuation.
+fn written_by_hand(world: &World) -> [(SessionLog, PathBuf); 2] {
     let conversation = conversation_named("conv_a");
 
     world.first_segment(&conversation).unwrap().release();
@@ -73,18 +79,45 @@ fn a_log_written_by_hand_reads_back_and_re_encodes_to_its_own_bytes() {
     assert_eq!(second.session_id(), &session("conv_a.2"));
     second.release();
 
-    for (segment, lines) in [(1, FIRST_SEGMENT.as_slice()), (2, &[CONTINUED])] {
+    [(1, FIRST_SEGMENT.as_slice()), (2, &[CONTINUED])].map(|(segment, lines)| {
         let log = world.log_of(&conversation, segment);
         let path = world.path_of(log.session_id());
 
         std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+        (log, path)
+    })
+}
 
+#[test]
+fn a_log_written_by_hand_reads_back_and_re_encodes_to_its_own_bytes() {
+    let world = World::new();
+
+    for (log, path) in written_by_hand(&world) {
         let replay = log.read().unwrap();
         let encoded: Vec<String> = replay.records().iter().map(LogRecord::to_line).collect();
 
         assert_eq!(encoded, lines_of(&path));
         assert!(replay.skipped_lines().is_empty());
     }
+}
+
+/// The person's words beside a line she read in her own language are its
+/// turn's as the history holds it, and are carried with the turn into the
+/// session that continues it.
+#[test]
+fn what_the_person_wrote_is_its_turn_s_and_survives_a_continued_session() {
+    let world = World::new();
+    let written: Vec<Option<String>> = written_by_hand(&world)
+        .iter()
+        .map(|(log, _)| {
+            log.read().unwrap().history().turns[0]
+                .written
+                .as_ref()
+                .map(ToString::to_string)
+        })
+        .collect();
+
+    assert_eq!(written, [Some("Tee?".to_owned()), Some("Tee?".to_owned())]);
 }
 
 /// A moment's event keeps what rang on her phone, and one that says nothing

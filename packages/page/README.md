@@ -62,7 +62,8 @@ words and the time as the viewer's system writes one, where they are, and
 each bubble says its own on hover; the person's bubbles take their app's
 colour, Telegram's or the page's blue; one sender's messages in a row sit
 close; and the head of the chat names her, while a bubble says whose it is
-only to a reader of the screen. A line of the
+only to a reader of the screen. The person's own line shows the words they
+wrote, also when she read it in her own language. A line of the
 person's not yet committed is drawn as theirs sent now in Messages, and
 under their newest message one line says how far it got: `Sending…`, the
 bubble faint, until the daemon answers; `Delivered` once her inbox has it;

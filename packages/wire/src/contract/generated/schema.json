@@ -2047,7 +2047,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 18
+          "const": 19
         },
         "homeRoot": {
           "type": "string"
@@ -2125,7 +2125,7 @@
       "type": "object",
       "properties": {
         "protocolVersion": {
-          "const": 18
+          "const": 19
         },
         "health": {
           "$ref": "#/$defs/GatewayHealth"
@@ -2183,6 +2183,15 @@
           "$ref": "#/$defs/SpeakerName"
         },
         "text": {
+          "$ref": "#/$defs/VisibleText",
+          "description": "The message as she read it or wrote it."
+        },
+        "written": {
+          "description": "The person's line as they wrote it, when she read it in her own\nlanguage.",
+          "$ref": "#/$defs/VisibleText"
+        },
+        "translation": {
+          "description": "Her message in the person's language, when she speaks another.",
           "$ref": "#/$defs/VisibleText"
         },
         "sentAt": {
@@ -2212,7 +2221,7 @@
         "sentAt",
         "app"
       ],
-      "description": "A committed message as the scrollback shows it: when it was sent, the\napp it is in, by its id, and for the person's line when she read it and\nthe stamps its client put on it."
+      "description": "A committed message as the scrollback shows it: when it was sent, the\napp it is in, by its id, its other form when she speaks another\nlanguage than the person, and for the person's line when she read it\nand the stamps its client put on it."
     },
     "HistoryOutcome": {
       "oneOf": [
@@ -4580,6 +4589,11 @@
               "$ref": "#/$defs/SpeakerName"
             },
             "text": {
+              "$ref": "#/$defs/VisibleText",
+              "description": "The line as she read it: in her language when she speaks another\nthan the person."
+            },
+            "written": {
+              "description": "The line as the person wrote it, when she read it in her own\nlanguage.",
               "$ref": "#/$defs/VisibleText"
             },
             "sentAt": {
@@ -4630,6 +4644,10 @@
               "$ref": "#/$defs/SpeakerName"
             },
             "text": {
+              "$ref": "#/$defs/VisibleText"
+            },
+            "translation": {
+              "description": "The same words in the person's language, when she speaks\nanother.",
               "$ref": "#/$defs/VisibleText"
             },
             "sentAt": {

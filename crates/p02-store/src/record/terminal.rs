@@ -72,6 +72,9 @@ pub enum TurnRejection {
 pub enum RuntimeRejection {
     /// The person's line was not one.
     InputValidationRejected,
+    /// The person's line could not be put into the character's language,
+    /// so it never reached her.
+    LineNotTranslated,
     /// A plugin refused the turn before the model was called.
     PluginBeforeRoleModelCallRejected,
     /// The runtime failed before the turn could complete.
@@ -79,8 +82,9 @@ pub enum RuntimeRejection {
 }
 
 impl RuntimeRejection {
-    const ALL: [Self; 3] = [
+    const ALL: [Self; 4] = [
         Self::InputValidationRejected,
+        Self::LineNotTranslated,
         Self::PluginBeforeRoleModelCallRejected,
         Self::RuntimeFailure,
     ];
@@ -89,6 +93,7 @@ impl RuntimeRejection {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::InputValidationRejected => "input_validation_rejected",
+            Self::LineNotTranslated => "line_not_translated",
             Self::PluginBeforeRoleModelCallRejected => BEFORE_ROLE_MODEL_CALL_REJECTION,
             Self::RuntimeFailure => "runtime_failure",
         }

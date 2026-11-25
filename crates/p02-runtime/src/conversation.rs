@@ -9,7 +9,7 @@ use p02_characters::Persona;
 use p02_contracts::{ConversationTurn, Rang, RoleModelAdapter};
 use p02_core::{
     AppNames, CharacterProfile, ClientStamp, ConversationId, EventId, EventIdentity, MessageId,
-    Participant, SessionId, SpeakerName, Timestamp,
+    Participant, SessionId, SpeakerName, Timestamp, VisibleMessageRole, VisibleText,
 };
 use p02_plugins::PluginHost;
 use p02_shared::{Identifier, error_chain};
@@ -58,8 +58,7 @@ pub struct Conversation {
     skipped: Option<String>,
 }
 
-/// What became of a line, or of a moment of hers, which is neither a
-/// duplicate nor a blank text.
+/// What became of a line, or of a moment of hers.
 #[derive(Debug)]
 pub enum Delivery {
     /// A turn took the line already, as `message_id`: nothing ran, and
@@ -68,9 +67,11 @@ pub enum Delivery {
         client_message_id: ClientStamp,
         message_id: MessageId,
     },
-    /// The text was no line: its event and the refusal are in the log, and
-    /// no message is.
-    InputRejected { message: String },
+    /// The line was refused before anything of it was committed: a text
+    /// that is no line, or one that could not be put into her language.
+    /// Its event and the refusal are in the log, no message is, and she
+    /// was never asked.
+    LineRefused(RejectedTurn),
     /// The turn completed, and the session continued after it when it was
     /// due to.
     Completed(CompletedTurn),
@@ -83,9 +84,10 @@ pub enum Delivery {
 
 /// What a turn is answered with: the name the person goes by, the names of
 /// the apps they write in, the apps her messages go in now, the
-/// character's model, her plugins, and the size of her model's window in
-/// tokens, as her settings say. Its keeper brings it up to date before her
-/// turn, and the turn before each request to the model after its first.
+/// character's model, her plugins, the size of her model's window in
+/// tokens, as her settings say, and her translator. Its keeper brings it up
+/// to date before her turn, and the turn before each request to the model
+/// after its first.
 #[async_trait]
 pub trait Mind: Send + Sync {
     fn person(&self) -> &SpeakerName;
@@ -101,6 +103,10 @@ pub trait Mind: Send + Sync {
 
     fn context_window(&self) -> NonZeroU64;
 
+    /// Who reads the person and her to each other, each in their own
+    /// language; none when nobody translates for her.
+    fn translator(&self) -> Option<&dyn Translator>;
+
     /// Built again from her settings when they changed since it was
     /// built: true when it was.
     ///
@@ -108,6 +114,44 @@ pub trait Mind: Send + Sync {
     ///
     /// The sentence that says why her settings no longer build her.
     async fn refresh(&mut self) -> Result<bool, String>;
+}
+
+/// Who reads the person and her to each other, each in their own language:
+/// the person's line put into hers, and her message into the person's.
+/// Each is handed `before`, the conversation's newest messages before the
+/// one to translate, oldest first.
+#[async_trait]
+pub trait Translator: Send + Sync {
+    /// The person's `line`, put into her language.
+    async fn for_her(&self, line: &VisibleText, before: &[Said<'_>]) -> Translation;
+
+    /// Her `message`, put into the language of the person's, `newest`, their
+    /// newest message as they wrote it; none while they never wrote.
+    async fn for_person(
+        &self,
+        message: &VisibleText,
+        before: &[Said<'_>],
+        newest: Option<&VisibleText>,
+    ) -> Translation;
+}
+
+/// A message of the conversation as its author wrote it, and whose it is:
+/// the person's or hers, whatever name it was said under.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Said<'a> {
+    pub role: VisibleMessageRole,
+    pub text: &'a VisibleText,
+}
+
+/// What a translator answers.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Translation {
+    /// The message, put into the other language.
+    Translated(VisibleText),
+    /// The message is in that language already.
+    Already,
+    /// None came: why, in a sentence.
+    Failed(String),
 }
 
 /// What a thread keeps on the disk, which only a blocking thread touches.

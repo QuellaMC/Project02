@@ -20,6 +20,16 @@ with an outcome of p02-wire, never an error.
   thread opens and her lines wait until a change gives her one. Her stop
   lets the turn in flight finish; the lines behind it wait for her next
   start.
+- **Her translator**, for a character whose package names her language,
+  is the model she speaks with, asked for a plain completion as the
+  summarizer asks it: it puts the person's line into her language, and her
+  message into the language of the person's newest message, or English
+  while they never wrote, reading the conversation before it, each message
+  cut to its first 500 characters. An answer that is the message as it was
+  written leaves it so; a blank answer, a failed request or a model with
+  no plain completion is none, said in a sentence, and the person is told
+  of a message of hers left untranslated in her maintenance note as it
+  happens.
 - **Her heartbeat.** While she is ready and her heartbeat is not off, a
   moment of her own is due one period after she has been quiet since:
   since her thread opened in this run, her last turn ended, or her boot
@@ -85,8 +95,9 @@ with an outcome of p02-wire, never an error.
   her phone says so on the stream, and her actor, while she runs, reads
   its rings again.
 - **The stream** hears each turn as it goes: its messages once they are
-  on disk, each with when it was sent and the app it is in, and the
-  person's line with when she read it, the moment her turn took it, as the
+  on disk, each with when it was sent, the app it is in and its other form
+  when she speaks another language than the person, and the person's line
+  with when she read it, the moment her turn took it, as the
   scrollback reads them, where a message of hers an earlier build kept is
   in the app of the person's line before it, the turn as it runs now,
   whenever that changes: whether she is writing, from each round's request

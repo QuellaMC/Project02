@@ -26,9 +26,9 @@ function character(id: string, displayName: string): CharacterSummary {
 }
 
 const ready: GatewayReady = {
-  protocolVersion: 18,
+  protocolVersion: 19,
   health: {
-    protocolVersion: 18,
+    protocolVersion: 19,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},

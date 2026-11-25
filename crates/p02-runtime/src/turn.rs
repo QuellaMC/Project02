@@ -1,7 +1,7 @@
 //! A turn through to its end, begun by the person's line or by a moment of
-//! the character's own: its records in the order they happen, the plugins'
-//! hooks around the model's rounds, what the turn announces as it goes,
-//! and the session's continuation after it.
+//! the character's own: its records in the order they happen, what her
+//! translator is asked, the plugins' hooks around the model's rounds, what
+//! the turn announces as it goes, and the session's continuation after it.
 
 use std::num::NonZeroU32;
 use std::time::Duration;
@@ -15,8 +15,8 @@ use p02_contracts::{
     Evidence, ModelToolCall, Rang, ToolCallId, ToolCallResult, TurnIdentity, TurnText,
 };
 use p02_core::{
-    BlankTextError, ClientStamp, EventIdentity, MessageId, SessionId, SpeakerName, Timestamp,
-    UserLine, VisibleMessage, VisibleMessageRole, app_of,
+    ClientStamp, EventIdentity, MessageId, SessionId, Timestamp, UserLine, VisibleMessage,
+    VisibleMessageRole, VisibleText, app_of,
 };
 use p02_plugins::{
     BeforeCallOutcome, PhaseStatus, PluginHost, PreparedContext, ProposedToolCall, ToolCallReport,
@@ -25,7 +25,7 @@ use p02_role_model::{
     ModelRound, Opening, Person, Reply, Rounds, RoutedToolCall, TurnInput, TurnOutcome, TurnSink,
     select_history_window, today_note,
 };
-use p02_shared::{Identifier, error_chain};
+use p02_shared::{Identifier, error_chain, sentence};
 use p02_store::{
     AfterTurnCommitted, ConversationHistory, EventReceived, Judgement, MessageCommitted,
     PayloadSummary, RecordBody, RoundRecord, RuntimeRejection, StorageError, ToolCallFinished,
@@ -35,7 +35,9 @@ use tokio::sync::Mutex;
 use tokio::task::JoinError;
 
 use crate::continuation;
-use crate::conversation::{Character, Delivery, Disk, Mind, Submission, on_disk};
+use crate::conversation::{
+    Character, Delivery, Disk, Mind, Said, Submission, Translation, Translator, on_disk,
+};
 
 /// What a turn announces, in order. A message is announced once its record
 /// is on disk, so the stream never says more than the log. Each round is
@@ -43,17 +45,21 @@ use crate::conversation::{Character, Delivery, Disk, Mind, Submission, on_disk};
 /// the calls it made after.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Progress {
-    /// The person's line, committed, with the stamps its client put on it
-    /// and when she read it: the moment her turn took it, its record's.
+    /// The person's line, committed as she read it, with what they wrote
+    /// when she read it in her own language, the stamps its client put on
+    /// it and when she read it: the moment her turn took it, its record's.
     UserMessage {
         message: VisibleMessage,
+        written: Option<VisibleText>,
         source: ClientStamp,
         client_message_id: ClientStamp,
         read_at: Timestamp,
     },
-    /// A reply, committed, with the id of the app it went in.
+    /// A reply, committed, with the same words in the person's language
+    /// when they read another, and the id of the app it went in.
     VisibleReply {
         message: VisibleMessage,
+        translation: Option<VisibleText>,
         app: String,
     },
     /// A round began: her model is asked for it.
@@ -88,10 +94,10 @@ pub struct CompletedTurn {
     pub post_commit_failures: Vec<String>,
 }
 
-/// A turn that ended refused, what it committed kept.
+/// A turn that ended refused, what it committed kept: the reason its
+/// record names, and the sentence the person is told.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RejectedTurn {
-    /// The reason its record names.
     pub reason: &'static str,
     pub message: String,
 }
@@ -116,17 +122,21 @@ const RUNTIME_FAILURE: &str = "The runtime failed before the turn could complete
 /// stands.
 const BLANK_REFUSAL: &str = "Provide a non-empty message.";
 
+/// How many of the conversation's newest messages a translator is handed
+/// before the one it translates.
+const BEFORE_TRANSLATED: usize = 6;
+
 type Listener<'a> = dyn Fn(Progress) + Send + Sync + 'a;
 
-/// What a turn begins from: the person's line, as it came and as it was
-/// taken, with the stamps its client put on it and when it was sent; or a
-/// moment of her own, which nobody began, with what rang on her phone when
-/// its ringing began it.
+/// What a turn begins from: the person's text as it came and the line it
+/// was taken as, none when nothing was left of it, with the stamps its
+/// client put on it and when it was sent; or a moment of her own, which
+/// nobody began, with what rang on her phone when its ringing began it.
 #[derive(Debug)]
 pub(crate) enum Occasion {
     Line {
         raw: String,
-        line: UserLine,
+        line: Option<UserLine>,
         source: ClientStamp,
         client_message_id: ClientStamp,
         sent_at: Timestamp,
@@ -140,15 +150,14 @@ impl Occasion {
         match self {
             Self::Line { raw, line, .. } => EventReceived::Text(PayloadSummary {
                 raw_input: raw.clone(),
-                normalized_current_user_message: Some(line.clone().into()),
+                normalized_current_user_message: line.clone().map(Into::into),
             }),
             Self::Moment(rang) => EventReceived::Moment(rang.clone()),
         }
     }
 }
 
-/// Takes `submission` through the turn its line begins, or refuses a
-/// blank text as no line.
+/// Takes `submission` through the turn its line begins.
 pub(crate) async fn take(
     disk: &mut Option<Disk>,
     submission: Submission<'_>,
@@ -156,13 +165,9 @@ pub(crate) async fn take(
     mind: &mut dyn Mind,
     listener: &Listener<'_>,
 ) -> Delivery {
-    let line = match UserLine::new(submission.line) {
-        Ok(line) => line,
-        Err(BlankTextError) => return refuse(disk, submission.line).await,
-    };
     let occasion = Occasion::Line {
         raw: submission.line.to_owned(),
-        line,
+        line: UserLine::new(submission.line).ok(),
         source: submission.source,
         client_message_id: submission.client_message_id,
         sent_at: submission.sent_at,
@@ -183,24 +188,30 @@ pub(crate) async fn run(
     listener: &Listener<'_>,
 ) -> Delivery {
     let identity = EventIdentity::mint();
-    let person = mind.person().clone();
-    let named = match Person::of(&person) {
+    let named = match Person::of(mind.person()) {
         Person::Named(name) => Some(name.clone()),
         Person::Unnamed => None,
     };
-    let begun = match begin(disk, &identity, occasion, person).await {
+    let begun = match begin(disk, &identity, occasion.received()).await {
         Ok(begun) => begun,
         Err(error) => return failed(disk, &identity, Vec::new(), Vec::new(), error).await,
     };
+    let turns = &begun.history.turns;
+    let opened = match open(disk, &identity, occasion, turns, character, &*mind).await {
+        Ok(opened) => opened,
+        Err(ended) => return ended,
+    };
     let zone = begun.now.time_zone().clone();
-    let (opening, committed) = match begun.opened {
+    let (opening, committed, written) = match opened {
         Opened::Line {
             message,
+            written,
             source,
             client_message_id,
         } => {
             listener(Progress::UserMessage {
                 message: message.clone(),
+                written: written.clone(),
                 source: source.clone(),
                 client_message_id,
                 read_at: identity.created_at().clone(),
@@ -211,10 +222,10 @@ pub(crate) async fn run(
                     source,
                 },
                 vec![message],
+                written,
             )
         }
         Opened::Moment(rang) => {
-            let turns = &begun.history.turns;
             let last = turns.iter().rev().find(|turn| turn.user_message.is_some());
             // Every message after the person's last line is hers: she
             // answered it once the newest message is hers.
@@ -234,13 +245,15 @@ pub(crate) async fn run(
                     rang,
                 },
                 Vec::new(),
+                None,
             )
         }
     };
-    let window = select_history_window(&begun.history.turns, mind.context_window());
+    let window = select_history_window(turns, mind.context_window());
     let mut turn = OpenTurn {
         identity: identity.clone(),
         opening,
+        written,
         now: begun.now,
         character,
         listener,
@@ -250,6 +263,7 @@ pub(crate) async fn run(
             character: character.profile.clone(),
             person: named,
         }),
+        history: turns,
         window: window
             .iter()
             .flat_map(ConversationTurn::visible_messages)
@@ -278,26 +292,160 @@ pub(crate) async fn run(
     delivery
 }
 
-/// Records a blank text as its event, taken as no line, and the runtime's
-/// refusal of it.
-async fn refuse(disk: &mut Option<Disk>, raw: &str) -> Delivery {
-    let identity = EventIdentity::mint();
-    let message = BLANK_REFUSAL.to_owned();
+/// The turn as far as what began it: the session's history, read before
+/// anything of the turn is committed, the session it runs in, and when it
+/// began, where the person is.
+struct Begun {
+    history: ConversationHistory,
+    session: SessionId,
+    now: Zoned,
+}
+
+/// How a turn opened: with the person's line, committed as she reads it,
+/// with what they wrote when she reads it in her own language, under the
+/// stamps its client put on it; or with a moment of hers, which commits
+/// nothing, and what rang when her phone's ringing began it.
+enum Opened {
+    Line {
+        message: VisibleMessage,
+        written: Option<VisibleText>,
+        source: ClientStamp,
+        client_message_id: ClientStamp,
+    },
+    Moment(Vec<Rang>),
+}
+
+/// Records what came in, `received`, then reads the history and the
+/// machine's time zone, all on the disk's side.
+async fn begin(
+    disk: &mut Option<Disk>,
+    identity: &EventIdentity,
+    received: EventReceived,
+) -> Result<Begun, RunTurnError> {
+    let identity = identity.clone();
+
+    on_disk(disk, move |disk| {
+        disk.append(&identity, RecordBody::EventReceived(received))?;
+
+        let replay = disk.writer.replay()?;
+
+        Ok(Begun {
+            history: replay.history(),
+            session: replay.session().id().clone(),
+            now: where_they_are(identity.created_at()),
+        })
+    })
+    .await
+}
+
+/// Opens the turn `occasion` began, after the history `turns`: a moment of
+/// hers as it is, or the person's line, committed under the name `mind`
+/// says they go by, in her language when her translator puts it there,
+/// which is handed the newest messages of `turns` as their authors wrote
+/// them. A text that is no line, and a line that could not be put into her
+/// language, are refused before anything of them is committed, and the
+/// delivery that ends the turn is the refusal, or the failure of what it
+/// could not write.
+async fn open(
+    disk: &mut Option<Disk>,
+    identity: &EventIdentity,
+    occasion: Occasion,
+    turns: &[ConversationTurn],
+    character: &Character,
+    mind: &dyn Mind,
+) -> Result<Opened, Delivery> {
+    let (line, source, client_message_id, sent_at) = match occasion {
+        Occasion::Moment(rang) => return Ok(Opened::Moment(rang)),
+        Occasion::Line { line: None, .. } => {
+            let blank = RuntimeRejection::InputValidationRejected;
+
+            return Err(refuse(disk, identity, blank, BLANK_REFUSAL.to_owned()).await);
+        }
+        Occasion::Line {
+            line: Some(line),
+            source,
+            client_message_id,
+            sent_at,
+            ..
+        } => (VisibleText::from(line), source, client_message_id, sent_at),
+    };
+    let translation = match mind.translator() {
+        Some(translator) => {
+            translator
+                .for_her(&line, &said_before(turns, &[], None))
+                .await
+        }
+        // Nobody translates for her: she reads the line as it was written.
+        None => Translation::Already,
+    };
+    let (text, written) = match translation {
+        Translation::Translated(text) => (text, Some(line)),
+        Translation::Already => (line, None),
+        Translation::Failed(reason) => {
+            let unread = RuntimeRejection::LineNotTranslated;
+            let message = sentence(&format!(
+                "Your message did not reach {}, because it could not be put into her \
+                 language: {reason}",
+                character.profile.display_name
+            ));
+
+            return Err(refuse(disk, identity, unread, message).await);
+        }
+    };
+    let committed = {
+        let (identity, person) = (identity.clone(), mind.person().clone());
+        let (kept, source, client_message_id) =
+            (written.clone(), source.clone(), client_message_id.clone());
+
+        on_disk(disk, move |disk| {
+            let message = disk
+                .writer
+                .replay()?
+                .session()
+                .user_message(text, person, sent_at);
+
+            disk.append(
+                &identity,
+                RecordBody::MessageCommitted(MessageCommitted::user(
+                    message.clone(),
+                    kept,
+                    source,
+                    client_message_id,
+                )),
+            )?;
+            Ok(message)
+        })
+        .await
+    };
+
+    match committed {
+        Ok(message) => Ok(Opened::Line {
+            message,
+            written,
+            source,
+            client_message_id,
+        }),
+        Err(error) => Err(failed(disk, identity, Vec::new(), Vec::new(), error).await),
+    }
+}
+
+/// Refuses the person's line of the turn `identity`, whose event is
+/// recorded, before anything of it is committed, as the runtime's
+/// `rejection`, telling them `message`.
+async fn refuse(
+    disk: &mut Option<Disk>,
+    identity: &EventIdentity,
+    rejection: RuntimeRejection,
+    message: String,
+) -> Delivery {
     let refused = {
-        let (identity, raw, message) = (identity.clone(), raw.to_owned(), message.clone());
+        let (identity, message) = (identity.clone(), message.clone());
 
         on_disk(disk, move |disk| {
             disk.append(
                 &identity,
-                RecordBody::EventReceived(EventReceived::Text(PayloadSummary {
-                    raw_input: raw,
-                    normalized_current_user_message: None,
-                })),
-            )?;
-            disk.append(
-                &identity,
                 RecordBody::TurnRejected(TurnRejected::new(
-                    TurnRejection::Runtime(RuntimeRejection::InputValidationRejected),
+                    TurnRejection::Runtime(rejection),
                     message,
                 )),
             )
@@ -306,85 +454,45 @@ async fn refuse(disk: &mut Option<Disk>, raw: &str) -> Delivery {
     };
 
     match refused {
-        Ok(()) => Delivery::InputRejected { message },
-        Err(error) => failed(disk, &identity, Vec::new(), Vec::new(), error).await,
+        Ok(()) => Delivery::LineRefused(RejectedTurn {
+            reason: rejection.as_str(),
+            message,
+        }),
+        Err(error) => failed(disk, identity, Vec::new(), Vec::new(), error).await,
     }
 }
 
-/// The turn as far as what began it: the session's history, read before
-/// anything of the turn is committed, the session it runs in, how it
-/// opened, and when it began, where the person is.
-struct Begun {
-    history: ConversationHistory,
-    session: SessionId,
-    opened: Opened,
-    now: Zoned,
-}
-
-/// How a turn opened: with the person's line, committed under the stamps
-/// its client put on it, or with a moment of hers, which commits nothing,
-/// and what rang when her phone's ringing began it.
-enum Opened {
-    Line {
-        message: VisibleMessage,
-        source: ClientStamp,
-        client_message_id: ClientStamp,
-    },
-    Moment(Vec<Rang>),
-}
-
-/// Records the event of `occasion`, reads the history, then commits the
-/// person's line, said under `person`, when a line began the turn, and
-/// reads the machine's time zone, all on the disk's side.
-async fn begin(
-    disk: &mut Option<Disk>,
-    identity: &EventIdentity,
-    occasion: Occasion,
-    person: SpeakerName,
-) -> Result<Begun, RunTurnError> {
-    let identity = identity.clone();
-
-    on_disk(disk, move |disk| {
-        disk.append(&identity, RecordBody::EventReceived(occasion.received()))?;
-
-        let replay = disk.writer.replay()?;
-        let history = replay.history();
-        let session = replay.session().id().clone();
-        let opened = match occasion {
-            Occasion::Line {
-                line,
-                source,
-                client_message_id,
-                sent_at,
-                ..
-            } => {
-                let message = replay.session().user_message(line, person, sent_at);
-
-                disk.append(
-                    &identity,
-                    RecordBody::MessageCommitted(MessageCommitted::user(
-                        message.clone(),
-                        source.clone(),
-                        client_message_id.clone(),
-                    )),
-                )?;
-                Opened::Line {
-                    message,
-                    source,
-                    client_message_id,
-                }
-            }
-            Occasion::Moment(rang) => Opened::Moment(rang),
-        };
-
-        Ok(Begun {
-            history,
-            session,
-            opened,
-            now: where_they_are(identity.created_at()),
+/// The newest messages of the conversation before one to translate, oldest
+/// first, each as its author wrote it: those of `turns`, the history a turn
+/// read, then those it `committed` so far, whose line, when she read it in
+/// her own language, the person wrote as `written`.
+fn said_before<'m>(
+    turns: &'m [ConversationTurn],
+    committed: &'m [VisibleMessage],
+    written: Option<&'m VisibleText>,
+) -> Vec<Said<'m>> {
+    let mut said: Vec<Said<'m>> = turns
+        .iter()
+        .flat_map(|turn| {
+            turn.visible_messages()
+                .map(|message| as_written(message, turn.written.as_ref()))
         })
-    })
-    .await
+        .chain(committed.iter().map(|message| as_written(message, written)))
+        .collect();
+
+    said.split_off(said.len().saturating_sub(BEFORE_TRANSLATED))
+}
+
+/// `message` as its author wrote it: hers as it stands, and the person's as
+/// `written` says when she read it in her own language.
+fn as_written<'m>(message: &'m VisibleMessage, written: Option<&'m VisibleText>) -> Said<'m> {
+    Said {
+        role: message.role,
+        text: match message.role {
+            VisibleMessageRole::User => written.unwrap_or(&message.text),
+            VisibleMessageRole::Character => &message.text,
+        },
+    }
 }
 
 /// How long before `now` the person's `line` was sent.
@@ -432,6 +540,9 @@ fn where_they_are(moment: &Timestamp) -> Zoned {
 struct OpenTurn<'a> {
     identity: EventIdentity,
     opening: Opening,
+    /// The person's line as they wrote it, when one began the turn and she
+    /// reads it in her own language.
+    written: Option<VisibleText>,
     /// When it began, where the person is: the day the model is told it
     /// is, first of its notes, the time a moment's note tells, and the zone
     /// each line's heading tells its time in.
@@ -442,6 +553,9 @@ struct OpenTurn<'a> {
     /// shown a clone with the text as it stands then, which shares its
     /// cancellation.
     hooks: p02_plugins::Turn,
+    /// The history the turn read, which her translator is handed the end
+    /// of.
+    history: &'a [ConversationTurn],
     /// The visible messages of the history window the model replays.
     window: Vec<MessageId>,
     /// What the conversation's earlier segments came to, shown ahead of
@@ -520,6 +634,7 @@ impl OpenTurn<'_> {
             let round = Round {
                 turn: self,
                 host: mind.host(),
+                translator: mind.translator(),
             };
 
             if let Some(outcome) = rounds.run(mind.adapter(), &round).await? {
@@ -732,6 +847,33 @@ impl OpenTurn<'_> {
         failed
     }
 
+    /// Her `message` as `translator` puts it into the person's language,
+    /// handed the conversation's newest messages before it, the history's
+    /// and those the turn `committed` so far, and the person's newest
+    /// message, this turn's line when one began it, each as its author
+    /// wrote it.
+    async fn for_person(
+        &self,
+        translator: &dyn Translator,
+        message: &VisibleText,
+        committed: &[VisibleMessage],
+    ) -> Translation {
+        let before = said_before(self.history, committed, self.written.as_ref());
+        let newest = self
+            .written
+            .as_ref()
+            .or_else(|| self.opening.line())
+            .or_else(|| {
+                self.history.iter().rev().find_map(|turn| {
+                    let line = turn.user_message.as_ref()?;
+
+                    Some(as_written(line, turn.written.as_ref()).text)
+                })
+            });
+
+        translator.for_person(message, &before, newest).await
+    }
+
     /// Records a call that came back, and what it recorded.
     async fn finish(
         &self,
@@ -752,11 +894,13 @@ impl OpenTurn<'_> {
     }
 }
 
-/// A round of the turn: the turn, and the plugins the round's request was
-/// made with, which run the calls it makes.
+/// A round of the turn: the turn, the plugins the round's request was made
+/// with, which run the calls it makes, and her translator, when she has
+/// one, which puts each message she says into the person's language.
 struct Round<'r, 'a> {
     turn: &'r OpenTurn<'a>,
     host: &'r PluginHost,
+    translator: Option<&'r dyn Translator>,
 }
 
 #[async_trait]
@@ -769,13 +913,30 @@ impl TurnSink for Round<'_, '_> {
         self.turn.append(RecordBody::ModelRound(record)).await
     }
 
+    /// Commits `reply` once her translator, when she has one, has put it
+    /// into the person's language, so the message's time is its commit's,
+    /// after the translation; one already in their language, or that could
+    /// not be put into it, is committed as she wrote it alone.
     async fn commit_reply(&self, reply: Reply<'_>) -> Result<VisibleMessage, RunTurnError> {
         let turn = self.turn;
+        let mut ledger = turn.ledger.lock().await;
+        let translation = match self.translator {
+            Some(translator) => {
+                turn.for_person(translator, reply.text, &ledger.committed)
+                    .await
+            }
+            // Nobody translates for her: the person reads her as she wrote.
+            None => Translation::Already,
+        };
+        let translation = match translation {
+            Translation::Translated(translation) => Some(translation),
+            Translation::Already | Translation::Failed(_) => None,
+        };
         let identity = turn.identity.clone();
         let text = reply.text.clone();
+        let kept = translation.clone();
         let round = reply.round;
         let app = reply.app.to_owned();
-        let mut ledger = turn.ledger.lock().await;
         let evidence = ledger.prepared.clone();
         let name = turn.character.profile.display_name.clone();
         let message = on_disk(&mut ledger.disk, move |disk| {
@@ -789,6 +950,7 @@ impl TurnSink for Round<'_, '_> {
                 &identity,
                 RecordBody::MessageCommitted(MessageCommitted::character(
                     message.clone(),
+                    kept,
                     round,
                     app,
                     evidence,
@@ -802,6 +964,7 @@ impl TurnSink for Round<'_, '_> {
         drop(ledger);
         (turn.listener)(Progress::VisibleReply {
             message: message.clone(),
+            translation,
             app: reply.app.to_owned(),
         });
         Ok(message)

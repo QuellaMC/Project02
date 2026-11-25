@@ -37,6 +37,8 @@ fn said(number: u64, text: &str, minutes: i64) -> HistoryMessage {
         speaker_id: Identifier::new(if hers { "mira" } else { "local-user" }).unwrap(),
         speaker_name: SpeakerName::new(if hers { "Mira" } else { "Sam" }).unwrap(),
         text: VisibleText::normalize(text).unwrap(),
+        written: None,
+        translation: None,
         sent_at: sent(minutes),
         read_at: None,
         app: "telegram".to_owned(),

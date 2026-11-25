@@ -1452,11 +1452,13 @@ function pairingOf(
   };
 }
 
+/** A committed message from a frame or a page: the person's own line in the words they wrote, when she read it in hers. */
 function messageOf(source: {
   readonly messageId: string;
   readonly role: VisibleMessageRole;
   readonly speakerName: string;
   readonly text: string;
+  readonly written?: string;
   readonly sentAt: string;
   readonly readAt?: string;
   readonly app: string;
@@ -1466,7 +1468,7 @@ function messageOf(source: {
     messageId: source.messageId,
     role: source.role,
     speakerName: source.speakerName,
-    text: source.text,
+    text: source.written ?? source.text,
     sentAt: source.sentAt,
     ...(source.readAt === undefined ? {} : {readAt: source.readAt}),
     app: source.app,

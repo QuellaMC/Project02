@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use p02_core::{CharacterProfile, SpeakerName};
+use p02_core::{CharacterProfile, LanguageTag, SpeakerName};
 use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -12,14 +12,19 @@ const FORMAT: &str = "project02.character.v1";
 pub(crate) const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
 /// A character as her package defines her: who she is, one line about her
-/// when it gives one, the persona the model is given, the version of that
-/// content, and the plugins she expects.
+/// when it gives one, the language she speaks when it names one, the
+/// persona the model is given, the version of that content, and the
+/// plugins she expects.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CharacterDefinition {
     pub profile: CharacterProfile,
     /// What a person adding her from a file reads of her before she is
     /// added; nothing else reads it.
     pub about: Option<String>,
+    /// The language she speaks, as her package writes its tag: she and the
+    /// person then read each other through a translator. Without one,
+    /// nobody translates for her.
+    pub language: Option<LanguageTag>,
     pub persona: Persona,
     pub version: CharacterVersion,
     pub plugins: PluginExpectations,
@@ -139,6 +144,10 @@ pub enum ParseDescriptorError {
          space at either end"
     )]
     InvalidAbout,
+    #[error(
+        "character package identity.language must be a language tag such as \"ja\" or \"pt-BR\""
+    )]
+    InvalidLanguage,
     #[error("character package persona.system must be an array of one section or more")]
     NoPersona,
     #[error("character package persona.system[{0}] must be a non-blank string")]
@@ -172,6 +181,9 @@ impl ParseDescriptorError {
             Self::InvalidAbout => {
                 "The line about the character in this file is not one line of at most 128 \
                  characters."
+            }
+            Self::InvalidLanguage => {
+                "Her language is not a language tag such as \"ja\" or \"pt-BR\"."
             }
             Self::NotAnObject("persona") | Self::NoPersona | Self::InvalidSection(_) => {
                 "This file does not say who the character is."
@@ -212,6 +224,7 @@ impl CharacterDefinition {
         Ok(Self {
             profile: profile(descriptor)?,
             about: about(descriptor)?,
+            language: language(descriptor)?,
             persona: persona(descriptor)?,
             version: version(descriptor)?,
             plugins: plugins(descriptor)?,
@@ -242,6 +255,19 @@ fn about(descriptor: &Map<String, Value>) -> Result<Option<String>, ParseDescrip
                 .filter(|about| SpeakerName::new(about).is_ok())
                 .map(str::to_owned)
                 .ok_or(ParseDescriptorError::InvalidAbout)
+        })
+        .transpose()
+}
+
+/// The language she speaks, when her package names one.
+fn language(descriptor: &Map<String, Value>) -> Result<Option<LanguageTag>, ParseDescriptorError> {
+    object(descriptor.get("identity"), "identity")?
+        .get("language")
+        .map(|language| {
+            language
+                .as_str()
+                .and_then(|language| LanguageTag::parse(language).ok())
+                .ok_or(ParseDescriptorError::InvalidLanguage)
         })
         .transpose()
 }
@@ -405,6 +431,7 @@ mod tests {
             ("/identity/pronouns", json!("she/her")),
             ("/identity/displayName", json!(emoji.repeat(128))),
             ("/identity/about", json!("A quiet one, who notices things.")),
+            ("/identity/language", json!("pt-BR")),
             ("/persona/system", json!(["First.", "Second."])),
             ("/meta/version", json!("999999999.0.01")),
             (
@@ -424,6 +451,10 @@ mod tests {
         assert_eq!(
             definition.about.as_deref(),
             Some("A quiet one, who notices things.")
+        );
+        assert_eq!(
+            definition.language.as_ref().map(LanguageTag::as_str),
+            Some("pt-BR")
         );
         assert_eq!(definition.persona.sections(), ["First.", "Second."]);
         assert_eq!(definition.version.as_str(), "999999999.0.01");
@@ -454,12 +485,10 @@ mod tests {
                 .plugins,
             PluginExpectations::default()
         );
-        assert_eq!(
-            CharacterDefinition::from_descriptor(&with(&[]))
-                .unwrap()
-                .about,
-            None
-        );
+        let plain = CharacterDefinition::from_descriptor(&with(&[])).unwrap();
+
+        assert_eq!(plain.about, None);
+        assert_eq!(plain.language, None);
     }
 
     #[test]
@@ -497,6 +526,13 @@ mod tests {
             (
                 with(&[("/identity/about", json!("Quiet.\nAnd more."))]),
                 "identity.about",
+            ),
+            (
+                with(&[
+                    ("/identity/language", json!("ja_JP")),
+                    ("/persona/system", json!([])),
+                ]),
+                "identity.language",
             ),
             (
                 with(&[("/persona/system", json!([]))]),

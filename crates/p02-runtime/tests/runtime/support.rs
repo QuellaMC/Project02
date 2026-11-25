@@ -1,6 +1,7 @@
 //! What the tests build a thread from: a canonical temporary home, Mira as
 //! her bundled package defines her, a model whose answers are scripted, a
-//! plugin whose hooks are, and an ear for what a turn says.
+//! translator and a plugin whose answers and hooks are, and an ear for
+//! what a turn says.
 
 use std::collections::VecDeque;
 use std::fmt;
@@ -15,14 +16,18 @@ use p02_contracts::{
     PluginError, ProvidedTool, ProviderAnswer, ProviderFailure, RoleModelAdapter, RuntimePlugin,
     TextCompletionRequest, ToolCall, ToolCallOutcome, ToolInputContract, WrittenCall,
 };
-use p02_core::{AppNames, ClientStamp, ConversationId, SpeakerName, Timestamp};
+use p02_core::{
+    AppNames, ClientStamp, ConversationId, SpeakerName, Timestamp, VisibleMessageRole, VisibleText,
+};
 use p02_phone::{Account, Chats};
 use p02_plugins::{
     AppCatalog, AppInternet, ConfigControl, ConfirmationDecision, ConfirmationRequest, Confirmer,
     Connections, FieldChange, FieldChangeOutcome, PluginHost, PluginSettings, ReadConfigError,
     Unanswered,
 };
-use p02_runtime::{Character, Conversation, Delivery, Mind, Progress, Submission};
+use p02_runtime::{
+    Character, Conversation, Delivery, Mind, Progress, Said, Submission, Translation, Translator,
+};
 use p02_shared::{BaseUrl, DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, LogRecord, RecordKind};
 use p02_wire::{ActivationStatus, AppConnection, HistoryMessage};
@@ -180,11 +185,13 @@ static SAM: LazyLock<SpeakerName> = LazyLock::new(|| SpeakerName::new("Sam").unw
 static APPS: LazyLock<AppNames> = LazyLock::new(|| AppNames::new([("telegram", "Telegram")]));
 
 /// What the thread's tests answer a line with: settings never change it,
-/// her messages go in Messages alone, and its turns never outgrow its
-/// window.
+/// her messages go in Messages alone, its turns never outgrow its window,
+/// and a translator reads the person and her to each other when there is
+/// one.
 pub(crate) struct Fixed<'c> {
     pub(crate) model: &'c Model,
     pub(crate) host: &'c PluginHost,
+    pub(crate) translator: Option<&'c Interpreter>,
 }
 
 #[async_trait]
@@ -213,6 +220,11 @@ impl Mind for Fixed<'_> {
         ROOMY
     }
 
+    fn translator(&self) -> Option<&dyn Translator> {
+        self.translator
+            .map(|translator| translator as &dyn Translator)
+    }
+
     async fn refresh(&mut self) -> Result<bool, String> {
         Ok(false)
     }
@@ -225,6 +237,8 @@ pub(crate) struct Chat {
     pub(crate) conversation: Option<Conversation>,
     pub(crate) model: Model,
     pub(crate) host: PluginHost,
+    /// None while nobody translates for her.
+    pub(crate) translator: Option<Interpreter>,
     pub(crate) heard: Heard,
 }
 
@@ -240,8 +254,26 @@ impl Chat {
             conversation: Some(conversation),
             model: Model::default(),
             host,
+            translator: None,
             heard: Heard::default(),
         }
+    }
+
+    /// A fresh thread, as [`Chat::new`] has it, read through a translator
+    /// whose answers are `answers`, in order.
+    pub(crate) fn translated(answers: impl IntoIterator<Item = Translation>) -> Self {
+        Self {
+            translator: Some(Interpreter {
+                answers: Mutex::new(answers.into_iter().collect()),
+                asked: Mutex::default(),
+            }),
+            ..Self::new(&[])
+        }
+    }
+
+    /// What her translator was asked so far, in order.
+    pub(crate) fn translator_asked(&self) -> Vec<Asked> {
+        std::mem::take(&mut *self.translator.as_ref().unwrap().asked.lock().unwrap())
     }
 
     /// Sam says `line`, submitted from the web page as `client_message_id`.
@@ -272,11 +304,31 @@ impl Chat {
                 &mut Fixed {
                     model: &self.model,
                     host: &self.host,
+                    translator: self.translator.as_ref(),
                 },
                 &|progress| {
                     hearing(&progress);
                     heard.push(progress);
                 },
+            )
+            .await
+    }
+
+    /// A moment of hers that nothing on her phone rang for.
+    pub(crate) async fn moment(&mut self) -> Delivery {
+        let heard = &self.heard;
+
+        self.conversation
+            .as_mut()
+            .unwrap()
+            .moment(
+                Vec::new(),
+                &mut Fixed {
+                    model: &self.model,
+                    host: &self.host,
+                    translator: self.translator.as_ref(),
+                },
+                &|progress| heard.push(progress),
             )
             .await
     }
@@ -382,6 +434,81 @@ impl RoleModelAdapter for Model {
     }
 }
 
+/// What a translator was asked: the person's line, to put into her
+/// language, or a message of hers, into the person's; the conversation
+/// before it, each message under the name of whose it is, and for hers,
+/// the person's newest message.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum Asked {
+    ForHer {
+        line: String,
+        before: Vec<String>,
+    },
+    ForPerson {
+        message: String,
+        before: Vec<String>,
+        newest: Option<String>,
+    },
+}
+
+/// A translator that answers each request as scripted, in order, and keeps
+/// what each was handed. A request it has no answer for fails.
+#[derive(Debug)]
+pub(crate) struct Interpreter {
+    answers: Mutex<VecDeque<Translation>>,
+    asked: Mutex<Vec<Asked>>,
+}
+
+impl Interpreter {
+    fn answer(&self, asked: Asked) -> Translation {
+        self.asked.lock().unwrap().push(asked);
+        self.answers
+            .lock()
+            .unwrap()
+            .pop_front()
+            .unwrap_or_else(|| Translation::Failed("no translation was scripted.".to_owned()))
+    }
+}
+
+#[async_trait]
+impl Translator for Interpreter {
+    async fn for_her(&self, line: &VisibleText, before: &[Said<'_>]) -> Translation {
+        self.answer(Asked::ForHer {
+            line: line.to_string(),
+            before: lines(before),
+        })
+    }
+
+    async fn for_person(
+        &self,
+        message: &VisibleText,
+        before: &[Said<'_>],
+        newest: Option<&VisibleText>,
+    ) -> Translation {
+        self.answer(Asked::ForPerson {
+            message: message.to_string(),
+            before: lines(before),
+            newest: newest.map(ToString::to_string),
+        })
+    }
+}
+
+/// Each message of `before` as `Sam: text`, the person's, or `Mira: text`,
+/// hers.
+fn lines(before: &[Said<'_>]) -> Vec<String> {
+    before
+        .iter()
+        .map(|said| {
+            let name = match said.role {
+                VisibleMessageRole::User => "Sam",
+                VisibleMessageRole::Character => "Mira",
+            };
+
+            format!("{name}: {}", said.text)
+        })
+        .collect()
+}
+
 /// What a turn said, in the order it said it.
 #[derive(Debug, Default)]
 pub(crate) struct Heard(Mutex<Vec<Progress>>);
@@ -397,13 +524,25 @@ impl Heard {
     }
 }
 
-/// What a turn said, each piece its kind and then what it names.
+/// What a turn said, each piece its kind and then what it names, a message
+/// with its other form after it when it has one.
 pub(crate) fn told(progress: &[Progress]) -> Vec<String> {
+    let said = |kind: &str, message: &VisibleText, other: Option<&VisibleText>| match other {
+        Some(other) => format!("{kind} {message} ({other})"),
+        None => format!("{kind} {message}"),
+    };
+
     progress
         .iter()
         .map(|progress| match progress {
-            Progress::UserMessage { message, .. } => format!("user_message {}", message.text),
-            Progress::VisibleReply { message, .. } => format!("visible_reply {}", message.text),
+            Progress::UserMessage {
+                message, written, ..
+            } => said("user_message", &message.text, written.as_ref()),
+            Progress::VisibleReply {
+                message,
+                translation,
+                ..
+            } => said("visible_reply", &message.text, translation.as_ref()),
             Progress::RoundBegan => "round_began".to_owned(),
             Progress::RoundEnded => "round_ended".to_owned(),
             Progress::ToolCallsRequested { round, tool_names } => {
