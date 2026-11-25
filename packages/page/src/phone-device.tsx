@@ -240,7 +240,7 @@ function ThreadView({
   readonly now: number;
   readonly session: PhoneSession;
 }) {
-  const {app, messages, person, message} = thread;
+  const {app, messages, person, language, message} = thread;
   const {locale, timeZone} = Intl.DateTimeFormat().resolvedOptions();
   const laid = laidOut(
     {messages, between: false, pending: []},
@@ -294,6 +294,7 @@ function ThreadView({
                 own={placed.own}
                 speaker={placed.message.speakerName}
                 text={placed.message.text}
+                lang={language}
                 placement={placed}
               />
             ))

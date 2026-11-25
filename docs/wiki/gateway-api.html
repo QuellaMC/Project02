@@ -329,7 +329,9 @@
               → <code>GatewayHealth</code>: protocol version, home root, config
               and package diagnostics, the roster with each character's state,
               whether she comes with the app (<code>builtIn</code>: she can be
-              switched off, never removed) and her last maintenance failure,
+              switched off, never removed), the language she speaks when her
+              package names one (<code>language</code>, see Her language) and
+              her last maintenance failure,
               <code>connectors</code>: for
               each built-in connector, whether a process of it is on the stream,
               and the bots it last said it runs, and <code>accounts</code>:
@@ -1630,7 +1632,9 @@ data: {…}</code></pre>
         of hers that cannot be put into the person's is committed in her words
         alone, and <code>maintenance_failed</code> says so. A character whose
         package names no language, or the one the person chose to read, is
-        never translated.
+        never translated. Her summary in health carries the tag as her
+        package wrote it, as <code>language</code>, absent when it names
+        none.
       </p>
 
       <h2>What a client never has to notice</h2>

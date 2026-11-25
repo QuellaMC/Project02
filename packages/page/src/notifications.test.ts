@@ -7,8 +7,13 @@ const conversationId = 'conv-1';
 /** When every message of these tests was sent, and the person's read: the rule reads neither. */
 const sentAt = '2026-11-24T10:00:00.000Z';
 
-/** A message of Mira's committed in `app`, as the stream says it. */
-function hers(messageId: string, text: string, app = 'messages'): GatewayEvent {
+/** A message of Mira's committed in `app`, as the stream says it, with the same words in the person's language when it carries them. */
+function hers(
+  messageId: string,
+  text: string,
+  app = 'messages',
+  translation?: string,
+): GatewayEvent {
   return {
     kind: 'turn_progress',
     characterId: 'mira',
@@ -19,6 +24,7 @@ function hers(messageId: string, text: string, app = 'messages'): GatewayEvent {
       speakerId: 'mira',
       speakerName: 'Mira',
       text,
+      ...(translation === undefined ? {} : {translation}),
       sentAt,
       app,
     },
@@ -26,7 +32,7 @@ function hers(messageId: string, text: string, app = 'messages'): GatewayEvent {
 }
 
 describe('when the desktop app shows a notification', () => {
-  it('shows one for a message of hers committed in Messages while the window does not have the focus, with her name and her words whole, and only once', () => {
+  it("shows one for a message of hers committed in Messages while the window does not have the focus, with her name and her words whole, in the person's language when it carries them so, and only once", () => {
     const words = Array.from(
       {length: 12},
       (_, at) => `Line ${String(at + 1)} of what I wanted to tell you.`,
@@ -38,6 +44,13 @@ describe('when the desktop app shows a notification', () => {
     expect(notificationFor(notified, hers('m1', words), false)).toBeUndefined();
     expect(
       notificationFor(notified, hers('m2', 'Still up?'), false)?.notification,
+    ).toEqual({title: 'Mira', body: 'Still up?'});
+    expect(
+      notificationFor(
+        notified,
+        hers('m3', 'まだ起きてる？', 'messages', 'Still up?'),
+        false,
+      )?.notification,
     ).toEqual({title: 'Mira', body: 'Still up?'});
   });
 

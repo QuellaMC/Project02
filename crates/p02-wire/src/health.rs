@@ -1,7 +1,7 @@
 //! Health: the daemon's whole state in one read, each installed character
 //! as it reports her, and what an explicit start of one came to.
 
-use p02_core::{SpeakerName, Timestamp};
+use p02_core::{LanguageTag, SpeakerName, Timestamp};
 use p02_shared::{Identifier, vocabulary};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -78,6 +78,10 @@ pub struct PersonAccount {
 pub struct CharacterSummary {
     pub id: Identifier,
     pub display_name: SpeakerName,
+    /// The language she speaks, as her package names it, when it names
+    /// one: she and the person read each other through a translator.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub language: Option<LanguageTag>,
     pub enabled: bool,
     /// Whether she comes with the app: she can be switched off, never
     /// removed.

@@ -29,9 +29,15 @@ function record(home: string): unknown {
   return JSON.parse(readFileSync(join(home, 'daemon.json'), 'utf8'));
 }
 
-/** A character package as a home's `characters/<id>` directory holds it. */
-function characterPackage(id: string, displayName: string) {
-  return {'project02.character.json': characterJson(id, displayName)};
+/** A character package as a home's `characters/<id>` directory holds it, its descriptor holding the parts of `descriptor` too. */
+function characterPackage(
+  id: string,
+  displayName: string,
+  descriptor: object = {},
+) {
+  return {
+    'project02.character.json': characterJson(id, displayName, descriptor),
+  };
 }
 
 /** The character's state in a ready frame's snapshot. */
@@ -283,12 +289,14 @@ it('lifecycle.crash-lease-reclaimed: after SIGKILL the record still names the de
   });
 });
 
-it('lifecycle.roster-boot: at boot every enabled character starts, and a disabled one is not started: health shows it switched off and not_started', async () => {
+it('lifecycle.roster-boot: at boot every enabled character starts, and a disabled one is not started: health shows it switched off and not_started, and names the language of a character whose package names one, and none for the others', async () => {
   const daemon = await startDaemon(
     createHome({
       characters: {
         nova: characterPackage('nova', 'Nova'),
-        zeta: characterPackage('zeta', 'Zeta'),
+        zeta: characterPackage('zeta', 'Zeta', {
+          identity: {id: 'zeta', displayName: 'Zeta', language: 'ja'},
+        }),
       },
       'character-data': {
         mira: {'config.json': configJson({project02: {enabled: false}})},
@@ -311,13 +319,20 @@ it('lifecycle.roster-boot: at boot every enabled character starts, and a disable
     })(),
   );
 
-  expect(await wireOf(daemon).health()).toMatchObject({
-    characters: [
-      {id: 'mira', enabled: false, state: 'not_started'},
-      {id: 'nova', enabled: true, state: 'ready'},
-      {id: 'zeta', enabled: true, state: 'ready'},
-    ],
-  });
+  const {characters} = (await wireOf(daemon).health()) as {
+    readonly characters: readonly Record<string, unknown>[];
+  };
+
+  expect(characters).toMatchObject([
+    {id: 'mira', enabled: false, state: 'not_started'},
+    {id: 'nova', enabled: true, state: 'ready'},
+    {id: 'zeta', enabled: true, state: 'ready'},
+  ]);
+  expect(characters.map(character => character['language'])).toEqual([
+    undefined,
+    undefined,
+    'ja',
+  ]);
 });
 
 it('lifecycle.no-model: with no AI service chosen she needs a model, saying what to choose as her view does, and a line sent to her waits until choosing a service starts her and she answers it; a service taken away while she runs leaves her needing one at once, and a line sent to her then waits in her inbox with nothing trying her again by itself, until a service is chosen again and she answers it', async () => {

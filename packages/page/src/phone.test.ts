@@ -367,23 +367,16 @@ describe("her phone's window", () => {
     );
   });
 
-  it('names her as health lists her, says why in place of her phone when it cannot be read until a read can, and draws the soonest of what rings', () => {
+  it('names her and the language she speaks as health lists her, says why in place of her phone when it cannot be read until a read can, and draws the soonest of what rings', () => {
     const nova = initialPhoneState('nova');
+    const listed = {...mira, id: 'nova', displayName: 'Nova', language: 'ja'};
     let state = phoneReady(nova, ready(health(mira)));
 
-    expect(state.name).toBeUndefined();
+    expect([state.name, state.language]).toEqual([undefined, undefined]);
     expect(screenOf(state)).toEqual({kind: 'blank'});
-    state = healthSaid(
-      state,
-      health(mira, {...mira, id: 'nova', displayName: 'Nova'}),
-    );
-    expect(state.name).toBe('Nova');
-    expect(
-      healthSaid(
-        state,
-        health(mira, {...mira, id: 'nova', displayName: 'Nova'}),
-      ),
-    ).toBe(state);
+    state = healthSaid(state, health(mira, listed));
+    expect([state.name, state.language]).toEqual(['Nova', 'ja']);
+    expect(healthSaid(state, health(mira, listed))).toBe(state);
 
     state = phoneRead(watching(), {
       status: 'refused',

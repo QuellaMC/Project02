@@ -83,6 +83,8 @@ export type PhoneState = {
   readonly connection: Connection;
   /** Her name as the daemon's health lists her; none while it does not. */
   readonly name?: string | undefined;
+  /** The language she speaks, as health names it; none while it names none. */
+  readonly language?: string | undefined;
   /** Her phone as last read. */
   readonly phone?: HerPhone;
   readonly shows: Shows;
@@ -139,6 +141,8 @@ export type OnScreen =
       readonly messages: readonly Message[];
       /** The person, by the name their newest message goes by; none before they wrote. */
       readonly person?: string | undefined;
+      /** The language she speaks, which every message on her phone is in; none while her package names none. */
+      readonly language?: string | undefined;
       /** Why her conversation cannot be shown, in a sentence. */
       readonly message?: string | undefined;
       /** Which page of her conversation this is: it changes as a page lands, and when the app does. */
@@ -297,16 +301,19 @@ export function askSettled(
   return {...state, asks};
 }
 
-/** Who she is as the daemon's health says it now: her name, while it lists her. */
+/** Who she is as the daemon's health says it now: her name, and the language she speaks, while it lists her. */
 export function healthSaid(
   state: PhoneState,
   health: GatewayHealth,
 ): PhoneState {
-  const name = health.characters.find(
+  const her = health.characters.find(
     character => character.id === state.characterId,
-  )?.displayName;
+  );
+  const [name, language] = [her?.displayName, her?.language];
 
-  return name === state.name ? state : {...state, name};
+  return name === state.name && language === state.language
+    ? state
+    : {...state, name, language};
 }
 
 /** The address will never work again: the window says why, in place of her phone. */
@@ -585,9 +592,10 @@ function viewOn(
 /**
  * `app`, an app messages come in, as her phone shows it: what went through
  * it of her conversation as the window holds it, the person by the name
- * their newest message goes by, and why her conversation cannot be shown,
- * when it cannot. In Messages, each message of hers the person read says
- * when, as her phone keeps the read; Telegram tells nobody.
+ * their newest message goes by, the language she speaks, which all of it
+ * is in, and why her conversation cannot be shown, when it cannot. In
+ * Messages, each message of hers the person read says when, as her phone
+ * keeps the read; Telegram tells nobody.
  */
 function threadOn(state: PhoneState, app: PhoneApp): OnScreen {
   const {thread} = state;
@@ -599,6 +607,7 @@ function threadOn(state: PhoneState, app: PhoneApp): OnScreen {
     app,
     messages: readUpTo(said, read).filter(message => message.app === app.id),
     person: said.findLast(message => message.role === 'user')?.speakerName,
+    language: state.language,
     message: state.unopened ?? thread?.unread,
     page: `${app.id} ${thread?.stale === undefined ? 'read' : 'reading'}`,
   };

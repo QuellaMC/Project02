@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use p02_characters::discover;
 use p02_config::{Sections, config_view, connector_config_view};
 use p02_core::{
-    ClientStamp, ConversationId, MessageId, SpeakerName, Timestamp, VisibleMessageRole, VisibleText,
+    ClientStamp, ConversationId, LanguageTag, MessageId, SpeakerName, Timestamp,
+    VisibleMessageRole, VisibleText,
 };
 use p02_shared::{DanglingLinks, Identifier, canonical_path};
 use p02_store::{CharacterData, Home, SettingsDocument};
@@ -405,6 +406,7 @@ fn written() -> Vec<(&'static str, Value)> {
         characters: vec![CharacterSummary {
             id: id("mira"),
             display_name: mira.clone(),
+            language: Some(LanguageTag::parse("ja").unwrap()),
             enabled: true,
             built_in: true,
             state: RosterState::NeedsModel,

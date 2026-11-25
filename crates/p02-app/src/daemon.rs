@@ -976,6 +976,7 @@ impl Daemon {
         CharacterSummary {
             id: definition.profile.id.clone(),
             display_name: definition.profile.display_name.clone(),
+            language: definition.language.clone(),
             enabled,
             built_in: is_bundled(&definition.profile.id),
             state: health.as_ref().map(|health| health.state).into(),

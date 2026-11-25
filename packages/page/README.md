@@ -62,8 +62,15 @@ words and the time as the viewer's system writes one, where they are, and
 each bubble says its own on hover; the person's bubbles take their app's
 colour, Telegram's or the page's blue; one sender's messages in a row sit
 close; and the head of the chat names her, while a bubble says whose it is
-only to a reader of the screen. The person's own line shows the words they
-wrote, also when she read it in her own language. A line of the
+only to a reader of the screen. With a character who speaks another
+language, as health says, a message shows what was written and, where it
+has them, the same words in the other's language under a hairline, a size
+smaller: the person's line as they wrote it over what she read, hers over
+its translation. What is in her language carries her language's tag, and
+what carries a tag is drawn without the system's own font, which on a
+machine set to Chinese or Korean is that language's: so a Japanese line
+has Japanese letterforms everywhere. Her message box asks the person to
+write in their own language. A line of the
 person's not yet committed is drawn as theirs sent now in Messages, and
 under their newest message one line says how far it got: `Sending…`, the
 bubble faint, until the daemon answers; `Delivered` once her inbox has it;
@@ -85,7 +92,8 @@ the roster until her chat opens: one dot however many wait, the tab's
 own, so a reload starts without.
 In the desktop app, a message of hers the stream commits in Messages
 while the main window does not have the focus has the app show a
-notification, her name over her words, once for each message, by the
+notification, her name over her words, or over their translation when
+they have one, once for each message, by the
 rule of `notifications.ts`, pure and tested in Node: none for her writing,
 a page of the scrollback or a snapshot, for what she sends in Telegram,
 or while the window is in front. The first asks the system's permission,
@@ -260,7 +268,9 @@ drawn as its thread, never read as a view: once one is on screen the
 window opens her conversation as the chat does and reads its newest page
 by the chat's rules, `store.ts`'s, and a message the stream commits joins
 it as it joins the chat; no earlier page is read. It shows what went
-through that app alone, laid out by `thread-layout.ts` as the chat is and
+through that app alone, the person's lines as she read them and no
+translation, each marked with her language, laid out by `thread-layout.ts`
+as the chat is and
 mirrored, since it is her phone: hers at the line's end in the app's
 colour and the person's at its start on a card, a time where time has
 passed and no app's name, one app being on screen; her typing is not

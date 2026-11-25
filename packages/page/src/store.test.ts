@@ -415,10 +415,10 @@ describe('web store', () => {
     ]);
   });
 
-  it("shows the person's line in the words they wrote when she read it in her own, from a frame or a page, and hers in her own words", () => {
+  it("keeps both forms of a message as the wire gives them, from a frame or a page: the person's line as she read it and as they wrote it, hers in her words and in theirs", () => {
     const written = 'Would you like some tea?';
-    const live = applyEvent(
-      opened(),
+    const translation = 'I would love some.';
+    const live = [
       progress({
         kind: 'user_message',
         messageId: 'm-1',
@@ -432,27 +432,33 @@ describe('web store', () => {
         source: 'web',
         clientMessageId: 'line-1',
       }),
-    );
+      progress({
+        kind: 'visible_reply',
+        messageId: 'm-2',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'いただきます。',
+        translation,
+        sentAt,
+        app: 'messages',
+      }),
+    ].reduce(applyEvent, opened());
     const read = historyPageRead(
       opened(),
       conversationId,
       {},
       page([
         {...committed('m-1', 'お茶はいかが？', 'line-1'), written},
-        {
-          ...committed('m-2', 'いただきます。'),
-          translation: 'I would love some.',
-        },
+        {...committed('m-2', 'いただきます。'), translation},
       ]),
     );
 
-    expect(live.thread?.messages.map(message => message.text)).toEqual([
-      written,
-    ]);
-    expect(read.thread?.messages.map(message => message.text)).toEqual([
-      written,
-      'いただきます。',
-    ]);
+    for (const state of [live, read]) {
+      expect(state.thread?.messages).toMatchObject([
+        {text: 'お茶はいかが？', written},
+        {text: 'いただきます。', translation},
+      ]);
+    }
   });
 
   it("says a line is delivered once the daemon answers that her inbox has it, now or already, and not delivered when it refuses it or cannot queue it, saying why; a duplicate is the line in the log, and no answer after a line's end moves it", () => {
@@ -1400,8 +1406,12 @@ describe('web store', () => {
     expect(away.notices).toEqual([]);
   });
 
-  it("applies roster events, clears a maintenance note on a fresh start, and keeps another conversation's progress for it", () => {
-    let state = opened();
+  it("applies roster events, clears a maintenance note on a fresh start, keeps the language she speaks, and keeps another conversation's progress for it", () => {
+    const speaking: CharacterSummary = {...mira, language: 'ja'};
+    let state = applyEvent(opened(), {
+      kind: 'health_changed',
+      health: health(speaking),
+    });
 
     state = applyEvent(state, {
       kind: 'state_changed',
@@ -1421,7 +1431,7 @@ describe('web store', () => {
       state: 'ready',
     });
 
-    expect(state.health?.characters[0]).toEqual(mira);
+    expect(state.health?.characters[0]).toEqual(speaking);
 
     state = applyEvent(state, {
       kind: 'maintenance_failed',
@@ -1446,7 +1456,7 @@ describe('web store', () => {
       state: 'ready',
     });
 
-    expect(state.health?.characters[0]).toEqual(mira);
+    expect(state.health?.characters[0]).toEqual(speaking);
 
     const away = applyEvent(
       state,

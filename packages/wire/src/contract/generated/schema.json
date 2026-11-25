@@ -1032,6 +1032,10 @@
         "displayName": {
           "$ref": "#/$defs/SpeakerName"
         },
+        "language": {
+          "description": "The language she speaks, as her package names it, when it names\none: she and the person read each other through a translator.",
+          "$ref": "#/$defs/LanguageTag"
+        },
         "enabled": {
           "type": "boolean"
         },
@@ -2301,6 +2305,10 @@
     "Identifier": {
       "type": "string",
       "description": "A Project02 identifier: an ASCII letter, then up to 127 ASCII letters,\ndigits, `.`, `_` or `-`. Characters, plugins and tools are named by one."
+    },
+    "LanguageTag": {
+      "type": "string",
+      "description": "A language as a BCP 47 tag names it, such as `ja` or `pt-BR`, kept as\nwritten: at most 35 characters, subtags of ASCII letters and digits\njoined by `-`, the first 2 to 8 letters and each later one 1 to 8."
     },
     "LayoutCard": {
       "type": "object",

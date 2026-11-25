@@ -13,6 +13,7 @@ import {
 } from '../conformance/harness/home.ts';
 import {
   calling,
+  completion,
   finish,
   reply,
   startModelServer,
@@ -306,6 +307,82 @@ test("page.chat-apps: a line from the page and her answer, then a line from Tele
     'Mira:',
     'Mira:',
   ]);
+});
+
+test("page.translated: with a character who speaks another language, the person's bubble shows their words and under them what she read, hers her words and under them their translation, what is in her language marked with it; her message box asks for the person's own language; and her phone's Messages shows the person's line as she read it, marked with her language as hers is, with no translation anywhere", async ({
+  context,
+  page,
+}) => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(
+    createHome({
+      'config.json': configJson({project02: model.settings}),
+      characters: {
+        kana: {
+          'project02.character.json': characterJson('kana', 'Kana', {
+            identity: {id: 'kana', displayName: 'Kana', language: 'ja'},
+          }),
+        },
+      },
+    }),
+  );
+  const composer = page.getByRole('textbox', {name: 'Message Kana'});
+  const person = page.locator('.bubble-own');
+  const her = page.locator('.bubble-theirs');
+
+  model.answer(
+    completion('お茶はいかが？'),
+    reply('いただきます。'),
+    completion('I would love some.'),
+  );
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: /^Kana\b/u}).click();
+  await expect(composer).toHaveAttribute(
+    'placeholder',
+    'Write in your own language',
+  );
+  await composer.fill('Would you like some tea?');
+  await composer.press('Enter');
+  await expect(her.locator('.bubble-translation')).toHaveText(
+    'I would love some.',
+  );
+  await expect(her.locator('.bubble-text')).toHaveText('いただきます。');
+  await expect(person.locator('.bubble-text')).toHaveText(
+    'Would you like some tea?',
+  );
+  await expect(person.locator('.bubble-translation')).toHaveText(
+    'お茶はいかが？',
+  );
+  // Only what is in her language says which it is.
+  await expect(page.locator('.messages [lang]')).toHaveText([
+    'お茶はいかが？',
+    'いただきます。',
+  ]);
+  await expect(page.locator('.messages [lang="ja"]')).toHaveCount(2);
+
+  for (const bubble of [person, her]) {
+    const [words, translation] = await Promise.all([
+      bubble.locator('.bubble-text').boundingBox(),
+      bubble.locator('.bubble-translation').boundingBox(),
+    ]);
+
+    expect(
+      words !== null &&
+        translation !== null &&
+        translation.y + near >= words.y + words.height,
+    ).toBe(true);
+  }
+
+  const phone = await context.newPage();
+
+  await phone.goto(`${daemon.origin}/?phone=kana#token=${daemon.token}`);
+  await phone.getByRole('button', {name: 'Messages', exact: true}).click();
+  await expect(phone.locator('.phone-thread .bubble-text')).toHaveText([
+    'お茶はいかが？',
+    'いただきます。',
+  ]);
+  await expect(phone.locator('.phone-thread [lang="ja"]')).toHaveCount(2);
+  await expect(phone.locator('.bubble-translation')).toHaveCount(0);
 });
 
 test('page.own-turn: a moment of hers in which she says nothing shows nothing, one whose model fails raises no notice, and her message in a moment of her own appears in the open thread with no dots while she writes it', async ({

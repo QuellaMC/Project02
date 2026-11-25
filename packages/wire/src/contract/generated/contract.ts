@@ -209,7 +209,12 @@ export type CharacterRuntimeState = "starting" | "ready" | "needs_model" | "stop
 /**
  * One installed character, as health reports her.
  */
-export type CharacterSummary = { id: Identifier, displayName: SpeakerName, enabled: boolean, 
+export type CharacterSummary = { id: Identifier, displayName: SpeakerName, 
+/**
+ * The language she speaks, as her package names it, when it names
+ * one: she and the person read each other through a translator.
+ */
+language?: LanguageTag, enabled: boolean, 
 /**
  * Whether she comes with the app: she can be switched off, never
  * removed.
@@ -501,6 +506,13 @@ export type HistoryRefusal = "unknown_conversation" | "invalid_page";
 export type Identifier = string;
 
 export type JsonValue = number | string | boolean | ReadonlyArray<JsonValue> | { [key in string]: JsonValue } | null;
+
+/**
+ * A language as a BCP 47 tag names it, such as `ja` or `pt-BR`, kept as
+ * written: at most 35 characters, subtags of ASCII letters and digits
+ * joined by `-`, the first 2 to 8 letters and each later one 1 to 8.
+ */
+export type LanguageTag = string;
 
 /**
  * One card of a section's layout: rows of its fields, under a title and

@@ -66,6 +66,10 @@
   --red-ink: #d70015;
   /* Telegram's own colour, the same in light and dark. */
   --telegram: #0f7fb0;
+  /* On the person's bubble, in whichever app's colour: the hairline above a translation. */
+  --own-rule: rgba(255, 255, 255, 0.32);
+  /* And the translation's words, the same in light and dark. */
+  --own-quiet: rgba(255, 255, 255, 0.78);
   /*
    * The dock's motion, as the approved prototype times it: it opens easing
    * out, and closes a little quicker, easing in and out. The chat's lines
@@ -143,6 +147,7 @@
     --edge-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.14);
     --green-ink: #30d158;
     --red-ink: #ff6961;
+    --own-rule: rgba(255, 255, 255, 0.3);
   }
 }
 
@@ -838,6 +843,33 @@ code {
 
 .bubble-theirs {
   align-self: flex-start;
+}
+
+/*
+ * Words marked with their language are drawn in its own letterforms. The
+ * system's font, first for everything else, is another language's on a
+ * machine set to Chinese or Korean and would draw a Japanese line in that
+ * language's shapes; without it, each mark picks its own.
+ */
+body [lang] {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto,
+    sans-serif;
+}
+
+/* Under a bubble's words, 6px apart, the same words in the other's language, a size smaller, past a hairline 6px above them. */
+.bubble-translation {
+  display: block;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--divider);
+  font-size: 13px;
+  color: var(--secondary);
+}
+
+.bubble-own .bubble-translation {
+  border-top-color: var(--own-rule);
+  color: var(--own-quiet);
 }
 
 /* Under a message of the same sender's with nothing between, 2px apart where the thread's lines are 8px. */

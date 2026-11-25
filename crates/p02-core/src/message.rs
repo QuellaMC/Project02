@@ -182,7 +182,8 @@ impl fmt::Display for SpeakerName {
 /// A language as a BCP 47 tag names it, such as `ja` or `pt-BR`, kept as
 /// written: at most 35 characters, subtags of ASCII letters and digits
 /// joined by `-`, the first 2 to 8 letters and each later one 1 to 8.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema, TS)]
+#[serde(try_from = "String")]
 pub struct LanguageTag(String);
 
 /// Why a text is not a [`LanguageTag`].
@@ -220,6 +221,14 @@ impl LanguageTag {
     #[must_use]
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+}
+
+impl TryFrom<String> for LanguageTag {
+    type Error = ParseLanguageTagError;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
     }
 }
 
