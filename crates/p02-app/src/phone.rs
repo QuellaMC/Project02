@@ -198,7 +198,8 @@ impl Chats for HerChats {
     }
 
     fn newest(&self, app: &str, count: usize) -> Result<Vec<HistoryMessage>, String> {
-        history::newest(&self.home, &self.id, app, count).map_err(|error| error_chain(&error))
+        history::newest(&self.home, &self.id, |message| message.app == app, count)
+            .map_err(|error| error_chain(&error))
     }
 }
 

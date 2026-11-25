@@ -149,13 +149,13 @@ pub(crate) fn hers(home: &Home, conversation: &str, message: &str) -> Result<Her
 }
 
 /// The newest messages of the conversation between `character` and the
-/// person on `home` that are in `app`, `count` at most, oldest first, as
+/// person on `home` that are `wanted`, `count` at most, oldest first, as
 /// the scrollback reads them, however far back they lie: none while the
 /// conversation was never made.
 pub(crate) fn newest(
     home: &Home,
     character: &Identifier,
-    app: &str,
+    wanted: impl Fn(&HistoryMessage) -> bool,
     count: usize,
 ) -> Result<Vec<HistoryMessage>, StorageError> {
     let Some(conversation) = p02_runtime::Conversation::find(home, character)? else {
@@ -168,15 +168,15 @@ pub(crate) fn newest(
     let mut newest = Vec::new();
 
     for segment in (0..segments.numbers.len()).rev() {
-        let wanted = count - newest.len();
+        let missing = count - newest.len();
 
         newest.extend(
             segments
                 .messages(segment)?
                 .iter()
                 .rev()
-                .filter(|message| message.app == app)
-                .take(wanted)
+                .filter(|message| wanted(message))
+                .take(missing)
                 .cloned(),
         );
 

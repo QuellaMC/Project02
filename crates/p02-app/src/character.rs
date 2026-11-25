@@ -16,7 +16,7 @@ use p02_config::{
     CharacterSettings, HostSettings, MaterializeError, ReadSettingsError, Resolution, materialize,
 };
 use p02_contracts::{CharacterStorage, FileStoreBackend, Rang, RoleModelAdapter};
-use p02_core::{AppNames, SpeakerName, Timestamp, VisibleText};
+use p02_core::{AppNames, SpeakerName, Timestamp, VisibleMessageRole, VisibleText};
 use p02_phone::SetRing;
 use p02_plugins::{PHONE_PLUGIN, PluginHost};
 use p02_role_model::{
@@ -30,8 +30,9 @@ use p02_runtime::{
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Inbox, QueuedLine, StorageError};
 use p02_wire::{
-    CharacterState, Diagnostic, Event, MaintenanceFailure, OpenOutcome, OpenRefusal, PhoneRing,
-    PlanAccount, RoleModelProvider, RunningTurn, TurnRefusal, TurnStamp, TurnStatus,
+    CharacterState, Diagnostic, Event, HistoryMessage, MaintenanceFailure, OpenOutcome,
+    OpenRefusal, PhoneRing, PlanAccount, RoleModelProvider, RunningTurn, TurnRefusal, TurnStamp,
+    TurnStatus,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, sleep_until};
@@ -42,6 +43,7 @@ use crate::config_control::CharacterConfig;
 use crate::confirmation::Broker;
 use crate::connections::PersonConnections;
 use crate::daemon::{Daemon, WeakDaemon, World, blocking};
+use crate::history;
 use crate::outcome::{duplicate, running_turn, storage_failure, told};
 use crate::phone::HerChats;
 use crate::reconcile::settings_now;
@@ -971,6 +973,20 @@ impl Her {
         self.health.borrow().state
     }
 
+    /// The person's newest message to her as they wrote it, by the
+    /// scrollback of their conversation, however far back it lies; none
+    /// while they never wrote, or where it cannot be read.
+    async fn person_wrote(&self) -> Option<VisibleText> {
+        let (home, id) = (self.world.home.clone(), self.id.clone());
+        let theirs = |message: &HistoryMessage| message.role == VisibleMessageRole::User;
+
+        blocking(move || history::newest(&home, &id, theirs, 1))
+            .await
+            .ok()?
+            .pop()
+            .map(|message| message.written.unwrap_or(message.text))
+    }
+
     /// The sentence she answers with while she takes nothing.
     fn not_ready(&self) -> String {
         not_ready(&self.id, &self.health.borrow())
@@ -1179,6 +1195,14 @@ impl Translator for HerTranslator<'_> {
         before: &[Said<'_>],
         newest: Option<&VisibleText>,
     ) -> Translation {
+        // A turn knows the person's messages its session replays, and a
+        // session that continued may carry none: their newest is then the
+        // scrollback's, which keeps them all.
+        let scrolled = match newest {
+            Some(_) => None,
+            None => self.her.person_wrote().await,
+        };
+        let newest = newest.or(scrolled.as_ref());
         let translation = match &self.model {
             Ok(model) => {
                 self.between

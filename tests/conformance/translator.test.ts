@@ -300,6 +300,37 @@ it("translator.moment: a message of her own is put into the language of the pers
   );
 });
 
+it("translator.moment-continued: a message of her own in a session that continued, carrying no line of the person's, is still put into the language of their newest message, which its request quotes as they wrote it", async () => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(
+    kanaHome(model, {contextWindowTokens: 1}),
+    shortened,
+  );
+  const events = await openEvents(daemon);
+  const say = await converse(wireOf(daemon), 'kana');
+
+  // A window this small continues the session after every turn, carrying
+  // none of it: each turn ends with the summarizer's request.
+  model.answer(
+    completion('お茶？'),
+    reply('飲む！'),
+    completion('Yes!'),
+    completion('They spoke of tea.'),
+    writes('お茶、おいしかった。'),
+    completion('The tea was nice.'),
+    completion('She liked the tea.'),
+  );
+  await say('Tea?', 'tea');
+  await events.next(own('turn_completed', 'kana'));
+
+  expect(messagesOf(model.requests[5])).toEqual(
+    translating(
+      intoTheirs,
+      "Sam's newest message:\n\nTea?\n\nThe message to translate, from Kana:\n\nお茶、おいしかった。",
+    ),
+  );
+});
+
 it("translator.your-language: with the language the person reads chosen, her message is put into it by its tag, and no newest message of theirs is read; with hers chosen, its tag in other capitals, nobody translates: a line's turn asks her model alone, the line as written", async () => {
   const model = await startModelServer();
   const wire = wireOf(await startDaemon(kanaHome(model, {userLanguage: 'de'})));

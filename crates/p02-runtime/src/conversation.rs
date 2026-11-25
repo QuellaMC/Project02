@@ -126,7 +126,8 @@ pub trait Translator: Send + Sync {
     async fn for_her(&self, line: &VisibleText, before: &[Said<'_>]) -> Translation;
 
     /// Her `message`, put into the language of the person's, `newest`, their
-    /// newest message as they wrote it; none while they never wrote.
+    /// newest message as they wrote it; none while the turn knows none of
+    /// theirs, as when they never wrote.
     async fn for_person(
         &self,
         message: &VisibleText,
