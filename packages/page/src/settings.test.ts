@@ -285,7 +285,7 @@ describe('settings window', () => {
     expect(viewsRead(initialState, fresh)).toBe(initialState);
   });
 
-  it('sends a box when it changed: nothing for what it held, an unset when emptied, the value typed by the field; a key whenever one is typed', () => {
+  it('sends a box when it changed: nothing for what it held, an unset when emptied, the value typed by the field, trimmed; a key whenever one is typed', () => {
     const sends = (row: Row, text: string) => {
       const settings = fieldEdited(opened(), row, text).settings;
 
@@ -293,8 +293,10 @@ describe('settings window', () => {
     };
 
     expect(sends(name, 'Sam')).toBeUndefined();
+    expect(sends(name, 'Sam ')).toBeUndefined();
     expect(sends(name, '  ')).toEqual({});
     expect(sends(name, 'Kim')).toEqual({value: 'Kim'});
+    expect(sends(name, ' Kim\n')).toEqual({value: 'Kim'});
     expect(sends(context, '4096')).toEqual({value: 4096});
     expect(sends(context, 'lots')).toEqual({value: 'lots'});
     expect(sends(context, '')).toBeUndefined();
@@ -309,6 +311,71 @@ describe('settings window', () => {
     expect(
       editLetGo(fieldEdited(opened(), name, 'Sam'), name).settings?.edits.size,
     ).toBe(0);
+  });
+
+  it('keeps a list of pairs as it is typed: it holds those both of whose boxes are filled, trimmed and in order, none once none is, and a pair with a box still empty stays on the page, when nothing is sent and once the rest landed, until it is filled or removed', () => {
+    type Pair = {readonly hers: string; readonly shown: string};
+
+    const words: Row = {
+      target: mira,
+      place: {kind: 'host', name: 'translationWords'},
+    };
+    const darling: Pair = {hers: 'ダーリン', shown: 'Darling'};
+    const boku: Pair = {hers: 'ボク', shown: 'I'};
+    const half: Pair = {hers: '叫竜', shown: ' '};
+    // Her words as her settings hold them, none when `held` is none.
+    const typed = (pairs: readonly Pair[], held?: readonly Pair[]) => {
+      const shape = {valueType: 'array'} as const;
+
+      return fieldEdited(
+        opened(
+          both(
+            view(),
+            view({
+              project02: [
+                held === undefined
+                  ? field('translationWords', shape)
+                  : own('translationWords', held, shape),
+              ],
+            }),
+          ),
+        ),
+        words,
+        JSON.stringify(pairs),
+      );
+    };
+    const sends = (state: WebState) =>
+      state.settings === undefined
+        ? 'closed'
+        : editToSend(state.settings, words);
+
+    expect(sends(typed([darling, half], [darling]))).toBeUndefined();
+    expect(
+      sends(typed([{hers: ' ボク', shown: 'I '}, half, darling], [darling])),
+    ).toEqual({value: [boku, darling]});
+    expect(sends(typed([half], [darling]))).toEqual({});
+    expect(sends(typed([half]))).toBeUndefined();
+
+    // Nothing to send: the pair with an empty box stays, and a list that
+    // holds no more than her settings do is let go.
+    expect(
+      editLetGo(typed([darling, half], [darling]), words).settings?.edits.get(
+        rowKey(words),
+      ),
+    ).toBe(JSON.stringify([darling, half]));
+    expect(
+      editLetGo(typed([darling], [darling]), words).settings?.edits.size,
+    ).toBe(0);
+
+    // The rest landed: the pair with an empty box stays all the same.
+    const landed = (state: WebState) =>
+      changeEnded(changeSent(state, 1, words), 1, {
+        status: 'applied',
+        fingerprint: 'f2',
+      }).settings?.edits.get(rowKey(words));
+
+    expect(landed(typed([boku, half]))).toBe(JSON.stringify([boku, half]));
+    expect(landed(typed([boku]))).toBeUndefined();
   });
 
   it('lets a key go the moment it is sent, and keeps what a box sent to tell a newer word apart', () => {
@@ -619,6 +686,9 @@ describe('settings window', () => {
     };
 
     expect(without({kind: 'character', characterId: 'nova'})).toEqual({
+      kind: 'you',
+    });
+    expect(without({kind: 'translation-notes', characterId: 'nova'})).toEqual({
       kind: 'you',
     });
     expect(

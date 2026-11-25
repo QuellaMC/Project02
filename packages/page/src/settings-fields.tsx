@@ -18,6 +18,7 @@ import {
   SelectBox,
   Switch,
   TextBox,
+  TextLines,
 } from './settings-controls.tsx';
 import {
   cardsShown,
@@ -285,10 +286,11 @@ function SuggestedRow({
 }
 
 /**
- * The service a character thinks with: a select of the services offered,
- * whose first entry, `none`, chooses none, saved at the choice.
+ * A menu whose first entry, `none`, chooses none, then the choices
+ * offered, saved at the choice: the service a character thinks with, or
+ * the one that translates, or the language the person reads.
  */
-export function ServiceRow({
+export function MenuRow({
   ctx,
   row,
   field,
@@ -447,6 +449,50 @@ function CardPieces({
         );
       })}
     </>
+  );
+}
+
+/**
+ * A field of several lines: its label over its box, which is its card,
+ * saved as any box is when the person leaves it; what was said of it
+ * under the card.
+ */
+export function LinesGroup({
+  ctx,
+  row,
+  field,
+  limit,
+  footer,
+}: {
+  readonly ctx: Ctx;
+  readonly row: Row;
+  readonly field: Field;
+  readonly limit: number;
+  readonly footer: string;
+}) {
+  const {settings, session} = ctx;
+  const id = domId(row);
+
+  return (
+    <section className="group">
+      <h3 className="group-title" id={id}>
+        {labelOf(field)}
+      </h3>
+      <TextLines
+        labelledBy={id}
+        value={settings.edits.get(rowKey(row)) ?? ownText(field)}
+        limit={limit}
+        {...checkProp(checkAt(ctx, row))}
+        onChange={text => {
+          session.edit(row, text);
+        }}
+        onCommit={() => {
+          void session.save(row);
+        }}
+      />
+      <Problems problems={problemsAt(ctx, row)} />
+      <p className="group-footer">{footer}</p>
+    </section>
   );
 }
 

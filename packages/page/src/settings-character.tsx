@@ -1,29 +1,36 @@
 /**
  * A character's pages: hers, with her switch, what makes up her mind and
- * body, her heartbeat, her apps, her bot, what she may do and what is hers
- * alone; a plugin's own page for her; and her own AI model. Each draws her
- * view, and writes only what her view lists.
+ * body, her heartbeat, the language she speaks, her apps, her bot, what
+ * she may do and what is hers alone; a plugin's own page for her; her own
+ * AI model; and her Translation Notes. Each draws her view, and writes
+ * only what her view lists.
  */
+import {useState} from 'react';
+
 import type {CharacterSummary} from '@project02/wire/contract';
 import {hasPhone, herPhoneRow} from './her-apps.ts';
 import {HerApps} from './settings-apps.tsx';
 import {
+  Arrow,
   BackButton,
   Cell,
   Chevron,
   Face,
   Group,
+  Icon,
   Label,
   LinkCell,
   PageHeader,
   SubHeader,
   Switch,
+  TextBox,
   Tile,
 } from './settings-controls.tsx';
 import {
   FieldRow,
   LayoutCards,
-  ServiceRow,
+  LinesGroup,
+  MenuRow,
   problemsAt,
   sectionRow,
   type Ctx,
@@ -36,6 +43,7 @@ import {
   featureControl,
   featureValue,
   featuresPlaced,
+  labelOf,
   ownModelExtras,
   ownModelRows,
   serviceChoice,
@@ -58,6 +66,18 @@ import {
   type Section,
 } from './settings.ts';
 import type {SettingsPage} from './store.ts';
+import {
+  languageName,
+  mostNotes,
+  noteLimit,
+  notesHeld,
+  notesShown,
+  notesText,
+  toneLimit,
+  toneRow,
+  wordsRow,
+  type Note,
+} from './translator.ts';
 
 function characterOf(
   ctx: Ctx,
@@ -310,6 +330,7 @@ function CharacterCards({
         ))}
       </Group>
       <HerHeartbeat ctx={ctx} characterId={character.id} view={view} />
+      <HerLanguage ctx={ctx} character={character} />
       <HerApps ctx={ctx} characterId={character.id} view={view} />
       <Group title="Telegram">
         <HerBot ctx={ctx} characterId={character.id} />
@@ -494,6 +515,44 @@ function HerHeartbeat({
       footer="While you're quiet, she gets a moment this often to think, use what she has, or write to you. Each one uses your AI model."
     >
       <FieldRow ctx={ctx} row={row} field={field} />
+    </Group>
+  );
+}
+
+/**
+ * For a character who speaks another language than the person: what she
+ * speaks, under its own name in its own letterforms, and her Translation
+ * Notes, with how many words and phrases she has when she has any.
+ */
+function HerLanguage({
+  ctx,
+  character,
+}: {
+  readonly ctx: Ctx;
+  readonly character: CharacterSummary;
+}) {
+  const {id, language} = character;
+  const notes = notesHeld(ctx.settings, id).length;
+
+  return language === undefined ? null : (
+    <Group
+      title="Language"
+      footer="Her words show with a translation under them, and yours reach her in her language. She never sees any of it."
+    >
+      <Cell>
+        <Label name="Speaks" />
+        <span className="value value-label" lang={language}>
+          {languageName(language)}
+        </span>
+      </Cell>
+      <LinkCell
+        {...(notes === 0 ? {} : {value: String(notes)})}
+        onClick={() => {
+          ctx.session.goTo({kind: 'translation-notes', characterId: id});
+        }}
+      >
+        <Label name="Translation Notes" />
+      </LinkCell>
     </Group>
   );
 }
@@ -694,7 +753,7 @@ export function CharacterModelPage({
             : `Only for ${name}. Everyone else keeps the one on the AI Model page.`
         }
       >
-        <ServiceRow
+        <MenuRow
           ctx={ctx}
           row={row}
           field={field}
@@ -738,5 +797,143 @@ export function CharacterModelPage({
         </Group>
       ))}
     </>
+  );
+}
+
+/**
+ * How her words are put into the person's language, from her page: her
+ * words and phrases, and how she sounds, each saved as any box is.
+ */
+export function TranslationNotesPage({
+  ctx,
+  characterId,
+}: {
+  readonly ctx: Ctx;
+  readonly characterId: string;
+}) {
+  const character = characterOf(ctx, characterId);
+  const view = viewOf(ctx.settings, characterTarget(characterId));
+  const tone = toneRow(characterId);
+  const toneField = view === undefined ? undefined : fieldAt(view, tone.place);
+
+  if (character === undefined) {
+    return null;
+  }
+
+  return (
+    <>
+      <SubHeader
+        back={character.displayName}
+        onBack={() => {
+          ctx.session.goTo({kind: 'character', characterId});
+        }}
+        title="Translation Notes"
+        blurb="How her words are put into your language."
+      />
+      {view === undefined ? null : (
+        <HerWords ctx={ctx} character={character} view={view} />
+      )}
+      {toneField === undefined ? null : (
+        <LinesGroup
+          ctx={ctx}
+          row={tone}
+          field={toneField}
+          limit={toneLimit}
+          footer="Anything else the translation should keep. Notes that came with her are here too; what you change is yours."
+        />
+      )}
+    </>
+  );
+}
+
+/**
+ * Her words and phrases, a row a pair: what she writes, in her language,
+ * and how it is shown, each pair removable; and, while she has fewer than
+ * the most, Add a Note, an empty pair with the focus in its first box.
+ * What is typed is kept as the page's own until it is saved, as a box's
+ * is: her settings hold the pairs both of whose boxes are filled, and a
+ * pair with a box still empty stays on the page until it is.
+ */
+function HerWords({
+  ctx,
+  character,
+  view,
+}: {
+  readonly ctx: Ctx;
+  readonly character: CharacterSummary;
+  readonly view: OkView;
+}) {
+  const {settings, session} = ctx;
+  const row = wordsRow(character.id);
+  const field = fieldAt(view, row.place);
+  const notes = notesShown(settings, character.id);
+  const [added, setAdded] = useState<number>();
+  const hers =
+    character.language === undefined ? {} : {lang: character.language};
+  const typed = (next: readonly Note[]) => {
+    session.edit(row, notesText(next));
+  };
+  const save = () => {
+    void session.save(row);
+  };
+
+  return field === undefined ? null : (
+    <Group
+      title={labelOf(field)}
+      footer="On the left, what she writes. On the right, how you want to read it, or a few words on what it means."
+      problems={problemsAt(ctx, row)}
+    >
+      {notes.map((note, at) => (
+        <Cell kind="pair" key={at}>
+          <TextBox
+            label="Her words"
+            {...hers}
+            limit={noteLimit}
+            value={note.hers}
+            focused={at === added}
+            onChange={text => {
+              typed(notes.with(at, {...note, hers: text}));
+            }}
+            onCommit={save}
+          />
+          <Arrow />
+          <TextBox
+            label="Shown as"
+            limit={noteLimit}
+            value={note.shown}
+            onChange={text => {
+              typed(notes.with(at, {...note, shown: text}));
+            }}
+            onCommit={save}
+          />
+          <button
+            type="button"
+            className="pair-remove"
+            aria-label="Remove this note"
+            onClick={() => {
+              typed(notes.filter((_, other) => other !== at));
+              save();
+            }}
+          >
+            <Icon name="cross" size={18} />
+          </button>
+        </Cell>
+      ))}
+      {notes.length < mostNotes ? (
+        <button
+          type="button"
+          className="cell cell-link"
+          onClick={() => {
+            setAdded(notes.length);
+            typed([...notes, {hers: '', shown: ''}]);
+          }}
+        >
+          <span className="line line-plain line-add">
+            <Icon name="plus" size={17} weight={2.2} />
+            <span className="label">Add a Note</span>
+          </span>
+        </button>
+      ) : null}
+    </Group>
   );
 }

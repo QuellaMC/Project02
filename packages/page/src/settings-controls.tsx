@@ -131,6 +131,26 @@ export function Chevron() {
   );
 }
 
+/** The arrow from one word to the word it is put as. */
+export function Arrow() {
+  return (
+    <svg
+      viewBox="0 0 20 10"
+      width="20"
+      height="10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className="arrow"
+    >
+      <path d="M1 5h17M14 1l4 4-4 4" />
+    </svg>
+  );
+}
+
 /**
  * A button that opens the system's file chooser for one file of the types
  * it accepts, and hands over the file chosen; choosing the same file again
@@ -304,16 +324,18 @@ export function SubHeader({
   );
 }
 
-/** A group of rows: a title over a card, and a footer under it. */
+/** A group of rows: a title over a card, what the daemon said of the card's one value under it, and a footer under that. */
 export function Group({
   title,
   titleId,
   footer,
+  problems,
   children,
 }: {
   readonly title?: string;
   readonly titleId?: string;
   readonly footer?: ReactNode;
+  readonly problems?: readonly string[];
   readonly children: ReactNode;
 }) {
   return (
@@ -324,6 +346,7 @@ export function Group({
         </h3>
       )}
       <div className="panel">{children}</div>
+      <Problems problems={problems} />
       {footer === undefined || footer === '' ? null : (
         <p className="group-footer">{footer}</p>
       )}
@@ -357,7 +380,8 @@ export function Cell({
   problems,
   children,
 }: {
-  readonly kind?: 'plain' | 'field' | 'switch' | 'tall' | 'person' | 'note';
+  readonly kind?:
+    'plain' | 'field' | 'switch' | 'tall' | 'person' | 'note' | 'pair';
   readonly problems?: readonly string[];
   readonly children: ReactNode;
 }) {
@@ -420,10 +444,16 @@ export function Label({
 /**
  * A text box. It saves when the person presses Return or leaves it, which
  * `onCommit` is told; `check` shows once a change of it landed. `focused`
- * takes the focus as it appears, for a box the person just asked for.
+ * takes the focus as it appears, for a box the person just asked for. A
+ * box no label names is called `label` to a reader of the screen; `lang`
+ * is the language of what is typed in it, when it is known; and it takes
+ * `limit` characters at most.
  */
 export function TextBox({
   id,
+  label,
+  lang,
+  limit,
   value,
   placeholder,
   numeric = false,
@@ -432,9 +462,12 @@ export function TextBox({
   onChange,
   onCommit,
 }: {
-  readonly id: string;
+  readonly id?: string;
+  readonly label?: string;
+  readonly lang?: string;
+  readonly limit?: number;
   readonly value: string;
-  readonly placeholder: string;
+  readonly placeholder?: string;
   readonly numeric?: boolean;
   readonly focused?: boolean;
   readonly check?: number;
@@ -447,6 +480,9 @@ export function TextBox({
         id={id}
         type="text"
         className={`input${numeric ? ' input-numeric' : ''}`}
+        aria-label={label}
+        lang={lang}
+        maxLength={limit}
         value={value}
         placeholder={placeholder}
         inputMode={numeric ? 'numeric' : undefined}
@@ -461,6 +497,44 @@ export function TextBox({
             event.currentTarget.blur();
           }
         }}
+      />
+      {check === undefined ? null : <Check key={check} />}
+    </span>
+  );
+}
+
+/**
+ * A box of several lines, which is its card, named by `labelledBy`. It
+ * saves when the person leaves it, which `onCommit` is told, since Return
+ * starts a new line; `check` shows once a change of it landed; and it
+ * takes `limit` characters at most.
+ */
+export function TextLines({
+  labelledBy,
+  value,
+  limit,
+  check,
+  onChange,
+  onCommit,
+}: {
+  readonly labelledBy: string;
+  readonly value: string;
+  readonly limit: number;
+  readonly check?: number;
+  readonly onChange: (text: string) => void;
+  readonly onCommit: () => void;
+}) {
+  return (
+    <span className="lines-field">
+      <textarea
+        className="lines-input"
+        aria-labelledby={labelledBy}
+        value={value}
+        maxLength={limit}
+        onChange={event => {
+          onChange(event.currentTarget.value);
+        }}
+        onBlur={onCommit}
       />
       {check === undefined ? null : <Check key={check} />}
     </span>

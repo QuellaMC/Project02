@@ -129,8 +129,8 @@ daemon's two verbs, and every value it shows is a view's: the home's and
 each character's, read when the window opens and again on every
 `health_changed` frame, with what is typed kept. `settings.ts` holds its
 rules, pure and tested in Node: where the window is, the views, what is
-typed and not saved, what a box sends and when, one operation per change,
-and how each change ends — applied shows a check, a refusal or a write
+typed and not saved, what a box sends, trimmed, and when, one operation
+per change, and how each change ends — applied shows a check, a refusal or a write
 that failed stays at its row with the person's text, and someone saving
 first sends the same change again once while its row still holds what it
 held. `settings-model.ts` works out what each page shows: which rows a
@@ -152,6 +152,24 @@ heartbeat, how often she gets a moment of her own, a group of its own
 between Mind & Body and Telegram: one row of choices, saved at the
 click. The chat and the window draw from one set of tokens in
 `styles.css`, light and dark.
+
+While a character speaks another language, as health says, the window
+has the translator, by the rules of `translator.ts`, pure and tested in
+Node, and none of it while none does: the person's page has Your
+Language, a menu of Automatic, which unsets it, and the languages its
+field suggests, with one it holds that it does not suggest under that
+language's own name; AI Model has what translates, under Helpers; and
+her page, after her heartbeat, what she speaks under its own name in
+her letterforms, and her Translation Notes. Their page holds her words
+and phrases, a pair of boxes each, her words in her language, each pair
+removable, and Add a Note while she has fewer than a hundred; they are
+saved as any box is, her settings holding the pairs both of whose boxes
+are filled, and a pair with a box still empty stays on the page until
+it is filled. Under them how she sounds, a box of several lines. The
+translator's page is drawn as her own AI model's is: Same AI Model as
+Hers, which takes away its service and model, or a service connected
+with its model, picked from that service's models; another service takes
+away the model chosen for the one before.
 
 The window adds and removes characters over three more verbs. Add
 Character opens the system's file chooser. The file's text goes to the

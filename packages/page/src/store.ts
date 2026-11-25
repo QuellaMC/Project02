@@ -147,6 +147,10 @@ export type SettingsPage =
     }
   /** A character's own AI model, from her page. */
   | {readonly kind: 'character-model'; readonly characterId: string}
+  /** How her words are put into the person's language, from her page. */
+  | {readonly kind: 'translation-notes'; readonly characterId: string}
+  /** What does the translating, from AI Model. */
+  | {readonly kind: 'translator'}
   /** A bot's page: the home's own, or a character's. */
   | {
       readonly kind: 'bot';
@@ -1374,6 +1378,7 @@ function characterOfPage(page: SettingsPage): string | undefined {
     case 'remove':
     case 'feature':
     case 'character-model':
+    case 'translation-notes':
     case 'app':
     case 'get-apps':
     case 'app-file':

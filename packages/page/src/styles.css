@@ -163,7 +163,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -1424,6 +1425,48 @@ button.bubble {
   padding: 6px 16px 6px 0;
 }
 
+/* A pair of her words on one line: what she writes, an arrow, how it is shown in a wider box, and the button that removes the pair. */
+.line-pair {
+  gap: 16px;
+  padding: 9px 16px 9px 0;
+}
+
+.line-pair > .box {
+  flex: 1 1 0;
+}
+
+.line-pair > .box ~ .box {
+  flex-grow: 1.4;
+}
+
+.line-pair .input {
+  padding-right: 10px;
+}
+
+.arrow {
+  flex: none;
+  color: var(--secondary);
+}
+
+.pair-remove {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--secondary);
+  display: grid;
+  place-items: center;
+}
+
+/* A row that adds one more to the card's list: its plus and its words in the link's colour. */
+.line-add {
+  gap: 8px;
+  color: var(--link);
+}
+
 .cell-problem {
   margin: -2px 16px 0 0;
   padding: 0 0 10px;
@@ -1467,6 +1510,11 @@ button.bubble {
 
 .value-link {
   color: var(--link);
+}
+
+/* A value that is no setting but what something is, read as plainly as a row's name. */
+.value-label {
+  color: var(--label);
 }
 
 .value-problem {
@@ -1839,6 +1887,40 @@ button.bubble {
   right: 10px;
   pointer-events: none;
   color: var(--secondary);
+}
+
+/* A box of several lines that is its card, as the design draws How She Sounds, lit as a box is while in use; it grows with what is typed where the browser can. */
+.lines-field {
+  position: relative;
+  display: block;
+}
+
+.lines-input {
+  display: block;
+  width: 100%;
+  min-height: 92px;
+  padding: 12px 16px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  outline: none;
+  font-size: 14px;
+  line-height: 1.45;
+  resize: none;
+  field-sizing: content;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.lines-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.lines-field > .box-check {
+  top: 14px;
 }
 
 .segmented {

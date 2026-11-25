@@ -71,20 +71,26 @@ export function controlOf(field: Field): Control {
 
 /**
  * What a select of a field's suggested values offers: each in its words,
- * then the value in effect, as it is, when it is none of them, so a value
- * typed in is one of the choices.
+ * then the value in effect when it is none of them, so a value typed in is
+ * one of the choices, in the words `named` gives it: as it is, unless
+ * another name says it better.
  */
 export function suggestedChoices(
   field: Field,
   value: string | undefined,
+  named: (unlisted: string) => string = unlisted => unlisted,
 ): readonly Option[] {
   const suggested = field.suggestedValues ?? [];
-  const typed = value === undefined || suggested.includes(value) ? [] : [value];
 
-  return [...suggested, ...typed].map(choice => ({
-    value: choice,
-    label: choiceWords(field, choice),
-  }));
+  return [
+    ...suggested.map(choice => ({
+      value: choice,
+      label: choiceWords(field, choice),
+    })),
+    ...(value === undefined || suggested.includes(value)
+      ? []
+      : [{value, label: named(value)}]),
+  ];
 }
 
 /** What a page calls a field: its label, or its name when it declares none. */
@@ -729,11 +735,19 @@ export function serviceChoice(
 
   return {
     ...(chosen === undefined ? {} : {chosen}),
-    options: view.services
-      .filter(service => service.connected || service.id === chosen?.id)
-      .map(service => ({value: service.id, label: service.name})),
+    options: servicesOffered(view, chosen),
     ...(model === undefined ? {} : {model}),
   };
+}
+
+/** The services a menu of a view's offers: each one connected for its target, and the one chosen while it is not. */
+export function servicesOffered(
+  view: OkView,
+  chosen: ModelService | undefined,
+): readonly Option[] {
+  return view.services
+    .filter(service => service.connected || service.id === chosen?.id)
+    .map(service => ({value: service.id, label: service.name}));
 }
 
 function chosenService(
@@ -1143,6 +1157,7 @@ export function parentOf(page: SettingsPage): SettingsPage | undefined {
   switch (page.kind) {
     case 'feature':
     case 'character-model':
+    case 'translation-notes':
     case 'remove':
     case 'app':
     case 'get-apps':
@@ -1156,6 +1171,7 @@ export function parentOf(page: SettingsPage): SettingsPage | undefined {
     case 'plugin':
       return {kind: 'advanced'};
     case 'service':
+    case 'translator':
       return {kind: 'model'};
     case 'account':
       return page.from === undefined

@@ -338,9 +338,14 @@ export function fieldEdited(state: WebState, row: Row, text: string): WebState {
   });
 }
 
-/** A box left as it was: nothing is sent, and it shows the view's value again. */
+/**
+ * A box left as it was: nothing is sent, and it shows the view's value
+ * again, but for what a list holds that it does not send.
+ */
 export function editLetGo(state: WebState, row: Row): WebState {
-  return withSettings(state, settings => withoutEdit(settings, rowKey(row)));
+  return withSettings(state, settings =>
+    holdsMore(settings, row) ? settings : withoutEdit(settings, rowKey(row)),
+  );
 }
 
 /** A click's value, as its row keeps it until the view says it landed. */
@@ -350,10 +355,10 @@ export function clickedText(value: JsonValue | undefined): string {
 
 /**
  * What leaving a box, or pressing Return in it, sends: nothing when it
- * holds no edit or the text it held; an unset when it was emptied, so the
- * value inherits again; and otherwise the text as the field's value. A key
- * box is always empty: a key typed into it is sent, and leaving it empty
- * sends nothing.
+ * holds no edit or the value its target holds already; an unset when it
+ * was emptied, so the value inherits again; and otherwise the field's
+ * value from what is typed. A key box is always empty: a key typed into it
+ * is sent, and leaving it empty sends nothing.
  */
 export function editToSend(
   settings: Settings,
@@ -367,17 +372,19 @@ export function editToSend(
     return undefined;
   }
 
+  const value = valueFrom(field, text);
+
   if (field.secret) {
-    return text.trim() === '' ? undefined : {value: text.trim()};
+    return value === undefined ? undefined : {value};
   }
 
   const held = ownText(field);
 
-  if (text === held || (text.trim() === '' && held === '')) {
-    return undefined;
+  if (value === undefined) {
+    return held === '' ? undefined : {};
   }
 
-  return text.trim() === '' ? {} : {value: valueFrom(field, text)};
+  return valueText(value) === held ? undefined : {value};
 }
 
 /**
@@ -422,14 +429,14 @@ export const changedElsewhere =
 /**
  * How the change ended, known by its ticket: a later change is waiting on
  * nothing this one can answer. `applied`: the text sent is done with, a
- * newer word typed meanwhile stays to be saved, and the check shows; the
- * view stays as it was read, and the session lands the answer with a view
- * read after it. A refusal, or a write the daemon could not make, is said
- * at its row in the daemon's words with the person's text kept; a click
- * has no text to keep, so its row shows what the daemon has. Someone else
- * saving first is `conflictMet`'s to judge; what reaches here of it is
- * said at the row, which shows what it holds now. A character that is
- * gone is a notice.
+ * newer word typed meanwhile stays to be saved, as does what a list holds
+ * that it did not send, and the check shows; the view stays as it was
+ * read, and the session lands the answer with a view read after it. A
+ * refusal, or a write the daemon could not make, is said at its row in
+ * the daemon's words with the person's text kept; a click has no text to
+ * keep, so its row shows what the daemon has. Someone else saving first is
+ * `conflictMet`'s to judge; what reaches here of it is said at the row,
+ * which shows what it holds now. A character that is gone is a notice.
  */
 export function changeEnded(
   state: WebState,
@@ -447,7 +454,8 @@ export function changeEnded(
 
   if (outcome.status === 'applied') {
     const typed = page.edits.get(key);
-    const newer = typed !== undefined && typed !== saving.text;
+    const newer =
+      typed !== undefined && (typed !== saving.text || holdsMore(page, saving));
 
     return {
       ...state,
@@ -577,15 +585,68 @@ export function ownText(field: Field): string {
 }
 
 /**
- * The field's value from what is typed: a number when it reads as one,
- * and the text itself otherwise, for the daemon to judge.
+ * The field's value from what is typed, trimmed: none when nothing is; a
+ * list's entries every word of which is typed, none while no entry is; a
+ * number when it reads as one; and the text otherwise, for the daemon to
+ * judge.
  */
-function valueFrom(field: Field, text: string): JsonValue {
-  const number = Number(text);
+function valueFrom(field: Field, text: string): JsonValue | undefined {
+  if (field.valueType === 'array') {
+    const {filled} = listOf(text);
+
+    return filled.length === 0 ? undefined : filled;
+  }
+
+  const typed = text.trim();
+
+  if (typed === '') {
+    return undefined;
+  }
+
+  const number = Number(typed);
 
   return field.valueType === 'number' && Number.isFinite(number)
     ? number
-    : text;
+    : typed;
+}
+
+/**
+ * A list as its row's edit holds it, the entries the page shows, each a
+ * few words by name, as typed: what the list holds of them, those none of
+ * whose words is empty, trimmed and in order; and whether that is all the
+ * edit holds, or an entry not yet filled, or a word with blank ends, stays
+ * on the page beside it.
+ */
+function listOf(text: string): {
+  readonly filled: readonly Readonly<Record<string, string>>[];
+  readonly whole: boolean;
+} {
+  // The edit of a list is the page's own JSON, as its editor writes it.
+  const entries = JSON.parse(text) as readonly Readonly<
+    Record<string, string>
+  >[];
+  const filled = entries
+    .filter(entry => Object.values(entry).every(word => word.trim() !== ''))
+    .map(entry =>
+      Object.fromEntries(
+        Object.entries(entry).map(([name, word]) => [name, word.trim()]),
+      ),
+    );
+
+  return {filled, whole: JSON.stringify(filled) === text};
+}
+
+/** Whether a row's edit is a list that holds more than it sends, which stays on the page until it is sent. */
+function holdsMore(settings: Settings, row: Row): boolean {
+  const text = settings.edits.get(rowKey(row));
+  const view = viewOf(settings, row.target);
+
+  return (
+    text !== undefined &&
+    view !== undefined &&
+    fieldAt(view, row.place)?.valueType === 'array' &&
+    !listOf(text).whole
+  );
 }
 
 /** Whether the row is a box the person types into, whose text a refusal keeps. */
@@ -596,13 +657,12 @@ function typedInto(settings: Settings, saving: Row): boolean {
   return field !== undefined && boxed(field);
 }
 
-/** A field changed by typing into a box, not by a click. */
+/** A field changed by typing, into a box or a list's boxes, not by a click. */
 function boxed(field: Field): boolean {
   return (
     field.secret ||
     (field.valueType !== 'boolean' &&
       field.valueType !== 'object' &&
-      field.valueType !== 'array' &&
       field.allowedValues === undefined)
   );
 }

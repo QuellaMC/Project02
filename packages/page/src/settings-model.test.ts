@@ -1237,6 +1237,11 @@ describe('settings model', () => {
       kind: 'character',
       characterId: 'mira',
     });
+    expect(parentOf({kind: 'translation-notes', characterId: 'mira'})).toEqual({
+      kind: 'character',
+      characterId: 'mira',
+    });
+    expect(parentOf({kind: 'translator'})).toEqual({kind: 'model'});
     expect(parentOf({kind: 'bot', target: hers, from: 'character'})).toEqual({
       kind: 'character',
       characterId: 'mira',
