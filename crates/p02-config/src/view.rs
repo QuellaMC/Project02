@@ -385,6 +385,8 @@ pub struct HostReport {
     /// Absent while her heartbeat is off.
     #[serde(skip_serializing_if = "Option::is_none")]
     heartbeat_minutes: Option<NonZeroU32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     translation_words: Vec<TranslationWord>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -469,6 +471,7 @@ impl Resolution<'_> {
                     translator_model: host.translator_model.clone(),
                     context_window_tokens: host.context_window_tokens,
                     heartbeat_minutes: host.heartbeat,
+                    language: host.language.as_ref().map(|tag| tag.as_str().to_owned()),
                     translation_words: host.translation_words.clone(),
                     translation_tone: host.translation_tone.clone(),
                 },

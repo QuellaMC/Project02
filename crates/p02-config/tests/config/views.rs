@@ -550,6 +550,7 @@ fn inspect_reports_where_the_settings_come_from_the_host_values_and_each_connect
             "pairedUsers": {"381940562": "Alice (@alice)"},
         }}},
     })));
+    world.write_overlay("mira", &document(json!({"project02": {"language": "ja"}})));
 
     let report = serde_json::to_value(world.resolve(&of("mira")).report(&world.home)).unwrap();
     let telegram = &report["connectors"][0];
@@ -575,6 +576,7 @@ fn inspect_reports_where_the_settings_come_from_the_host_values_and_each_connect
             "translatorProvider": "anthropic",
             "contextWindowTokens": 4096,
             "heartbeatMinutes": 30,
+            "language": "ja",
         })
     );
     assert_eq!(
