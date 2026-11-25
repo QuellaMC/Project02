@@ -2,9 +2,10 @@ import {expect, it} from 'vitest';
 
 import {connector, startDaemon} from './harness/daemon.ts';
 import {frameOf, openEvents, type Events} from './harness/events.ts';
-import {configJson, createHome} from './harness/home.ts';
+import {characterJson, configJson, createHome} from './harness/home.ts';
 import {
   calling,
+  completion,
   finish,
   reply,
   startModelServer,
@@ -21,6 +22,7 @@ import {
 import {conversationOf, converse, saveConfig, wireOf} from './harness/wire.ts';
 
 const miraBot = {token: '987654:mira', id: 987654, username: 'mira_bot'};
+const kanaBot = {token: '135791:kana', id: 135791, username: 'kana_bot'};
 const alice = {id: 4242, first_name: 'Alice'};
 const bob = {id: 5151, first_name: 'Bob', username: 'bob'};
 const miraAnswers = 'Telegram: @mira_bot answers for Mira.';
@@ -277,6 +279,45 @@ it('connectors.telegram-line: a line from Telegram that she answers naming no ap
       {role: 'character', text: 'Here, Alice.', app: 'telegram'},
     ],
   });
+});
+
+it('connectors.telegram-translated: a message of hers that has a translation is posted in Telegram once: her words, an empty line, then the translation', async () => {
+  const model = await startModelServer();
+  // Kana's package says she speaks Japanese, so she and the person read
+  // each other through the translator.
+  const home = createHome({
+    'config.json': homeSettings(model, [alice]),
+    characters: {
+      kana: {
+        'project02.character.json': characterJson('kana', 'Kana', {
+          identity: {id: 'kana', displayName: 'Kana', language: 'ja'},
+        }),
+      },
+    },
+    'character-data': {
+      kana: {
+        'config.json': configJson({
+          connectors: {telegram: {config: {botToken: kanaBot.token}}},
+        }),
+      },
+    },
+  });
+
+  await startDaemon(home);
+
+  const telegram = await startTelegramServer([kanaBot]);
+  const run = connector(['--store', home], telegram.env);
+  const posted = 'いただきます。\n\nI would love some.';
+
+  await run.printed('Telegram: @kana_bot answers for Kana.');
+  model.answer(
+    completion('お茶はいかが？'),
+    reply('いただきます。'),
+    completion('I would love some.'),
+  );
+  telegram.push(kanaBot.token, messageFrom(alice, 1, 'Some tea?'));
+  await telegram.shows(kanaBot.token, alice.id, posted);
+  expect(textsIn(telegram.calls(kanaBot.token), alice.id)).toEqual([posted]);
 });
 
 it('connectors.telegram-app-named: a message she sends naming Telegram goes to every paired chat though it answers a line from the page, and one naming Messages goes to none though it answers a line from Telegram; each is kept in the app named', async () => {
