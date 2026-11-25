@@ -13,7 +13,8 @@ use futures_util::FutureExt;
 use futures_util::future::join_all;
 use p02_characters::{CharacterDefinition, discover, is_bundled};
 use p02_config::{
-    Connector, Sections, apply_change, config_view, connector_config_view, connectors,
+    CharacterSettings, Connector, Sections, apply_change, config_view, connector_config_view,
+    connectors,
 };
 use p02_contracts::{
     FactoryInput, Manifest, PluginError, RoleModelAdapter, RuntimePlugin, SetupCheck,
@@ -467,12 +468,7 @@ impl Daemon {
             },
             characters: roster
                 .characters()
-                .map(|(definition, settings)| {
-                    self.summary(
-                        definition,
-                        settings.is_none_or(|settings| settings.host().enabled),
-                    )
-                })
+                .map(|(definition, settings)| self.summary(definition, settings))
                 .collect(),
             connectors: {
                 let presence = self.inner.presence();
@@ -668,10 +664,7 @@ impl Daemon {
         .await;
 
         StartOutcome::Settled {
-            character: self.summary(
-                &definition,
-                settings.is_none_or(|settings| settings.host().enabled),
-            ),
+            character: self.summary(&definition, settings.as_ref()),
         }
     }
 
@@ -968,7 +961,14 @@ impl Daemon {
             .emit(Event::HealthChanged { health });
     }
 
-    fn summary(&self, definition: &CharacterDefinition, enabled: bool) -> CharacterSummary {
+    /// Her summary as her package and her settings, where they can be
+    /// read, have her; switched on while they cannot.
+    fn summary(
+        &self,
+        definition: &CharacterDefinition,
+        settings: Option<&CharacterSettings>,
+    ) -> CharacterSummary {
+        let host = settings.map(CharacterSettings::host);
         let health = self
             .handle(&definition.profile.id)
             .map(|handle| handle.health());
@@ -976,7 +976,8 @@ impl Daemon {
         CharacterSummary {
             id: definition.profile.id.clone(),
             display_name: definition.profile.display_name.clone(),
-            enabled,
+            language: host.and_then(|host| host.language.clone()),
+            enabled: host.is_none_or(|host| host.enabled),
             built_in: is_bundled(&definition.profile.id),
             state: health.as_ref().map(|health| health.state).into(),
             diagnostic: health.as_ref().and_then(|health| health.diagnostic.clone()),

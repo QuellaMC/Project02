@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
-use p02_core::{CharacterProfile, SpeakerName};
+use p02_core::{CharacterProfile, LanguageTag, SpeakerName};
 use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -12,17 +12,23 @@ const FORMAT: &str = "project02.character.v1";
 pub(crate) const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
 /// A character as her package defines her: who she is, one line about her
-/// when it gives one, the persona the model is given, the version of that
-/// content, and the plugins she expects.
+/// when it gives one, the language she speaks when it names one, the
+/// persona the model is given, the version of that content, the plugins
+/// she expects, and her translation notes.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CharacterDefinition {
     pub profile: CharacterProfile,
     /// What a person adding her from a file reads of her before she is
     /// added; nothing else reads it.
     pub about: Option<String>,
+    /// The language she speaks, as her package writes its tag, when her
+    /// story fixes one: it becomes her own setting, where the person can
+    /// change it.
+    pub language: Option<LanguageTag>,
     pub persona: Persona,
     pub version: CharacterVersion,
     pub plugins: PluginExpectations,
+    pub translation: TranslationNotes,
 }
 
 /// A character's persona: one section or more, in order, none blank.
@@ -113,6 +119,27 @@ impl PluginExpectations {
     }
 }
 
+/// Her translation notes as her package gives them, each when it does: how
+/// some of her words are put for the person, and how she sounds. Shape
+/// only: her settings judge them when they become hers.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct TranslationNotes {
+    words: Option<Value>,
+    tone: Option<Value>,
+}
+
+impl TranslationNotes {
+    #[must_use]
+    pub fn words(&self) -> Option<&Value> {
+        self.words.as_ref()
+    }
+
+    #[must_use]
+    pub fn tone(&self) -> Option<&Value> {
+        self.tone.as_ref()
+    }
+}
+
 /// The first rule a descriptor breaks, in the order they are checked.
 #[derive(Debug, thiserror::Error)]
 pub enum ParseDescriptorError {
@@ -139,6 +166,10 @@ pub enum ParseDescriptorError {
          space at either end"
     )]
     InvalidAbout,
+    #[error(
+        "character package identity.language must be a language tag such as \"ja\" or \"pt-BR\""
+    )]
+    InvalidLanguage,
     #[error("character package persona.system must be an array of one section or more")]
     NoPersona,
     #[error("character package persona.system[{0}] must be a non-blank string")]
@@ -173,11 +204,17 @@ impl ParseDescriptorError {
                 "The line about the character in this file is not one line of at most 128 \
                  characters."
             }
+            Self::InvalidLanguage => {
+                "Her language is not a language tag such as \"ja\" or \"pt-BR\"."
+            }
             Self::NotAnObject("persona") | Self::NoPersona | Self::InvalidSection(_) => {
                 "This file does not say who the character is."
             }
             Self::NotAnObject("meta") | Self::InvalidVersion => {
                 "This file does not give its version as three numbers, such as 1.0.0."
+            }
+            Self::NotAnObject("translation") => {
+                "This file gives the character's translation notes in a way the app cannot read."
             }
             Self::NotAnObject(_)
             | Self::InvalidPluginList(_)
@@ -212,9 +249,11 @@ impl CharacterDefinition {
         Ok(Self {
             profile: profile(descriptor)?,
             about: about(descriptor)?,
+            language: language(descriptor)?,
             persona: persona(descriptor)?,
             version: version(descriptor)?,
             plugins: plugins(descriptor)?,
+            translation: translation(descriptor)?,
         })
     }
 }
@@ -242,6 +281,19 @@ fn about(descriptor: &Map<String, Value>) -> Result<Option<String>, ParseDescrip
                 .filter(|about| SpeakerName::new(about).is_ok())
                 .map(str::to_owned)
                 .ok_or(ParseDescriptorError::InvalidAbout)
+        })
+        .transpose()
+}
+
+/// The language she speaks, when her package names one.
+fn language(descriptor: &Map<String, Value>) -> Result<Option<LanguageTag>, ParseDescriptorError> {
+    object(descriptor.get("identity"), "identity")?
+        .get("language")
+        .map(|language| {
+            language
+                .as_str()
+                .and_then(|language| LanguageTag::parse(language).ok())
+                .ok_or(ParseDescriptorError::InvalidLanguage)
         })
         .transpose()
 }
@@ -337,6 +389,21 @@ fn plugin_config(
         .collect()
 }
 
+/// Her translation notes, read as a plugin's values are: each kept as
+/// written.
+fn translation(descriptor: &Map<String, Value>) -> Result<TranslationNotes, ParseDescriptorError> {
+    if descriptor.get("translation").is_none() {
+        return Ok(TranslationNotes::default());
+    }
+
+    let notes = object(descriptor.get("translation"), "translation")?;
+
+    Ok(TranslationNotes {
+        words: notes.get("words").cloned(),
+        tone: notes.get("tone").cloned(),
+    })
+}
+
 /// The object `value` holds, or the refusal naming `part`.
 fn object<'a>(
     value: Option<&'a Value>,
@@ -405,6 +472,7 @@ mod tests {
             ("/identity/pronouns", json!("she/her")),
             ("/identity/displayName", json!(emoji.repeat(128))),
             ("/identity/about", json!("A quiet one, who notices things.")),
+            ("/identity/language", json!("pt-BR")),
             ("/persona/system", json!(["First.", "Second."])),
             ("/meta/version", json!("999999999.0.01")),
             (
@@ -415,6 +483,10 @@ mod tests {
                 "/plugins/config",
                 json!({"zeta-plugin": {"b": 1, "a": [true]}, "alpha-plugin": {"z": null, "y": 2}}),
             ),
+            (
+                "/translation",
+                json!({"words": [{"hers": "ダーリン"}], "tone": 42, "voice": "low"}),
+            ),
         ]);
         let definition = CharacterDefinition::from_descriptor(&bytes).unwrap();
         let config = definition.plugins.config();
@@ -424,6 +496,10 @@ mod tests {
         assert_eq!(
             definition.about.as_deref(),
             Some("A quiet one, who notices things.")
+        );
+        assert_eq!(
+            definition.language.as_ref().map(LanguageTag::as_str),
+            Some("pt-BR")
         );
         assert_eq!(definition.persona.sections(), ["First.", "Second."]);
         assert_eq!(definition.version.as_str(), "999999999.0.01");
@@ -449,17 +525,23 @@ mod tests {
             [["z", "y"], ["b", "a"]]
         );
         assert_eq!(
+            (
+                definition.translation.words(),
+                definition.translation.tone()
+            ),
+            (Some(&json!([{"hers": "ダーリン"}])), Some(&json!(42)))
+        );
+        assert_eq!(
             CharacterDefinition::from_descriptor(&without("plugins"))
                 .unwrap()
                 .plugins,
             PluginExpectations::default()
         );
-        assert_eq!(
-            CharacterDefinition::from_descriptor(&with(&[]))
-                .unwrap()
-                .about,
-            None
-        );
+        let plain = CharacterDefinition::from_descriptor(&with(&[])).unwrap();
+
+        assert_eq!(plain.about, None);
+        assert_eq!(plain.language, None);
+        assert_eq!(plain.translation, TranslationNotes::default());
     }
 
     #[test]
@@ -499,6 +581,13 @@ mod tests {
                 "identity.about",
             ),
             (
+                with(&[
+                    ("/identity/language", json!("ja_JP")),
+                    ("/persona/system", json!([])),
+                ]),
+                "identity.language",
+            ),
+            (
                 with(&[("/persona/system", json!([]))]),
                 "persona.system must be an array of one section or more",
             ),
@@ -527,6 +616,10 @@ mod tests {
             (
                 with(&[("/plugins/config", json!({"alpha": "warm"}))]),
                 "plugins.config[\"alpha\"] must be an object",
+            ),
+            (
+                with(&[("/translation", json!(["ダーリン", "Darling"]))]),
+                "translation must be an object",
             ),
         ];
 

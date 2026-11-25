@@ -14,10 +14,11 @@ import type {DesktopNotification} from './window-calls.ts';
  * The notification a frame of the stream asks for, with the messages
  * notified once it is asked for: a message of hers committed in Messages
  * while the window does not have the focus, which `notified` does not hold
- * yet, titled with her name as the message carries it, its body her words,
- * whole. Anything else asks for none: the person's own line, her writing, a
- * message of hers in another app, one while the window has the focus, and
- * one notified already.
+ * yet, titled with her name as the message carries it, its body her words
+ * in the person's language when it carries them so, else as she wrote
+ * them, whole. Anything else asks for none: the person's own line, her
+ * writing, a message of hers in another app, one while the window has the
+ * focus, and one notified already.
  */
 export function notificationFor(
   notified: ReadonlySet<string>,
@@ -37,11 +38,11 @@ export function notificationFor(
     return undefined;
   }
 
-  const {messageId, app, speakerName, text} = event.progress;
+  const {messageId, app, speakerName, text, translation} = event.progress;
 
   return app === messagesApp && !notified.has(messageId)
     ? {
-        notification: {title: speakerName, body: text},
+        notification: {title: speakerName, body: translation ?? text},
         notified: new Set(notified).add(messageId),
       }
     : undefined;

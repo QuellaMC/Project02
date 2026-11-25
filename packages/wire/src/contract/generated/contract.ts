@@ -209,7 +209,12 @@ export type CharacterRuntimeState = "starting" | "ready" | "needs_model" | "stop
 /**
  * One installed character, as health reports her.
  */
-export type CharacterSummary = { id: Identifier, displayName: SpeakerName, enabled: boolean, 
+export type CharacterSummary = { id: Identifier, displayName: SpeakerName, 
+/**
+ * The language she speaks, when her settings say one: she and the
+ * person read each other through a translator.
+ */
+language?: LanguageTag, enabled: boolean, 
 /**
  * Whether she comes with the app: she can be switched off, never
  * removed.
@@ -417,7 +422,7 @@ message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "
 /**
  * The daemon's whole state in one read.
  */
-export type GatewayHealth = { protocolVersion: 18, homeRoot: string, 
+export type GatewayHealth = { protocolVersion: 19, homeRoot: string, 
 /**
  * What the home's settings document says of itself.
  */
@@ -447,7 +452,7 @@ export type GatewayMessage = { conversationId: Short, text: Text, source: Client
  * The first frame of a stream that cannot be caught up: the state every
  * later frame moves on from.
  */
-export type GatewayReady = { protocolVersion: 18, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
+export type GatewayReady = { protocolVersion: 19, health: GatewayHealth, confirmations: ReadonlyArray<PendingConfirmation>, pairings: ReadonlyArray<PairingRequest>, turns: ReadonlyArray<RunningTurn>, };
 
 /**
  * Why a line was refused before any turn ran.
@@ -456,10 +461,24 @@ export type GatewayRefusalReason = "unknown_conversation" | "character_unavailab
 
 /**
  * A committed message as the scrollback shows it: when it was sent, the
- * app it is in, by its id, and for the person's line when she read it and
- * the stamps its client put on it.
+ * app it is in, by its id, its other form when she speaks another
+ * language than the person, and for the person's line when she read it
+ * and the stamps its client put on it.
  */
-export type HistoryMessage = { messageId: MessageId, role: VisibleMessageRole, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, sentAt: Timestamp, 
+export type HistoryMessage = { messageId: MessageId, role: VisibleMessageRole, speakerId: Identifier, speakerName: SpeakerName, 
+/**
+ * The message as she read it or wrote it.
+ */
+text: VisibleText, 
+/**
+ * The person's line as they wrote it, when she read it in her own
+ * language.
+ */
+written?: VisibleText, 
+/**
+ * Her message in the person's language, when she speaks another.
+ */
+translation?: VisibleText, sentAt: Timestamp, 
 /**
  * When she read the person's line: the moment her turn took it. Hers
  * has none.
@@ -487,6 +506,13 @@ export type HistoryRefusal = "unknown_conversation" | "invalid_page";
 export type Identifier = string;
 
 export type JsonValue = number | string | boolean | ReadonlyArray<JsonValue> | { [key in string]: JsonValue } | null;
+
+/**
+ * A language as a BCP 47 tag names it, such as `ja` or `pt-BR`, kept as
+ * written: at most 35 characters, subtags of ASCII letters and digits
+ * joined by `-`, the first 2 to 8 letters and each later one 1 to 8.
+ */
+export type LanguageTag = string;
 
 /**
  * One card of a section's layout: rows of its fields, under a title and
@@ -1139,7 +1165,17 @@ export type TurnIdentity = { conversationId: ConversationId, source: ClientStamp
 /**
  * What a turn says as it goes, in order.
  */
-export type TurnProgress = { "kind": "user_message", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, sentAt: Timestamp, 
+export type TurnProgress = { "kind": "user_message", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, 
+/**
+ * The line as she read it: in her language when she speaks another
+ * than the person.
+ */
+text: VisibleText, 
+/**
+ * The line as the person wrote it, when she read it in her own
+ * language.
+ */
+written?: VisibleText, sentAt: Timestamp, 
 /**
  * When she read it: the moment her turn took it.
  */
@@ -1147,7 +1183,12 @@ readAt: Timestamp,
 /**
  * The id of the app the line came in, as `messages` or `telegram`.
  */
-app: string, source: ClientStamp, clientMessageId: ClientStamp, } | { "kind": "visible_reply", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, sentAt: Timestamp, 
+app: string, source: ClientStamp, clientMessageId: ClientStamp, } | { "kind": "visible_reply", messageId: MessageId, speakerId: Identifier, speakerName: SpeakerName, text: VisibleText, 
+/**
+ * The same words in the person's language, when she speaks
+ * another.
+ */
+translation?: VisibleText, sentAt: Timestamp, 
 /**
  * The id of the app it went in, as `messages` or `telegram`.
  */

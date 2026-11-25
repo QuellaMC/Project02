@@ -4,11 +4,11 @@
  * holder's own bubbles are in their app's colour; one sender's messages in
  * a row sit close together; and a line under the holder's newest message
  * says how far it got. The chat draws it in Messages as the person holds
- * it, theirs at the end of the line, and a line of theirs not yet
- * committed as theirs sent now in Messages; her phone draws what went
- * through one app as she holds it, the mirror of the chat. Nothing here
- * touches the DOM or reads a clock: the viewer's clock comes in, so the
- * rules are tested in Node.
+ * it, theirs at the end of the line, a line of theirs not yet committed as
+ * theirs sent now in Messages, and a translated message in both its forms;
+ * her phone draws what went through one app as she holds it, the mirror of
+ * the chat. Nothing here touches the DOM or reads a clock: the viewer's
+ * clock comes in, so the rules are tested in Node.
  */
 import type {VisibleMessageRole} from '@project02/wire/contract';
 import type {LineState, Message, PendingLine} from './store.ts';
@@ -88,6 +88,12 @@ export type Placement = {
 /** A message, or a line not yet committed, as its thread is drawn. */
 export type Laid<T> = Placement & {readonly message: T};
 
+/** Words a bubble draws, marked with her language when they are in it. */
+export type Form = {readonly text: string; readonly lang?: string};
+
+/** What a bubble draws: its words, and under them, when it has them, the same words in the other's language. */
+export type Drawn = Form & {readonly translation?: Form};
+
 /** What the rules read of a message: who sent it, when, and in which app. */
 type Sent = Pick<Message, 'role' | 'sentAt' | 'app'>;
 
@@ -138,6 +144,32 @@ export function onHerPhone(app: string): Holder {
 /** What the head of her phone's thread in `app` says under the person's name: the app's name, but in Messages, the phone's own, nothing. */
 export function labelOf(app: string): string | undefined {
   return app === messagesApp ? undefined : appOf(app).name;
+}
+
+/**
+ * What the chat draws of a message: first the words its writer wrote, and
+ * under them, when it has them, the same words in the other's language —
+ * the person's line as they wrote it over what she read, her message over
+ * its translation. What is in `language`, the language she speaks when
+ * she has one of her own, is marked with it: her words, and the person's
+ * line as she read it.
+ */
+export function drawnOf(message: Message, language?: string): Drawn {
+  const inHers = (text: string): Form =>
+    language === undefined ? {text} : {text, lang: language};
+
+  if (message.role === 'user') {
+    return message.written === undefined
+      ? {text: message.text}
+      : {text: message.written, translation: inHers(message.text)};
+  }
+
+  return {
+    ...inHers(message.text),
+    ...(message.translation === undefined
+      ? {}
+      : {translation: {text: message.translation}}),
+  };
 }
 
 /**

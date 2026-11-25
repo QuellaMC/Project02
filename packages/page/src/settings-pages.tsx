@@ -1,8 +1,8 @@
 /**
- * The window's pages of the home: the person, the AI model and each
- * service it can be, a plugin's account, an account her apps use,
- * Advanced, and what the app knows of one plugin. Each draws the home's
- * view; a view the daemon refuses takes the page's place with the
+ * The window's pages of the home: the person, the AI model, each service
+ * it can be and what translates, a plugin's account, an account her apps
+ * use, Advanced, and what the app knows of one plugin. Each draws the
+ * home's view; a view the daemon refuses takes the page's place with the
  * daemon's sentence.
  */
 import type {ReactNode} from 'react';
@@ -30,7 +30,7 @@ import {
 import {
   FieldRow,
   LayoutCards,
-  ServiceRow,
+  MenuRow,
   problemsAt,
   type Ctx,
 } from './settings-fields.tsx';
@@ -62,6 +62,17 @@ import {
   type Row,
 } from './settings.ts';
 import type {SettingsPage} from './store.ts';
+import {
+  languageAt,
+  sameAsHers,
+  translated,
+  translatorChanges,
+  translatorChoice,
+  translatorModelRow,
+  translatorRow,
+  translatorWords,
+  yourLanguageRow,
+} from './translator.ts';
 
 /** The home's view, or the daemon's sentence in place of a page it cannot be read for. */
 function HomeView({
@@ -128,6 +139,7 @@ function advancedField(
     : undefined;
 }
 
+/** The person: their name, and while a character speaks another language, the language they read. */
 export function YouPage({ctx}: {readonly ctx: Ctx}) {
   const name = nameInEffect(ctx.settings);
 
@@ -143,14 +155,45 @@ export function YouPage({ctx}: {readonly ctx: Ctx}) {
           const row = hostRow(home, 'userDisplayName');
           const field = fieldAt(view, row.place);
 
-          return field === undefined ? null : (
-            <Group footer="Your characters call you this.">
-              <FieldRow ctx={ctx} row={row} field={field} />
-            </Group>
+          return (
+            <>
+              {field === undefined ? null : (
+                <Group footer="Your characters call you this.">
+                  <FieldRow ctx={ctx} row={row} field={field} />
+                </Group>
+              )}
+              {translated(ctx.state.health?.characters ?? []) ? (
+                <YourLanguage ctx={ctx} />
+              ) : null}
+            </>
           );
         }}
       </HomeView>
     </>
+  );
+}
+
+/** The language the person reads, Automatic or one of the menu's, saved at the choice. */
+function YourLanguage({ctx}: {readonly ctx: Ctx}) {
+  const language = languageAt(ctx.settings, yourLanguageRow);
+
+  return language === undefined ? null : (
+    <Group
+      title="Language"
+      footer="A character who speaks another language is translated for you. Automatic follows the language you write in."
+    >
+      <MenuRow
+        ctx={ctx}
+        row={yourLanguageRow}
+        field={language.field}
+        value={language.value}
+        options={language.options}
+        none="Automatic"
+        onChoose={value => {
+          void ctx.session.choose(yourLanguageRow, value);
+        }}
+      />
+    </Group>
   );
 }
 
@@ -171,7 +214,8 @@ export function ModelPage({ctx}: {readonly ctx: Ctx}) {
 
 /**
  * Once a service is connected, what every character thinks with and the
- * services connected; the services that can be added; and under Advanced
+ * services connected; the services that can be added; while a character
+ * speaks another language, what does the translating; and under Advanced
  * the context size, which is every service's.
  */
 function ServiceGroups({
@@ -203,6 +247,21 @@ function ServiceGroups({
           ))}
         </Group>
       )}
+      {translated(ctx.state.health?.characters ?? []) ? (
+        <Group
+          title="Helpers"
+          footer="What does the translating. It is asked once for each message, each way."
+        >
+          <LinkCell
+            value={translatorWords(ctx.settings)}
+            onClick={() => {
+              ctx.session.goTo({kind: 'translator'});
+            }}
+          >
+            <Label name="Translator" />
+          </LinkCell>
+        </Group>
+      ) : null}
       {context === undefined ? null : (
         <Group title="Advanced">
           <FieldRow
@@ -235,7 +294,7 @@ function ThinksWith({ctx, view}: {readonly ctx: Ctx; readonly view: OkView}) {
           : view.model.message
       }
     >
-      <ServiceRow
+      <MenuRow
         ctx={ctx}
         row={row}
         field={field}
@@ -327,6 +386,61 @@ export function ServicePage({
             <ServiceCards ctx={ctx} view={view} service={service} />
           )
         }
+      </HomeView>
+    </>
+  );
+}
+
+/**
+ * What does the translating, from AI Model, drawn as a character's own AI
+ * model page is: Same AI Model as Hers, or one of the services connected,
+ * and with a service chosen, its model. Another service takes away the
+ * model chosen for the one before, and Same AI Model as Hers takes away
+ * both.
+ */
+export function TranslatorPage({ctx}: {readonly ctx: Ctx}) {
+  const {settings, session} = ctx;
+
+  return (
+    <>
+      <div className="sub-header">
+        <BackButton
+          label="AI Model"
+          onClick={() => {
+            session.goTo({kind: 'model'});
+          }}
+        />
+        <PageHeader
+          art={<Tile icon="sparkle" tint="indigo" size="page" />}
+          title="Translator"
+        />
+      </div>
+      <HomeView ctx={ctx}>
+        {view => {
+          const field = fieldAt(view, translatorRow.place);
+          const {chosen, options, model} = translatorChoice(settings);
+
+          return field === undefined ? null : (
+            <Group footer="Unless you choose one, the AI model she runs on also translates, as a separate request she never sees.">
+              <MenuRow
+                ctx={ctx}
+                row={translatorRow}
+                field={field}
+                value={chosen?.id}
+                options={options}
+                none={sameAsHers}
+                onChoose={value => {
+                  for (const change of translatorChanges(settings, value)) {
+                    void session.choose(change.row, change.value);
+                  }
+                }}
+              />
+              {chosen === undefined || model === undefined ? null : (
+                <FieldRow ctx={ctx} row={translatorModelRow} field={model} />
+              )}
+            </Group>
+          );
+        }}
       </HomeView>
     </>
   );

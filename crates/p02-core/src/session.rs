@@ -4,9 +4,7 @@ use p02_shared::Identifier;
 
 use crate::event::Timestamp;
 use crate::id::{MessageId, SessionId};
-use crate::message::{
-    LOCAL_USER, SpeakerName, UserLine, VisibleMessage, VisibleMessageRole, VisibleText,
-};
+use crate::message::{LOCAL_USER, SpeakerName, VisibleMessage, VisibleMessageRole, VisibleText};
 
 /// One character's session: the messages of one segment of a conversation,
 /// in the order they were committed. Each is numbered after the one before
@@ -52,12 +50,12 @@ impl Session {
         &self.messages
     }
 
-    /// The person's line, said under `name` and sent at `sent_at`, as the
-    /// session's next message.
+    /// The person's line, `text` as the character reads it, said under
+    /// `name` and sent at `sent_at`, as the session's next message.
     #[must_use]
     pub fn user_message(
         &self,
-        line: UserLine,
+        text: VisibleText,
         name: SpeakerName,
         sent_at: Timestamp,
     ) -> VisibleMessage {
@@ -66,7 +64,7 @@ impl Session {
             role: VisibleMessageRole::User,
             speaker_id: LOCAL_USER.clone(),
             speaker_name: name,
-            text: line.into(),
+            text,
             sent_at,
         }
     }
@@ -160,7 +158,7 @@ mod tests {
 
     /// Sam's line `text`, as the session's next message.
     fn said(session: &Session, text: &str) -> VisibleMessage {
-        session.user_message(UserLine::new(text).unwrap(), name("Sam"), noon())
+        session.user_message(VisibleText::normalize(text).unwrap(), name("Sam"), noon())
     }
 
     /// Mira's reply `text`, as the session's next message.

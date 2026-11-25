@@ -158,6 +158,18 @@ function addedTo(home: string): string[] {
   return existsSync(packages) ? readdirSync(packages) : [];
 }
 
+/** Kana, whose package says she speaks Japanese, as the home's characters hold her, with the parts of `descriptor` too. */
+function kana(descriptor: object = {}) {
+  return {
+    kana: {
+      'project02.character.json': characterJson('kana', 'Kana', {
+        identity: {id: 'kana', displayName: 'Kana', language: 'ja'},
+        ...descriptor,
+      }),
+    },
+  };
+}
+
 test('page.welcome-first-run: a home whose settings give her no AI model opens on the welcome; the name, the service and the key save as each is given, Start Chatting opens the chat, and she answers through the key', async ({
   page,
 }) => {
@@ -928,6 +940,196 @@ test('page.settings-telegram: the page says when Telegram is not running; a toke
   release();
   await expect(page.getByText('No one yet')).toBeVisible();
   expect(pairedIn(home)).toEqual({});
+});
+
+test("page.settings-your-language: with a character who speaks another language, Your Language chosen from its menu is in the home's settings and back on Automatic is gone; once no character speaks one, neither it nor the translator's row shows", async ({
+  page,
+}) => {
+  const {home, daemon} = await miraHome({}, {characters: kana()});
+  const language = page.getByRole('combobox', {name: 'Your Language'});
+  const translator = link(page.getByRole('main'), 'Translator');
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'You').click();
+  await expect(language.locator('option:checked')).toHaveText('Automatic');
+  await language.selectOption('ja');
+  await expect
+    .poll(() => homeConfig(home))
+    .toMatchObject({project02: {userLanguage: 'ja'}});
+  await expect(language.locator('option:checked')).toHaveText('日本語');
+  await language.selectOption('');
+  await expect
+    .poll(() => homeConfig(home))
+    .not.toHaveProperty(['project02', 'userLanguage']);
+  await entry(page, 'AI Model').click();
+  await expect(translator).toContainText('Same AI Model as Hers');
+
+  await entry(page, 'Kana').click();
+  await page.getByRole('button', {name: 'Remove Kana…'}).click();
+  await page
+    .getByRole('alertdialog')
+    .getByRole('button', {name: 'Remove', exact: true})
+    .click();
+  await expect(
+    page.getByRole('heading', {name: 'You', exact: true}),
+  ).toBeVisible();
+  await expect(language).toHaveCount(0);
+  await entry(page, 'AI Model').click();
+  await expect(group(page, 'Characters Think With')).toBeVisible();
+  await expect(translator).toHaveCount(0);
+});
+
+test('page.settings-her-language: a character whose package names no language says Any Language on her page, with no Translation Notes, and nothing of the translator shows on You; a language chosen for her is in her settings, her Translation Notes are offered and Your Language shows; back on Any Language it is gone from her settings, and so are they', async ({
+  page,
+}) => {
+  const {home, daemon} = await miraHome({});
+  const speaks = page.getByRole('combobox', {name: 'Speaks'});
+  const notes = link(page.getByRole('main'), 'Translation Notes');
+  const yours = page.getByRole('combobox', {name: 'Your Language'});
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings for Mira'}).click();
+  await expect(speaks.locator('option:checked')).toHaveText('Any Language');
+  await expect(notes).toHaveCount(0);
+  await entry(page, 'You').click();
+  await expect(
+    page.getByRole('heading', {name: 'You', exact: true}),
+  ).toBeVisible();
+  await expect(yours).toHaveCount(0);
+
+  await entry(page, 'Mira').click();
+  await speaks.selectOption('en');
+  await expect
+    .poll(() => characterConfig(home, 'mira'))
+    .toMatchObject({project02: {language: 'en'}});
+  await expect(speaks.locator('option:checked')).toHaveText('English');
+  await expect(notes).toBeVisible();
+  await entry(page, 'You').click();
+  await expect(yours.locator('option:checked')).toHaveText('Automatic');
+
+  await entry(page, 'Mira').click();
+  await speaks.selectOption('');
+  await expect
+    .poll(() => characterConfig(home, 'mira'))
+    .not.toHaveProperty(['project02', 'language']);
+  await expect(notes).toHaveCount(0);
+  await entry(page, 'You').click();
+  await expect(
+    page.getByRole('heading', {name: 'You', exact: true}),
+  ).toBeVisible();
+  await expect(yours).toHaveCount(0);
+});
+
+test('page.settings-translation-notes: her page says the language her package brought her, under its own name; her Translation Notes open on what her package brought; a pair added and filled is in her settings as typed, one removed is gone, and how she sounds, typed over several lines, is kept', async ({
+  page,
+}) => {
+  const darling = {hers: 'ダーリン', shown: 'Darling'};
+  const klaxosaur = {hers: '叫竜', shown: 'Klaxosaur'};
+  const boku = {hers: 'ボク', shown: 'I (she says it as a boy would)'};
+  const {home, daemon} = await miraHome(
+    {},
+    {
+      characters: kana({
+        translation: {
+          words: [darling, klaxosaur],
+          tone: 'Playful and teasing, never formal.',
+        },
+      }),
+    },
+  );
+  const notes = link(page.getByRole('main'), 'Translation Notes');
+  const hers = page.getByRole('textbox', {name: 'Her words'});
+  const shown = page.getByRole('textbox', {name: 'Shown as'});
+  const tone = page.getByRole('textbox', {name: 'How She Sounds'});
+  const hersHeld = () => characterConfig(home, 'kana');
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings for Kana'}).click();
+  await expect(
+    page.getByRole('combobox', {name: 'Speaks'}).locator('option:checked'),
+  ).toHaveText('日本語');
+  await expect(notes).toContainText('2');
+  await notes.click();
+  await expect(
+    page.getByRole('heading', {name: 'Translation Notes'}),
+  ).toBeVisible();
+  await expect(hers).toHaveCount(2);
+  await expect(hers.first()).toHaveValue('ダーリン');
+  await expect(hers.first()).toHaveAttribute('lang', 'ja');
+  await expect(shown.last()).toHaveValue('Klaxosaur');
+  await expect(tone).toHaveValue('Playful and teasing, never formal.');
+
+  await page.getByRole('button', {name: 'Add a Note'}).click();
+  await expect(hers.nth(2)).toBeFocused();
+  await hers.nth(2).fill(boku.hers);
+  await shown.nth(2).fill(boku.shown);
+  await shown.nth(2).press('Enter');
+  await expect.poll(hersHeld).toMatchObject({
+    project02: {translationWords: [darling, klaxosaur, boku]},
+  });
+
+  await page.getByRole('button', {name: 'Remove this note'}).first().click();
+  await expect
+    .poll(hersHeld)
+    .toMatchObject({project02: {translationWords: [klaxosaur, boku]}});
+  await expect(hers).toHaveCount(2);
+
+  await tone.fill('Playful and teasing.\nKeep her short sentences short.\n');
+  await tone.blur();
+  await expect.poll(hersHeld).toMatchObject({
+    project02: {
+      translationTone: 'Playful and teasing.\nKeep her short sentences short.',
+    },
+  });
+});
+
+test("page.settings-translator: on AI Model, a service and a model chosen for what translates are in the home's settings, its row naming the service, and Same AI Model as Hers takes both away", async ({
+  page,
+}) => {
+  const {home, daemon} = await miraHome(
+    {project02: {openaiApiKey: 'sk-home'}},
+    {characters: kana()},
+  );
+  const translator = link(group(page, 'Helpers'), 'Translator');
+  const service = page.getByRole('combobox', {name: 'Service'});
+  const model = page.getByRole('combobox', {name: 'Model'});
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings', exact: true}).click();
+  await entry(page, 'AI Model').click();
+  await expect(translator).toContainText('Same AI Model as Hers');
+  await translator.click();
+  await expect(page.getByRole('heading', {name: 'Translator'})).toBeVisible();
+  await expect(service.locator('option:checked')).toHaveText(
+    'Same AI Model as Hers',
+  );
+  await expect(model).toHaveCount(0);
+
+  await service.selectOption('openai');
+  await expect(model.locator('option:checked')).toHaveText('GPT-6 Luna');
+  await model.selectOption('gpt-6.1-terra');
+  await expect
+    .poll(() => homeConfig(home))
+    .toMatchObject({
+      project02: {
+        translatorProvider: 'openai',
+        translatorModel: 'gpt-6.1-terra',
+      },
+    });
+  await page
+    .getByRole('main')
+    .getByRole('button', {name: 'AI Model', exact: true})
+    .click();
+  await expect(translator).toContainText('OpenAI API');
+
+  await translator.click();
+  await service.selectOption('');
+  await expect
+    .poll(() => homeConfig(home))
+    .not.toHaveProperty(['project02', 'translatorProvider']);
+  expect(homeConfig(home)).not.toHaveProperty(['project02', 'translatorModel']);
+  await expect(model).toHaveCount(0);
 });
 
 test('page.settings-advanced: the Advanced switch shows what most people never need and survives a reload, a row holding a value shows without it, and the plugin list opens what the app knows of a plugin', async ({

@@ -1,6 +1,6 @@
 use std::num::NonZeroU32;
 
-use p02_core::{ClientStamp, EventIdentity, Timestamp, VisibleMessage};
+use p02_core::{ClientStamp, EventIdentity, Timestamp, VisibleMessage, VisibleText};
 use p02_shared::{Identifier, redact_credentials, redact_object_credentials};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -23,6 +23,11 @@ pub struct ConversationTurn {
     /// and for a line an earlier build kept without it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<ClientStamp>,
+    /// The person's message as they wrote it, when the character read it
+    /// in her own language: what her translator is handed of it, and
+    /// nothing else reads it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written: Option<VisibleText>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub rang: Vec<Rang>,
     pub tool_rounds: Vec<ToolRound>,

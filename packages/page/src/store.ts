@@ -64,7 +64,12 @@ export type Message = {
   readonly messageId: string;
   readonly role: VisibleMessageRole;
   readonly speakerName: string;
+  /** The message as she read it or wrote it. */
   readonly text: string;
+  /** The person's line as they wrote it, when she read it in her own language. */
+  readonly written?: string;
+  /** Her message in the person's language, when she speaks another. */
+  readonly translation?: string;
   readonly sentAt: string;
   readonly readAt?: string;
   readonly app: string;
@@ -142,6 +147,10 @@ export type SettingsPage =
     }
   /** A character's own AI model, from her page. */
   | {readonly kind: 'character-model'; readonly characterId: string}
+  /** How her words are put into the person's language, from her page. */
+  | {readonly kind: 'translation-notes'; readonly characterId: string}
+  /** What does the translating, from AI Model. */
+  | {readonly kind: 'translator'}
   /** A bot's page: the home's own, or a character's. */
   | {
       readonly kind: 'bot';
@@ -1369,6 +1378,7 @@ function characterOfPage(page: SettingsPage): string | undefined {
     case 'remove':
     case 'feature':
     case 'character-model':
+    case 'translation-notes':
     case 'app':
     case 'get-apps':
     case 'app-file':
@@ -1417,6 +1427,7 @@ function summaryOf(
   return {
     id: character.id,
     displayName: character.displayName,
+    ...(character.language === undefined ? {} : {language: character.language}),
     enabled: character.enabled,
     builtIn: character.builtIn,
     state,
@@ -1452,11 +1463,14 @@ function pairingOf(
   };
 }
 
+/** A committed message from a frame or a page, each of its forms as the wire means it. */
 function messageOf(source: {
   readonly messageId: string;
   readonly role: VisibleMessageRole;
   readonly speakerName: string;
   readonly text: string;
+  readonly written?: string;
+  readonly translation?: string;
   readonly sentAt: string;
   readonly readAt?: string;
   readonly app: string;
@@ -1467,6 +1481,10 @@ function messageOf(source: {
     role: source.role,
     speakerName: source.speakerName,
     text: source.text,
+    ...(source.written === undefined ? {} : {written: source.written}),
+    ...(source.translation === undefined
+      ? {}
+      : {translation: source.translation}),
     sentAt: source.sentAt,
     ...(source.readAt === undefined ? {} : {readAt: source.readAt}),
     app: source.app,

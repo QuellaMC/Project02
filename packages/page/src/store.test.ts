@@ -56,7 +56,7 @@ const readAt = '2026-09-11T00:00:02.000Z';
 
 function health(...characters: readonly CharacterSummary[]): GatewayHealth {
   return {
-    protocolVersion: 18,
+    protocolVersion: 19,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -72,7 +72,7 @@ function ready(
   turns: readonly RunningTurn[] = [],
 ): GatewayReady {
   return {
-    protocolVersion: 18,
+    protocolVersion: 19,
     health: health(mira),
     confirmations,
     pairings: [],
@@ -413,6 +413,52 @@ describe('web store', () => {
         clientMessageId: 'line-1',
       },
     ]);
+  });
+
+  it("keeps both forms of a message as the wire gives them, from a frame or a page: the person's line as she read it and as they wrote it, hers in her words and in theirs", () => {
+    const written = 'Would you like some tea?';
+    const translation = 'I would love some.';
+    const live = [
+      progress({
+        kind: 'user_message',
+        messageId: 'm-1',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'お茶はいかが？',
+        written,
+        sentAt,
+        readAt,
+        app: 'messages',
+        source: 'web',
+        clientMessageId: 'line-1',
+      }),
+      progress({
+        kind: 'visible_reply',
+        messageId: 'm-2',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'いただきます。',
+        translation,
+        sentAt,
+        app: 'messages',
+      }),
+    ].reduce(applyEvent, opened());
+    const read = historyPageRead(
+      opened(),
+      conversationId,
+      {},
+      page([
+        {...committed('m-1', 'お茶はいかが？', 'line-1'), written},
+        {...committed('m-2', 'いただきます。'), translation},
+      ]),
+    );
+
+    for (const state of [live, read]) {
+      expect(state.thread?.messages).toMatchObject([
+        {text: 'お茶はいかが？', written},
+        {text: 'いただきます。', translation},
+      ]);
+    }
   });
 
   it("says a line is delivered once the daemon answers that her inbox has it, now or already, and not delivered when it refuses it or cannot queue it, saying why; a duplicate is the line in the log, and no answer after a line's end moves it", () => {
@@ -1360,8 +1406,12 @@ describe('web store', () => {
     expect(away.notices).toEqual([]);
   });
 
-  it("applies roster events, clears a maintenance note on a fresh start, and keeps another conversation's progress for it", () => {
-    let state = opened();
+  it("applies roster events, clears a maintenance note on a fresh start, keeps the language she speaks, and keeps another conversation's progress for it", () => {
+    const speaking: CharacterSummary = {...mira, language: 'ja'};
+    let state = applyEvent(opened(), {
+      kind: 'health_changed',
+      health: health(speaking),
+    });
 
     state = applyEvent(state, {
       kind: 'state_changed',
@@ -1381,7 +1431,7 @@ describe('web store', () => {
       state: 'ready',
     });
 
-    expect(state.health?.characters[0]).toEqual(mira);
+    expect(state.health?.characters[0]).toEqual(speaking);
 
     state = applyEvent(state, {
       kind: 'maintenance_failed',
@@ -1406,7 +1456,7 @@ describe('web store', () => {
       state: 'ready',
     });
 
-    expect(state.health?.characters[0]).toEqual(mira);
+    expect(state.health?.characters[0]).toEqual(speaking);
 
     const away = applyEvent(
       state,

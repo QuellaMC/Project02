@@ -2,6 +2,7 @@ import {describe, expect, it} from 'vitest';
 
 import type {LineState, Message} from './store.ts';
 import {
+  drawnOf,
   labelOf,
   laidOut,
   onHerPhone,
@@ -389,6 +390,38 @@ describe('thread layout', () => {
     expect([labelOf('telegram'), labelOf('messages')]).toEqual([
       'Telegram',
       undefined,
+    ]);
+  });
+
+  it("draws the person's line as they wrote it over what she read, hers in her words over their translation, what is in her language marked with it, and a message with one form as it is", () => {
+    const sentAt = nyc('2026-11-24T14:10');
+    const read: Message = {
+      ...mine(sentAt),
+      text: 'お茶はいかが？',
+      written: 'Would you like some tea?',
+    };
+    const translated: Message = {
+      ...hers(sentAt),
+      text: 'いただきます。',
+      translation: 'I would love some.',
+    };
+
+    expect(drawnOf(read, 'ja')).toEqual({
+      text: 'Would you like some tea?',
+      translation: {text: 'お茶はいかが？', lang: 'ja'},
+    });
+    expect(drawnOf(translated, 'ja')).toEqual({
+      text: 'いただきます。',
+      lang: 'ja',
+      translation: {text: 'I would love some.'},
+    });
+    // One form: the person's words in a language the page does not know,
+    // hers in her own; and with a character who speaks none, as they are.
+    expect(drawnOf(mine(sentAt), 'ja')).toEqual({text: 'Hi.'});
+    expect(drawnOf(hers(sentAt), 'ja')).toEqual({text: 'Hello.', lang: 'ja'});
+    expect([drawnOf(mine(sentAt)), drawnOf(hers(sentAt))]).toEqual([
+      {text: 'Hi.'},
+      {text: 'Hello.'},
     ]);
   });
 });

@@ -16,4 +16,7 @@ depends on p02-shared alone.
   names the others.
 - Visible text is normalized once, `\n` line endings and both ends
   trimmed; stored text that is not is refused, never rewritten.
+- A language is a BCP 47 tag as written, such as `ja` or `pt-BR`: subtags
+  of ASCII letters and digits joined by `-`, the first 2 to 8 letters and
+  each later one 1 to 8, 35 characters at most.
 - A moment is UTC to the millisecond, `2026-06-15T00:00:00.000Z`.

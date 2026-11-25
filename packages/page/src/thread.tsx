@@ -11,8 +11,10 @@ import {
   type WebState,
 } from './store.ts';
 import {
+  drawnOf,
   laidOut,
   type Divider,
+  type Form,
   type Placement,
   type Status,
 } from './thread-layout.ts';
@@ -149,7 +151,7 @@ export function ThreadPane({
               key={placed.message.messageId}
               own={placed.own}
               speaker={placed.message.speakerName}
-              text={placed.message.text}
+              {...drawnOf(placed.message, character?.language)}
               placement={placed}
             />
           ))}
@@ -195,6 +197,10 @@ export function Composer({
   readonly session: Session;
 }) {
   const name = characterName(state, thread.characterId);
+  const translated =
+    state.health?.characters.find(
+      character => character.id === thread.characterId,
+    )?.language !== undefined;
   const typed = composerText(state);
   // Nothing can be sent into an address that will never work again; the
   // banner says where to go, and what was typed stays here.
@@ -210,7 +216,9 @@ export function Composer({
     >
       <input
         aria-label={`Message ${name}`}
-        placeholder={`Message ${name}`}
+        placeholder={
+          translated ? 'Write in your own language' : `Message ${name}`
+        }
         value={typed}
         onChange={event => {
           session.compose(event.currentTarget.value);
@@ -274,10 +282,11 @@ function Typing({name}: {readonly name: string}) {
  * A bubble, with what stands above it and under it where the thread's
  * layout puts anything there. Whose it is, `speaker`, is said to a reader
  * of the screen and not drawn: the side and the colour say it to the eye.
- * A line of the person's not yet committed is faint while it is sending,
- * and one that did not reach her is a button that takes it back into the
- * message box, which takes the focus. Her phone draws its threads with it
- * too.
+ * Its words carry their language when the chat knows it, and a translation
+ * stands under them, smaller, past a hairline. A line of the person's not
+ * yet committed is faint while it is sending, and one that did not reach
+ * her is a button that takes it back into the message box, which takes the
+ * focus. Her phone draws its threads with it too.
  */
 export function Bubble({
   own = false,
@@ -285,6 +294,8 @@ export function Bubble({
   speaker,
   placement,
   text,
+  lang,
+  translation,
   onTakeBack,
 }: {
   readonly own?: boolean;
@@ -293,6 +304,10 @@ export function Bubble({
   readonly speaker?: string;
   readonly placement?: Placement;
   readonly text: string;
+  /** The language its words are in, when whoever draws it knows. */
+  readonly lang?: string | undefined;
+  /** The same words in the other's language. */
+  readonly translation?: Form;
   /** Takes back a line that did not reach her. */
   readonly onTakeBack?: () => void;
 }) {
@@ -311,7 +326,14 @@ export function Bubble({
       {speaker === undefined ? null : (
         <span className="visually-hidden">{`${speaker}: `}</span>
       )}
-      <span className="bubble-text">{text}</span>
+      <span className="bubble-text" lang={lang}>
+        {text}
+      </span>
+      {translation === undefined ? null : (
+        <span className="bubble-translation" lang={translation.lang}>
+          {translation.text}
+        </span>
+      )}
     </>
   );
 

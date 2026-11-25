@@ -407,7 +407,7 @@ function health(
   accounts: GatewayHealth['accounts'] = [],
 ): GatewayHealth {
   return {
-    protocolVersion: 18,
+    protocolVersion: 19,
     homeRoot: '/home/person/.project02',
     config: {diagnostics: []},
     packages: {diagnostics: []},
@@ -1237,6 +1237,11 @@ describe('settings model', () => {
       kind: 'character',
       characterId: 'mira',
     });
+    expect(parentOf({kind: 'translation-notes', characterId: 'mira'})).toEqual({
+      kind: 'character',
+      characterId: 'mira',
+    });
+    expect(parentOf({kind: 'translator'})).toEqual({kind: 'model'});
     expect(parentOf({kind: 'bot', target: hers, from: 'character'})).toEqual({
       kind: 'character',
       characterId: 'mira',

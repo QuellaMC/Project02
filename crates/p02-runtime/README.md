@@ -38,6 +38,18 @@ turn ended.
   sent, however long it waited, and is announced with when she read it,
   the turn's own moment; each reply of hers is sent as it is committed,
   its commit keeping the app it went in.
+- **Her language.** When her `Mind` hands out a translator, the person's
+  line reaches her in her language: its event keeps what they wrote, and
+  it is committed as she reads it, what they wrote beside it. Each
+  message of hers is put into the person's language before its commit,
+  while she is seen writing, and committed with it beside her words. The
+  translator is handed the conversation's newest six messages before the
+  one it puts into the other language, each as its author wrote it, and
+  for hers the person's newest message as they wrote it. One already in
+  the other's language is committed alone, as is a message of hers that
+  could not be put into theirs. A line that could not be put into hers is
+  refused before anything of it is committed, as a blank text is: its
+  event and the refusal are in the log, and she is never asked.
 - **Failure.** A failed store write, or settings that no longer build
   her, fail the turn: its rejection is recorded if it can be, and her
   actor restarts her. The thread opened again closes a turn a crash left

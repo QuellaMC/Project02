@@ -12,6 +12,7 @@ import {
   CharacterModelPage,
   CharacterPage,
   FeaturePage,
+  TranslationNotesPage,
 } from './settings-character.tsx';
 import {
   BackButton,
@@ -30,6 +31,7 @@ import {
   ModelPage,
   PluginPage,
   ServicePage,
+  TranslatorPage,
   YouPage,
 } from './settings-pages.tsx';
 import {BotPage, TelegramPage} from './settings-telegram.tsx';
@@ -118,6 +120,10 @@ function PageShown({
       );
     case 'character-model':
       return <CharacterModelPage ctx={ctx} characterId={page.characterId} />;
+    case 'translation-notes':
+      return <TranslationNotesPage ctx={ctx} characterId={page.characterId} />;
+    case 'translator':
+      return <TranslatorPage ctx={ctx} />;
     case 'bot':
       return <BotPage ctx={ctx} page={page} />;
     case 'plugin':

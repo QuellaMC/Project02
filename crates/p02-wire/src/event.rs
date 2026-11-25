@@ -140,7 +140,13 @@ pub enum TurnProgress {
         message_id: MessageId,
         speaker_id: Identifier,
         speaker_name: SpeakerName,
+        /// The line as she read it: in her language when she speaks another
+        /// than the person.
         text: VisibleText,
+        /// The line as the person wrote it, when she read it in her own
+        /// language.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        written: Option<VisibleText>,
         sent_at: Timestamp,
         /// When she read it: the moment her turn took it.
         read_at: Timestamp,
@@ -154,6 +160,10 @@ pub enum TurnProgress {
         speaker_id: Identifier,
         speaker_name: SpeakerName,
         text: VisibleText,
+        /// The same words in the person's language, when she speaks
+        /// another.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        translation: Option<VisibleText>,
         sent_at: Timestamp,
         /// The id of the app it went in, as `messages` or `telegram`.
         app: String,

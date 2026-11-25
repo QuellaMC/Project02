@@ -149,13 +149,13 @@ pub(crate) fn hers(home: &Home, conversation: &str, message: &str) -> Result<Her
 }
 
 /// The newest messages of the conversation between `character` and the
-/// person on `home` that are in `app`, `count` at most, oldest first, as
+/// person on `home` that are `wanted`, `count` at most, oldest first, as
 /// the scrollback reads them, however far back they lie: none while the
 /// conversation was never made.
 pub(crate) fn newest(
     home: &Home,
     character: &Identifier,
-    app: &str,
+    wanted: impl Fn(&HistoryMessage) -> bool,
     count: usize,
 ) -> Result<Vec<HistoryMessage>, StorageError> {
     let Some(conversation) = p02_runtime::Conversation::find(home, character)? else {
@@ -168,15 +168,15 @@ pub(crate) fn newest(
     let mut newest = Vec::new();
 
     for segment in (0..segments.numbers.len()).rev() {
-        let wanted = count - newest.len();
+        let missing = count - newest.len();
 
         newest.extend(
             segments
                 .messages(segment)?
                 .iter()
                 .rev()
-                .filter(|message| message.app == app)
-                .take(wanted)
+                .filter(|message| wanted(message))
+                .take(missing)
                 .cloned(),
         );
 
@@ -373,9 +373,10 @@ impl Segments {
 }
 
 /// The messages `records`, one segment's, committed: each with when it was
-/// sent and the app it is in, and the person's lines with when she read
-/// them, the moment of the record that holds each, and the stamps they
-/// carry. A message of hers an earlier build kept names no app: it is in
+/// sent, the app it is in and its other form when it has one, and the
+/// person's lines with when she read them, the moment of the record that
+/// holds each, and the stamps they carry. A message of hers an earlier
+/// build kept names no app: it is in
 /// the app of the person's line nearest before it in the segment, which it
 /// answered, and in Messages when there is none.
 fn messages_of(records: &[LogRecord]) -> Vec<HistoryMessage> {
@@ -403,6 +404,8 @@ fn messages_of(records: &[LogRecord]) -> Vec<HistoryMessage> {
                 speaker_id: message.speaker_id,
                 speaker_name: message.speaker_name,
                 text: message.text,
+                written: commit.written().cloned(),
+                translation: commit.translation().cloned(),
                 sent_at: message.sent_at,
                 read_at,
                 app: app.to_owned(),

@@ -1,10 +1,10 @@
 //! A character's bot: her thread with the person, opened once the bot
 //! knows its name; a paired account's line handed to her inbox, and her
 //! typing shown in its chat while she writes in the turn it began; each
-//! message she sends in Telegram posted whole in every paired chat, and
-//! nothing else of her conversation; and a card with Approve and Deny for
-//! each confirmation a turn of this bot's line raises. Nothing is read from
-//! history.
+//! message she sends in Telegram posted whole in every paired chat, its
+//! translation under it when it has one, and nothing else of her
+//! conversation; and a card with Approve and Deny for each confirmation a
+//! turn of this bot's line raises. Nothing is read from history.
 
 use p02_core::{ClientStamp, ConversationId};
 use p02_shared::Identifier;
@@ -161,12 +161,21 @@ impl Character {
     }
 
     /// A message of hers, once committed, posted whole when she sent it in
-    /// Telegram.
+    /// Telegram: her words, and when it has a translation, an empty line
+    /// and the translation under them.
     fn progressed(chat: &Chat, progress: &TurnProgress) {
-        if let TurnProgress::VisibleReply { app, text, .. } = progress
+        if let TurnProgress::VisibleReply {
+            app,
+            text,
+            translation,
+            ..
+        } = progress
             && app == CONNECTOR
         {
-            chat.outbox.post(text.to_string());
+            chat.outbox.post(match translation {
+                Some(translation) => format!("{text}\n\n{translation}"),
+                None => text.to_string(),
+            });
         }
     }
 }

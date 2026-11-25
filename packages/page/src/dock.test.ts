@@ -31,9 +31,9 @@ function character(id: string, displayName: string): CharacterSummary {
 /** A live tab of Mira's and Nova's home, nothing waiting. */
 function live(): WebState {
   return installSnapshot(initialState, {
-    protocolVersion: 18,
+    protocolVersion: 19,
     health: {
-      protocolVersion: 18,
+      protocolVersion: 19,
       homeRoot: '/home/person/.project02',
       config: {diagnostics: []},
       packages: {diagnostics: []},

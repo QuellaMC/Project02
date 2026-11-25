@@ -66,6 +66,10 @@
   --red-ink: #d70015;
   /* Telegram's own colour, the same in light and dark. */
   --telegram: #0f7fb0;
+  /* On the person's bubble, in whichever app's colour: the hairline above a translation. */
+  --own-rule: rgba(255, 255, 255, 0.32);
+  /* And the translation's words, the same in light and dark. */
+  --own-quiet: rgba(255, 255, 255, 0.78);
   /*
    * The dock's motion, as the approved prototype times it: it opens easing
    * out, and closes a little quicker, easing in and out. The chat's lines
@@ -143,6 +147,7 @@
     --edge-shadow: 0 0 0 0.5px rgba(255, 255, 255, 0.14);
     --green-ink: #30d158;
     --red-ink: #ff6961;
+    --own-rule: rgba(255, 255, 255, 0.3);
   }
 }
 
@@ -158,7 +163,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
   color: inherit;
 }
@@ -721,6 +727,16 @@ code {
   white-space: nowrap;
 }
 
+/*
+ * It is placed out of the flow, against the nearest box that is placed
+ * itself: with none, against the window, where it keeps its place in a
+ * conversation however far that has scrolled, and so stands far under the
+ * window and makes the whole window scroll. What holds it is that box.
+ */
+:where(:has(> .visually-hidden)) {
+  position: relative;
+}
+
 .thread {
   flex: 1 1 0;
   min-height: 0;
@@ -838,6 +854,33 @@ code {
 
 .bubble-theirs {
   align-self: flex-start;
+}
+
+/*
+ * Words marked with their language are drawn in its own letterforms. The
+ * system's font, first for everything else, is another language's on a
+ * machine set to Chinese or Korean and would draw a Japanese line in that
+ * language's shapes; without it, each mark picks its own.
+ */
+body [lang] {
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto,
+    sans-serif;
+}
+
+/* Under a bubble's words, 6px apart, the same words in the other's language, a size smaller, past a hairline 6px above them. */
+.bubble-translation {
+  display: block;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--divider);
+  font-size: 13px;
+  color: var(--secondary);
+}
+
+.bubble-own .bubble-translation {
+  border-top-color: var(--own-rule);
+  color: var(--own-quiet);
 }
 
 /* Under a message of the same sender's with nothing between, 2px apart where the thread's lines are 8px. */
@@ -1392,6 +1435,48 @@ button.bubble {
   padding: 6px 16px 6px 0;
 }
 
+/* A pair of her words on one line: what she writes, an arrow, how it is shown in a wider box, and the button that removes the pair. */
+.line-pair {
+  gap: 16px;
+  padding: 9px 16px 9px 0;
+}
+
+.line-pair > .box {
+  flex: 1 1 0;
+}
+
+.line-pair > .box ~ .box {
+  flex-grow: 1.4;
+}
+
+.line-pair .input {
+  padding-right: 10px;
+}
+
+.arrow {
+  flex: none;
+  color: var(--secondary);
+}
+
+.pair-remove {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--secondary);
+  display: grid;
+  place-items: center;
+}
+
+/* A row that adds one more to the card's list: its plus and its words in the link's colour. */
+.line-add {
+  gap: 8px;
+  color: var(--link);
+}
+
 .cell-problem {
   margin: -2px 16px 0 0;
   padding: 0 0 10px;
@@ -1435,6 +1520,11 @@ button.bubble {
 
 .value-link {
   color: var(--link);
+}
+
+/* A value that is no setting but what something is, read as plainly as a row's name. */
+.value-label {
+  color: var(--label);
 }
 
 .value-problem {
@@ -1807,6 +1897,40 @@ button.bubble {
   right: 10px;
   pointer-events: none;
   color: var(--secondary);
+}
+
+/* A box of several lines that is its card, as the design draws How She Sounds, lit as a box is while in use; it grows with what is typed where the browser can. */
+.lines-field {
+  position: relative;
+  display: block;
+}
+
+.lines-input {
+  display: block;
+  width: 100%;
+  min-height: 92px;
+  padding: 12px 16px;
+  border: 1px solid transparent;
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  outline: none;
+  font-size: 14px;
+  line-height: 1.45;
+  resize: none;
+  field-sizing: content;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+
+.lines-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.lines-field > .box-check {
+  top: 14px;
 }
 
 .segmented {

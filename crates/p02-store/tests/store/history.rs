@@ -5,7 +5,8 @@ use std::num::NonZeroU64;
 
 use p02_contracts::Rang;
 use p02_core::{
-    Conversation, ConversationId, Participant, SessionId, Timestamp, UserLine, VisibleMessageRole,
+    Conversation, ConversationId, Participant, SessionId, Timestamp, VisibleMessageRole,
+    VisibleText,
 };
 use p02_store::{LogRecord, SessionWriter};
 
@@ -68,7 +69,7 @@ fn a_log_makes_its_session_through_the_core_gate_numbering_after_the_last_messag
     assert_eq!(
         session
             .user_message(
-                UserLine::new("Five?").unwrap(),
+                VisibleText::normalize("Five?").unwrap(),
                 sam(),
                 Timestamp::new("2026-10-21T09:00:00.000Z").unwrap()
             )

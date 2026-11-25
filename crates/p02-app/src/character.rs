@@ -16,19 +16,23 @@ use p02_config::{
     CharacterSettings, HostSettings, MaterializeError, ReadSettingsError, Resolution, materialize,
 };
 use p02_contracts::{CharacterStorage, FileStoreBackend, Rang, RoleModelAdapter};
-use p02_core::{AppNames, SpeakerName, Timestamp};
+use p02_core::{AppNames, SpeakerName, Timestamp, VisibleMessageRole, VisibleText};
 use p02_phone::SetRing;
 use p02_plugins::{PHONE_PLUGIN, PluginHost};
 use p02_role_model::{
     AnthropicSettings, ChatgptSettings, NvidiaSettings, OpenaiSettings, PlanSignIn,
     ServiceSettings, select_adapter,
 };
-use p02_runtime::{Character, CompletedTurn, Conversation, Delivery, Mind, Progress, Submission};
+use p02_runtime::{
+    Character, CompletedTurn, Conversation, Delivery, Mind, Progress, Said, Submission,
+    Translation, Translator,
+};
 use p02_shared::{Identifier, error_sentence};
-use p02_store::{CharacterData, Inbox, QueuedLine, RuntimeRejection, StorageError};
+use p02_store::{CharacterData, Inbox, QueuedLine, StorageError};
 use p02_wire::{
-    CharacterState, Diagnostic, Event, MaintenanceFailure, OpenOutcome, OpenRefusal, PhoneRing,
-    PlanAccount, RoleModelProvider, RunningTurn, TurnRefusal, TurnStamp, TurnStatus,
+    CharacterState, Diagnostic, Event, HistoryMessage, MaintenanceFailure, OpenOutcome,
+    OpenRefusal, PhoneRing, PlanAccount, RoleModelProvider, RunningTurn, TurnRefusal, TurnStamp,
+    TurnStatus,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, sleep_until};
@@ -39,10 +43,12 @@ use crate::config_control::CharacterConfig;
 use crate::confirmation::Broker;
 use crate::connections::PersonConnections;
 use crate::daemon::{Daemon, WeakDaemon, World, blocking};
+use crate::history;
 use crate::outcome::{duplicate, running_turn, storage_failure, told};
 use crate::phone::HerChats;
 use crate::reconcile::settings_now;
 use crate::rings::{Rings, rang, ringing};
+use crate::translator::Between;
 
 /// What a character whose settings choose no AI service needs, which the
 /// settings page answers.
@@ -253,10 +259,12 @@ fn not_ready(id: &Identifier, health: &CharacterHealth) -> String {
 
 /// What she is built of, from her package and her settings as they were
 /// when she was built: who she is, her data, the name the person goes by,
-/// the model she answers with, or what she needs for one, the plugins she
-/// answers with, her model's window, and those settings and the home's
-/// sign-in to the plan she thinks with, if she does, which her next
-/// request compares with what they are then.
+/// the model she answers with, or what she needs for one, the model her
+/// translator asks when her settings choose it a service of its own, or
+/// what it needs for one, the plugins she answers with, her model's
+/// window, and those settings and the home's sign-in to the plan she or
+/// her translator thinks with, if either does, which her next request
+/// compares with what they are then.
 #[derive(Debug)]
 struct Built {
     character: Character,
@@ -264,6 +272,7 @@ struct Built {
     person: SpeakerName,
     context_window: NonZeroU64,
     model: Result<Arc<dyn RoleModelAdapter>, String>,
+    translator: Option<Result<Arc<dyn RoleModelAdapter>, String>>,
     host: PluginHost,
     settings: CharacterSettings,
     signed_in: Option<PlanAccount>,
@@ -817,14 +826,9 @@ impl Actor {
                 ),
                 None,
             ),
-            Delivery::InputRejected { message } => (
-                Ending::rejected(
-                    RuntimeRejection::InputValidationRejected.as_str(),
-                    message,
-                    false,
-                ),
-                None,
-            ),
+            Delivery::LineRefused(turn) => {
+                (Ending::rejected(turn.reason, turn.message, false), None)
+            }
             Delivery::Rejected(turn) => (Ending::rejected(turn.reason, turn.message, true), None),
             Delivery::Completed(CompletedTurn {
                 post_commit_failures,
@@ -969,6 +973,20 @@ impl Her {
         self.health.borrow().state
     }
 
+    /// The person's newest message to her as they wrote it, by the
+    /// scrollback of their conversation, however far back it lies; none
+    /// while they never wrote, or where it cannot be read.
+    async fn person_wrote(&self) -> Option<VisibleText> {
+        let (home, id) = (self.world.home.clone(), self.id.clone());
+        let theirs = |message: &HistoryMessage| message.role == VisibleMessageRole::User;
+
+        blocking(move || history::newest(&home, &id, theirs, 1))
+            .await
+            .ok()?
+            .pop()
+            .map(|message| message.written.unwrap_or(message.text))
+    }
+
     /// The sentence she answers with while she takes nothing.
     fn not_ready(&self) -> String {
         not_ready(&self.id, &self.health.borrow())
@@ -1110,11 +1128,96 @@ impl Her {
 }
 
 /// Her parts as a turn runs on them, brought up to date with her settings
-/// before each of its requests after the first, and the model it runs on.
+/// before each of its requests after the first, the model it runs on, and
+/// her translator, while she speaks a language of her own and the person
+/// reads another.
 struct Current<'a> {
     her: &'a Her,
     built: &'a mut Built,
     adapter: Arc<dyn RoleModelAdapter>,
+    translator: Option<HerTranslator<'a>>,
+}
+
+impl<'a> Current<'a> {
+    fn new(her: &'a Her, built: &'a mut Built, adapter: Arc<dyn RoleModelAdapter>) -> Self {
+        let translator = HerTranslator::of(her, built, &adapter);
+
+        Self {
+            her,
+            built,
+            adapter,
+            translator,
+        }
+    }
+}
+
+/// Her translator as her turn has her: who it is between, the model it
+/// asks, or what that model needs, which fails every translation saying
+/// so, and her, on whom a message of hers it could not put into the
+/// person's language is noted as it happens.
+struct HerTranslator<'a> {
+    her: &'a Her,
+    model: Result<Arc<dyn RoleModelAdapter>, String>,
+    between: Between,
+}
+
+impl<'a> HerTranslator<'a> {
+    /// Hers as `built` has her, while she speaks a language of her own
+    /// and the person reads another: on the model her settings choose it,
+    /// else on `model`, the one she speaks with.
+    fn of(her: &'a Her, built: &Built, model: &Arc<dyn RoleModelAdapter>) -> Option<Self> {
+        Some(Self {
+            her,
+            model: built
+                .translator
+                .clone()
+                .unwrap_or_else(|| Ok(Arc::clone(model))),
+            between: Between::of(
+                built.settings.host(),
+                built.character.profile.display_name.clone(),
+            )?,
+        })
+    }
+}
+
+#[async_trait]
+impl Translator for HerTranslator<'_> {
+    async fn for_her(&self, line: &VisibleText, before: &[Said<'_>]) -> Translation {
+        match &self.model {
+            Ok(model) => self.between.for_her(model.as_ref(), line, before).await,
+            Err(needed) => Translation::Failed(needed.clone()),
+        }
+    }
+
+    async fn for_person(
+        &self,
+        message: &VisibleText,
+        before: &[Said<'_>],
+        newest: Option<&VisibleText>,
+    ) -> Translation {
+        // A turn knows the person's messages its session replays, and a
+        // session that continued may carry none: their newest is then the
+        // scrollback's, which keeps them all.
+        let scrolled = match newest {
+            Some(_) => None,
+            None => self.her.person_wrote().await,
+        };
+        let newest = newest.or(scrolled.as_ref());
+        let translation = match &self.model {
+            Ok(model) => {
+                self.between
+                    .for_person(model.as_ref(), message, before, newest)
+                    .await
+            }
+            Err(needed) => Translation::Failed(needed.clone()),
+        };
+
+        if let Translation::Failed(reason) = &translation {
+            self.her.note_maintenance(self.between.untranslated(reason));
+        }
+
+        translation
+    }
 }
 
 #[async_trait]
@@ -1143,12 +1246,19 @@ impl Mind for Current<'_> {
         self.built.context_window
     }
 
+    fn translator(&self) -> Option<&dyn Translator> {
+        self.translator
+            .as_ref()
+            .map(|translator| translator as &dyn Translator)
+    }
+
     /// Settings that no longer give her a model end the turn, as settings
     /// that no longer build her do.
     async fn refresh(&mut self) -> Result<bool, String> {
         let rebuilt = self.her.refresh(self.built).await?;
 
         self.adapter = self.built.model.clone()?;
+        self.translator = HerTranslator::of(self.her, self.built, &self.adapter);
         Ok(rebuilt)
     }
 }
@@ -1215,11 +1325,7 @@ async fn take_turn(
             her.world.events.emit(event);
         }
     };
-    let mut mind = Current {
-        her,
-        built,
-        adapter,
-    };
+    let mut mind = Current::new(her, built, adapter);
 
     her.broker.running(line.map(|line| TurnStamp {
         conversation_id: line.conversation_id.clone(),
@@ -1300,6 +1406,10 @@ fn assemble(
     )
     .map_err(|error| unmaterialized(id, error))?;
     let signed_in = plan_sign_in(world, settings.host());
+    let translator = settings
+        .host()
+        .translator()
+        .map(|own| model(world, &daemon, &own, signed_in.as_ref()));
     let model = model(world, &daemon, settings.host(), signed_in.as_ref());
     let cautions: Vec<&str> = resolution.cautions().map(Diagnostic::message).collect();
     let connections = PersonConnections::new(Arc::clone(world), daemon.clone(), stop);
@@ -1340,6 +1450,7 @@ fn assemble(
             person: settings.host().user_display_name.clone(),
             context_window: settings.host().context_window_tokens,
             model,
+            translator,
             host,
             settings,
             signed_in,
@@ -1348,9 +1459,11 @@ fn assemble(
 }
 
 /// Whom the home is signed in to a ChatGPT plan as, while `host` chooses
-/// the plan: what her model depends on beyond her settings.
+/// the plan for her or for her translator: what their models depend on
+/// beyond her settings.
 fn plan_sign_in(world: &World, host: &HostSettings) -> Option<PlanAccount> {
-    (host.role_model_provider == Some(RoleModelProvider::Chatgpt))
+    [host.role_model_provider, host.translator_provider]
+        .contains(&Some(RoleModelProvider::Chatgpt))
         .then(|| world.chatgpt.account())
         .flatten()
 }

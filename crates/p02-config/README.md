@@ -17,7 +17,12 @@ under the store's locks, and its views and changes are p02-wire's types.
   The host's are declared in `src/host.rs`, each once, in the order the
   settings page shows them, with the rule its values meet and the typed
   value a character runs on; a plugin's come from its manifest, and a
-  connector's from this build. A scope says which document may set a
+  connector's from this build. Among the host's are the translator's: the
+  language the person reads, Automatic while unset; her translation notes,
+  her words as pairs and how she sounds, each hers alone; and the service
+  and model that translate, the home's alone, her own model while unset,
+  which a character's settings give as her own model's settings with that
+  service and model in their place. A scope says which document may set a
   value: the home's for every character, a character's alone, or the
   home's alone. A value outside its scope is a warning and never in
   effect. A view hands a page what a declaration says of drawing it: a
@@ -64,8 +69,8 @@ under the store's locks, and its views and changes are p02-wire's types.
   repeats a value.
 - **Her package's settings.** At her first start, and the first after her
   package's version changes, the plugins her package expects are switched
-  on in her overlay and its values filled in where she has none, never a
-  credential, a server or a path. Until then her view shows them as her
-  start will merge them.
+  on in her overlay and its values and her translation notes filled in
+  where she has none, never a credential, a server or a path, and no other
+  host field. Until then her view shows them as her start will merge them.
 - **Secrets.** Every reader but a connector sees a secret as
   `[redacted]`, and a fingerprint counts its presence, never its value.

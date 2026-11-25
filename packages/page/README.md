@@ -62,7 +62,15 @@ words and the time as the viewer's system writes one, where they are, and
 each bubble says its own on hover; the person's bubbles take their app's
 colour, Telegram's or the page's blue; one sender's messages in a row sit
 close; and the head of the chat names her, while a bubble says whose it is
-only to a reader of the screen. A line of the
+only to a reader of the screen. With a character who speaks another
+language, as health says, a message shows what was written and, where it
+has them, the same words in the other's language under a hairline, a size
+smaller: the person's line as they wrote it over what she read, hers over
+its translation. What is in her language carries her language's tag, and
+what carries a tag is drawn without the system's own font, which on a
+machine set to Chinese or Korean is that language's: so a Japanese line
+has Japanese letterforms everywhere. Her message box asks the person to
+write in their own language. A line of the
 person's not yet committed is drawn as theirs sent now in Messages, and
 under their newest message one line says how far it got: `Sending…`, the
 bubble faint, until the daemon answers; `Delivered` once her inbox has it;
@@ -84,7 +92,8 @@ the roster until her chat opens: one dot however many wait, the tab's
 own, so a reload starts without.
 In the desktop app, a message of hers the stream commits in Messages
 while the main window does not have the focus has the app show a
-notification, her name over her words, once for each message, by the
+notification, her name over her words, or over their translation when
+they have one, once for each message, by the
 rule of `notifications.ts`, pure and tested in Node: none for her writing,
 a page of the scrollback or a snapshot, for what she sends in Telegram,
 or while the window is in front. The first asks the system's permission,
@@ -120,8 +129,8 @@ daemon's two verbs, and every value it shows is a view's: the home's and
 each character's, read when the window opens and again on every
 `health_changed` frame, with what is typed kept. `settings.ts` holds its
 rules, pure and tested in Node: where the window is, the views, what is
-typed and not saved, what a box sends and when, one operation per change,
-and how each change ends — applied shows a check, a refusal or a write
+typed and not saved, what a box sends, trimmed, and when, one operation
+per change, and how each change ends — applied shows a check, a refusal or a write
 that failed stays at its row with the person's text, and someone saving
 first sends the same change again once while its row still holds what it
 held. `settings-model.ts` works out what each page shows: which rows a
@@ -143,6 +152,25 @@ heartbeat, how often she gets a moment of her own, a group of its own
 between Mind & Body and Telegram: one row of choices, saved at the
 click. The chat and the window draw from one set of tokens in
 `styles.css`, light and dark.
+
+Every character's page has, after her heartbeat, what she speaks: a
+menu of Any Language, which unsets it, and the languages its field
+suggests, with one it holds that it does not suggest under that
+language's own name. While a character speaks a language of her own, as
+health says, the window has the translator, by the rules of
+`translator.ts`, pure and tested in Node, and none of it while none
+does: the person's page has Your Language, a menu as hers is, of
+Automatic and the languages; AI Model has what translates, under
+Helpers; and her page has her Translation Notes. Their page holds her words
+and phrases, a pair of boxes each, her words in her language, each pair
+removable, and Add a Note while she has fewer than a hundred; they are
+saved as any box is, her settings holding the pairs both of whose boxes
+are filled, and a pair with a box still empty stays on the page until
+it is filled. Under them how she sounds, a box of several lines. The
+translator's page is drawn as her own AI model's is: Same AI Model as
+Hers, which takes away its service and model, or a service connected
+with its model, picked from that service's models; another service takes
+away the model chosen for the one before.
 
 The window adds and removes characters over three more verbs. Add
 Character opens the system's file chooser. The file's text goes to the
@@ -259,7 +287,9 @@ drawn as its thread, never read as a view: once one is on screen the
 window opens her conversation as the chat does and reads its newest page
 by the chat's rules, `store.ts`'s, and a message the stream commits joins
 it as it joins the chat; no earlier page is read. It shows what went
-through that app alone, laid out by `thread-layout.ts` as the chat is and
+through that app alone, the person's lines as she read them and no
+translation, each marked with her language, laid out by `thread-layout.ts`
+as the chat is and
 mirrored, since it is her phone: hers at the line's end in the app's
 colour and the person's at its start on a card, a time where time has
 passed and no app's name, one app being on screen; her typing is not

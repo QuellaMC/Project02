@@ -571,6 +571,7 @@ mod tests {
                     identity,
                     user_message,
                     source: None,
+                    written: None,
                     rang: Vec::new(),
                     tool_rounds,
                     final_replies,

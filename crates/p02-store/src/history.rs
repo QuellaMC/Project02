@@ -156,6 +156,7 @@ impl Gathered<'_> {
             identity: self.identity.clone(),
             user_message: self.line.map(|line| line.message().clone()),
             source: self.line.and_then(MessageCommitted::source).cloned(),
+            written: self.line.and_then(MessageCommitted::written).cloned(),
             rang: self.rang.to_vec(),
             tool_rounds,
             final_replies,

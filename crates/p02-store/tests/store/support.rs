@@ -353,6 +353,7 @@ impl TurnScript<'_> {
                 .message(VisibleMessageRole::User, &line, self.identity.created_at());
         let commit = MessageCommitted::user(
             message.clone(),
+            None,
             ClientStamp::new("web").unwrap(),
             ClientStamp::new(client_message_id).unwrap(),
         );
@@ -421,6 +422,7 @@ impl TurnScript<'_> {
                 self.messages.push(message.id.clone());
                 self.push(RecordBody::MessageCommitted(MessageCommitted::character(
                     message,
+                    None,
                     round,
                     MESSAGES.to_owned(),
                     vec![evidence],

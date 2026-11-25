@@ -25,7 +25,9 @@ token.
   she writes in the turn that line began, kept up past Telegram's five
   seconds, and makes a confirmation its line raised a card with Approve and
   Deny. Each message she sends in Telegram is posted whole, once it is
-  committed, in every paired chat; nothing else of her conversation is: not
-  what she sends in another app, nor what the person writes elsewhere. The
-  management bot answers `/status`, `/pending`, `/approve` and `/deny`, and
-  shows every confirmation and pairing request as a card.
+  committed, in every paired chat: her words, and when it has a
+  translation, an empty line and the translation, in one message. Nothing
+  else of her conversation is: not what she sends in another app, nor what
+  the person writes elsewhere. The management bot answers `/status`,
+  `/pending`, `/approve` and `/deny`, and shows every confirmation and
+  pairing request as a card.

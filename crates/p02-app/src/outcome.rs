@@ -74,6 +74,7 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
     let (said, changed) = match progress {
         Progress::UserMessage {
             message,
+            written,
             source,
             client_message_id,
             read_at,
@@ -83,6 +84,7 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
                 speaker_id: message.speaker_id,
                 speaker_name: message.speaker_name,
                 text: message.text,
+                written,
                 sent_at: message.sent_at,
                 read_at,
                 app: app_of(Some(&source)).to_owned(),
@@ -91,12 +93,17 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
             }),
             true,
         ),
-        Progress::VisibleReply { message, app } => (
+        Progress::VisibleReply {
+            message,
+            translation,
+            app,
+        } => (
             Some(TurnProgress::VisibleReply {
                 message_id: message.id,
                 speaker_id: message.speaker_id,
                 speaker_name: message.speaker_name,
                 text: message.text,
+                translation,
                 sent_at: message.sent_at,
                 app,
             }),

@@ -131,8 +131,9 @@ pub enum HistoryRefusal {
 }
 
 /// A committed message as the scrollback shows it: when it was sent, the
-/// app it is in, by its id, and for the person's line when she read it and
-/// the stamps its client put on it.
+/// app it is in, by its id, its other form when she speaks another
+/// language than the person, and for the person's line when she read it
+/// and the stamps its client put on it.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -141,7 +142,15 @@ pub struct HistoryMessage {
     pub role: VisibleMessageRole,
     pub speaker_id: Identifier,
     pub speaker_name: SpeakerName,
+    /// The message as she read it or wrote it.
     pub text: VisibleText,
+    /// The person's line as they wrote it, when she read it in her own
+    /// language.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub written: Option<VisibleText>,
+    /// Her message in the person's language, when she speaks another.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub translation: Option<VisibleText>,
     pub sent_at: Timestamp,
     /// When she read the person's line: the moment her turn took it. Hers
     /// has none.
