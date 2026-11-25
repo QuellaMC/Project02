@@ -330,7 +330,7 @@
               and package diagnostics, the roster with each character's state,
               whether she comes with the app (<code>builtIn</code>: she can be
               switched off, never removed), the language she speaks when her
-              package names one (<code>language</code>, see Her language) and
+              settings say one (<code>language</code>, see Her language) and
               her last maintenance failure,
               <code>connectors</code>: for
               each built-in connector, whether a process of it is on the stream,
@@ -1613,8 +1613,10 @@ data: {…}</code></pre>
       </p>
 
       <p>
-        A character whose package names the language she speaks
-        (<code>identity.language</code>, a tag such as <code>ja</code>) and
+        A character whose settings say the language she speaks
+        (<code>language</code>, a tag such as <code>ja</code>, hers alone:
+        her package brings it as <code>identity.language</code> when her
+        story fixes one, and the person can choose her one or none) and
         the person read each other through her own model, or the service and
         model the home's settings choose for translating, which puts each
         message into the other's language, keeping her words and how she
@@ -1631,10 +1633,10 @@ data: {…}</code></pre>
         <code>line_not_translated</code> and a message saying why. A message
         of hers that cannot be put into the person's is committed in her words
         alone, and <code>maintenance_failed</code> says so. A character whose
-        package names no language, or the one the person chose to read, is
-        never translated. Her summary in health carries the tag as her
-        package wrote it, as <code>language</code>, absent when it names
-        none.
+        settings say no language, or the one the person chose to read, is
+        never translated: her model answers in the language the person
+        writes. Her summary in health carries the tag as her settings hold
+        it, as <code>language</code>, absent when they hold none.
       </p>
 
       <h2>What a client never has to notice</h2>

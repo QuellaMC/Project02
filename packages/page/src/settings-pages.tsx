@@ -63,6 +63,7 @@ import {
 } from './settings.ts';
 import type {SettingsPage} from './store.ts';
 import {
+  languageAt,
   sameAsHers,
   translated,
   translatorChanges,
@@ -70,7 +71,6 @@ import {
   translatorModelRow,
   translatorRow,
   translatorWords,
-  yourLanguage,
   yourLanguageRow,
 } from './translator.ts';
 
@@ -175,7 +175,7 @@ export function YouPage({ctx}: {readonly ctx: Ctx}) {
 
 /** The language the person reads, Automatic or one of the menu's, saved at the choice. */
 function YourLanguage({ctx}: {readonly ctx: Ctx}) {
-  const language = yourLanguage(ctx.settings);
+  const language = languageAt(ctx.settings, yourLanguageRow);
 
   return language === undefined ? null : (
     <Group

@@ -78,8 +78,8 @@ pub struct PersonAccount {
 pub struct CharacterSummary {
     pub id: Identifier,
     pub display_name: SpeakerName,
-    /// The language she speaks, as her package names it, when it names
-    /// one: she and the person read each other through a translator.
+    /// The language she speaks, when her settings say one: she and the
+    /// person read each other through a translator.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub language: Option<LanguageTag>,
     pub enabled: bool,

@@ -20,8 +20,9 @@ with an outcome of p02-wire, never an error.
   thread opens and her lines wait until a change gives her one. Her stop
   lets the turn in flight finish; the lines behind it wait for her next
   start.
-- **Her translator**, for a character whose package names her language,
-  while the person has not chosen hers as theirs, is the model she speaks
+- **Her translator**, for a character whose settings say the language
+  she speaks, which her package brought or the person chose her, while
+  the person has not chosen hers as theirs, is the model she speaks
   with, or the service and model the home's settings choose it, built
   from her settings with those in place of hers, on the key, server and
   sign-in in effect for her. It is asked for a plain completion as the

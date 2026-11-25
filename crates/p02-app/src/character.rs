@@ -16,7 +16,7 @@ use p02_config::{
     CharacterSettings, HostSettings, MaterializeError, ReadSettingsError, Resolution, materialize,
 };
 use p02_contracts::{CharacterStorage, FileStoreBackend, Rang, RoleModelAdapter};
-use p02_core::{AppNames, LanguageTag, SpeakerName, Timestamp, VisibleText};
+use p02_core::{AppNames, SpeakerName, Timestamp, VisibleText};
 use p02_phone::SetRing;
 use p02_plugins::{PHONE_PLUGIN, PluginHost};
 use p02_role_model::{
@@ -256,18 +256,16 @@ fn not_ready(id: &Identifier, health: &CharacterHealth) -> String {
 }
 
 /// What she is built of, from her package and her settings as they were
-/// when she was built: who she is, the language she speaks when her
-/// package names one, her data, the name the person goes by, the model she
-/// answers with, or what she needs for one, the model her translator asks
-/// when her settings choose it a service of its own, or what it needs for
-/// one, the plugins she answers with, her model's window, and those
-/// settings and the home's sign-in to the plan she or her translator
-/// thinks with, if either does, which her next request compares with what
-/// they are then.
+/// when she was built: who she is, her data, the name the person goes by,
+/// the model she answers with, or what she needs for one, the model her
+/// translator asks when her settings choose it a service of its own, or
+/// what it needs for one, the plugins she answers with, her model's
+/// window, and those settings and the home's sign-in to the plan she or
+/// her translator thinks with, if either does, which her next request
+/// compares with what they are then.
 #[derive(Debug)]
 struct Built {
     character: Character,
-    language: Option<LanguageTag>,
     data: CharacterData,
     person: SpeakerName,
     context_window: NonZeroU64,
@@ -1115,7 +1113,7 @@ impl Her {
 
 /// Her parts as a turn runs on them, brought up to date with her settings
 /// before each of its requests after the first, the model it runs on, and
-/// her translator, while her package names her language and the person
+/// her translator, while she speaks a language of her own and the person
 /// reads another.
 struct Current<'a> {
     her: &'a Her,
@@ -1148,9 +1146,9 @@ struct HerTranslator<'a> {
 }
 
 impl<'a> HerTranslator<'a> {
-    /// Hers as `built` has her, while her package names her language and
-    /// the person reads another: on the model her settings choose it, else
-    /// on `model`, the one she speaks with.
+    /// Hers as `built` has her, while she speaks a language of her own
+    /// and the person reads another: on the model her settings choose it,
+    /// else on `model`, the one she speaks with.
     fn of(her: &'a Her, built: &Built, model: &Arc<dyn RoleModelAdapter>) -> Option<Self> {
         Some(Self {
             her,
@@ -1161,7 +1159,6 @@ impl<'a> HerTranslator<'a> {
             between: Between::of(
                 built.settings.host(),
                 built.character.profile.display_name.clone(),
-                built.language.clone()?,
             )?,
         })
     }
@@ -1425,7 +1422,6 @@ fn assemble(
                 profile: definition.profile.clone(),
                 persona: definition.persona.clone(),
             },
-            language: definition.language.clone(),
             data,
             person: settings.host().user_display_name.clone(),
             context_window: settings.host().context_window_tokens,

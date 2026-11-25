@@ -4,6 +4,7 @@ import {placeholderOf} from './settings-model.ts';
 import {home, operationFor, rowKey} from './settings.ts';
 import type {Settings} from './store.ts';
 import {
+  languageAt,
   languageName,
   notesHeld,
   notesShown,
@@ -17,7 +18,6 @@ import {
   translatorRow,
   translatorWords,
   wordsRow,
-  yourLanguage,
   yourLanguageRow,
 } from './translator.ts';
 import type {
@@ -204,11 +204,11 @@ describe('the translator in the settings', () => {
     expect(languageName('abcd')).toBe('abcd');
   });
 
-  it("offers Your Language as a menu of the languages its field suggests, under the names it gives them, then one it holds that it does not suggest, under that language's own name; Automatic holds none, and a choice writes the language, or on Automatic unsets it", () => {
+  it("offers a language, as Your Language, as a menu of the languages its field suggests, under the names it gives them, then one it holds that it does not suggest, under that language's own name; Automatic holds none, and a choice writes the language, or on Automatic unsets it", () => {
     const menu = (
       held: Readonly<Record<string, JsonValue>>,
       edits?: Readonly<Record<string, string>>,
-    ) => yourLanguage(settingsOf({home: homeView(held)}, edits));
+    ) => languageAt(settingsOf({home: homeView(held)}, edits), yourLanguageRow);
     const suggested = Object.entries(languages).map(([value, label]) => ({
       value,
       label,
@@ -231,7 +231,7 @@ describe('the translator in the settings', () => {
     expect(
       menu({userLanguage: 'ja'}, {[rowKey(yourLanguageRow)]: ''}),
     ).not.toHaveProperty('value');
-    expect(yourLanguage(settingsOf({}))).toBeUndefined();
+    expect(languageAt(settingsOf({}), yourLanguageRow)).toBeUndefined();
     expect(operationFor(yourLanguageRow.place, 'ja')).toEqual({
       kind: 'set',
       path: 'project02.userLanguage',

@@ -1033,7 +1033,7 @@
           "$ref": "#/$defs/SpeakerName"
         },
         "language": {
-          "description": "The language she speaks, as her package names it, when it names\none: she and the person read each other through a translator.",
+          "description": "The language she speaks, when her settings say one: she and the\nperson read each other through a translator.",
           "$ref": "#/$defs/LanguageTag"
         },
         "enabled": {

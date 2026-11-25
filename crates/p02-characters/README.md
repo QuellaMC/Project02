@@ -11,9 +11,9 @@ p02-shared.
   `ja` or `pt-BR`, a persona of one section or more, the version of that
   content, the plugins she expects, required or recommended, each
   listed once, with values for their settings, and her translation notes,
-  `translation.words` and `translation.tone`, kept as written. A character
-  whose package names her language and the person read each other through
-  a translator.
+  `translation.words` and `translation.tone`, kept as written. Her
+  language and her notes become her own settings at her first start, where
+  the person can change them.
   A descriptor is read once, as UTF-8 JSON of at most 64 KiB, and
   what it holds that a descriptor does not know is not read; a refusal
   names the first rule it breaks, and says it in plain words for a person

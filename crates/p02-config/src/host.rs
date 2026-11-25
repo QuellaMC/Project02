@@ -68,6 +68,26 @@ const LANGUAGES: [(&str, &str); 8] = [
     ("de", "Deutsch"),
 ];
 
+/// The tags of the languages a page offers first, in the order it lists
+/// them.
+fn language_tags() -> Vec<&'static str> {
+    LANGUAGES.iter().map(|(tag, _)| *tag).collect()
+}
+
+/// Each of those languages' names, by its tag.
+fn language_names() -> Map<String, Value> {
+    LANGUAGES
+        .iter()
+        .map(|(tag, name)| ((*tag).to_owned(), Value::from(*name)))
+        .collect()
+}
+
+fn language(value: &Value) -> Option<LanguageTag> {
+    value.as_str().and_then(|tag| LanguageTag::parse(tag).ok())
+}
+
+const LANGUAGE_RULE: &str = "a language tag such as \"ja\" or \"pt-BR\"";
+
 const USER_LANGUAGE: HostSetting<LanguageTag> = HostSetting {
     name: "userLanguage",
     field: || {
@@ -77,16 +97,13 @@ const USER_LANGUAGE: HostSetting<LanguageTag> = HostSetting {
                 translated into for you. Automatic when left unset: the language you write in.",
             "secret": false,
             "valueType": "string",
-            "suggestedValues": LANGUAGES.iter().map(|(tag, _)| *tag).collect::<Vec<_>>(),
-            "choices": LANGUAGES
-                .iter()
-                .map(|(tag, name)| ((*tag).to_owned(), Value::from(*name)))
-                .collect::<Map<String, Value>>(),
+            "suggestedValues": language_tags(),
+            "choices": language_names(),
             "redactionLabels": [],
         })
     },
-    read: |value| value.as_str().and_then(|tag| LanguageTag::parse(tag).ok()),
-    must_be: Some("a language tag such as \"ja\" or \"pt-BR\""),
+    read: language,
+    must_be: Some(LANGUAGE_RULE),
 };
 
 const ROLE_MODEL_PROVIDER: HostSetting<RoleModelProvider> = HostSetting {
@@ -440,6 +457,27 @@ const HEARTBEAT: HostSetting<Option<NonZeroU32>> = HostSetting {
     must_be: None,
 };
 
+const LANGUAGE: HostSetting<LanguageTag> = HostSetting {
+    name: "language",
+    field: || {
+        json!({
+            "label": "Speaks",
+            "description": "The language she speaks: what you write reaches her in it, and \
+                what she writes is translated for you. Her package brings it when her story \
+                fixes one. Left unset, she answers in the language you write and nobody \
+                translates.",
+            "scope": "character_only",
+            "secret": false,
+            "valueType": "string",
+            "suggestedValues": language_tags(),
+            "choices": language_names(),
+            "redactionLabels": [],
+        })
+    },
+    read: language,
+    must_be: Some(LANGUAGE_RULE),
+};
+
 /// One of her words and how it is put for the person: what she writes, and
 /// how they read it, or what it means.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -538,8 +576,9 @@ fn text(value: &Value) -> Option<String> {
 /// person decides first, their name and the language they read, the service
 /// and each service's own fields in the order the services are listed, the
 /// translator's service and model, then the knobs, then what is each
-/// character's own: her switch, her heartbeat and her translation notes.
-static SETTINGS: [&dyn Setting; 18] = [
+/// character's own: her switch, her heartbeat, the language she speaks and
+/// her translation notes.
+static SETTINGS: [&dyn Setting; 19] = [
     &USER_DISPLAY_NAME,
     &USER_LANGUAGE,
     &ROLE_MODEL_PROVIDER,
@@ -556,6 +595,7 @@ static SETTINGS: [&dyn Setting; 18] = [
     &CONTEXT_WINDOW_TOKENS,
     &ENABLED,
     &HEARTBEAT,
+    &LANGUAGE,
     &TRANSLATION_WORDS,
     &TRANSLATION_TONE,
 ];
@@ -906,6 +946,10 @@ pub struct HostSettings {
     /// How many minutes apart her moments of her own come while the person
     /// is quiet; none when her heartbeat is off.
     pub heartbeat: Option<NonZeroU32>,
+    /// The language she speaks, which her package brings or the person
+    /// chooses her; with none she answers in the language the person
+    /// writes, and nobody translates.
+    pub language: Option<LanguageTag>,
     /// How some of her words are put for the person.
     pub translation_words: Vec<TranslationWord>,
     /// How she sounds, for her translation to keep, when her settings say.
@@ -932,6 +976,7 @@ impl HostSettings {
             context_window_tokens: CONTEXT_WINDOW_TOKENS.value_or_default(fields),
             enabled: ENABLED.value(fields) == Some(true),
             heartbeat: HEARTBEAT.value_or_default(fields),
+            language: LANGUAGE.value(fields),
             translation_words: TRANSLATION_WORDS.value(fields).unwrap_or_default(),
             translation_tone: TRANSLATION_TONE.value(fields),
         }
@@ -1008,6 +1053,7 @@ impl fmt::Debug for HostSettings {
             .field("context_window_tokens", &self.context_window_tokens)
             .field("enabled", &self.enabled)
             .field("heartbeat", &self.heartbeat)
+            .field("language", &self.language)
             .field("translation_words", &self.translation_words)
             .field("translation_tone", &self.translation_tone)
             .finish()

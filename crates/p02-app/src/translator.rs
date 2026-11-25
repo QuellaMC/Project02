@@ -1,4 +1,4 @@
-//! Her translator, for a character whose package names her language: one
+//! Her translator, for a character who speaks a language of her own: one
 //! plain completion of a model puts the person's line into her language,
 //! or her message into the person's, as her settings say how, and its
 //! answer comes to the translation, the message as it was, or why none
@@ -32,9 +32,8 @@ const UNSUPPORTED: &str = "this AI model cannot translate.";
 const UNNAMED: &str = "User";
 
 /// Who a translation is between, as its request names them, her language
-/// as her package writes its tag, the language the person reads when they
-/// chose one, and her notes: how some of her words are put, and how she
-/// sounds.
+/// by its tag, the language the person reads when they chose one, and her
+/// notes: how some of her words are put, and how she sounds.
 #[derive(Debug)]
 pub(crate) struct Between {
     person: String,
@@ -46,12 +45,14 @@ pub(crate) struct Between {
 }
 
 impl Between {
-    /// Between the person and `her`, by her display name, who speaks
-    /// `language`, as `host`, her settings, have them: the person by the
-    /// name they go by, reading the language they chose, if they did, and
-    /// her notes. None when the language they chose is hers, the two tags
-    /// equal but for case: nobody translates.
-    pub(crate) fn of(host: &HostSettings, her: SpeakerName, language: LanguageTag) -> Option<Self> {
+    /// Between the person and `her`, by her display name, as `host`, her
+    /// settings, have them: her speaking the language they say, the person
+    /// by the name they go by, reading the language they chose, if they
+    /// did, and her notes. None while her settings say no language of
+    /// hers, or the one the person chose is hers, the two tags equal but
+    /// for case: nobody translates.
+    pub(crate) fn of(host: &HostSettings, her: SpeakerName) -> Option<Self> {
+        let language = host.language.clone()?;
         let theirs = host.user_language.clone();
 
         if theirs

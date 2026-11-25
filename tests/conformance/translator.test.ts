@@ -334,6 +334,66 @@ it("translator.your-language: with the language the person reads chosen, her mes
   });
 });
 
+it('translator.her-language: a character whose package names no language answers untranslated until her settings choose her one, which health then names: her next line reaches her in it, and her message is committed with theirs beside it; the language a package names is her setting from the start, and once it is taken away nobody translates her either', async () => {
+  const model = await startModelServer();
+  const wire = wireOf(await startDaemon(kanaHome(model)));
+  const mira = {scope: 'character', characterId: 'mira'} as const;
+  const say = await converse(wire, 'mira');
+  const {conversationId} = await conversationOf(wire, 'mira');
+  const speaking = async () => {
+    const {characters} = (await wire.health()) as {
+      readonly characters: readonly Record<string, unknown>[];
+    };
+
+    return characters.map(character => [
+      character['id'],
+      character['language'],
+    ]);
+  };
+
+  expect(await speaking()).toEqual([
+    ['kana', 'ja'],
+    ['mira', undefined],
+  ]);
+  model.answer(reply('Yes, please.'));
+  await say(written, 'tea');
+  expect(model.requests).toHaveLength(1);
+
+  await saveConfig(wire, mira, {
+    kind: 'set',
+    path: 'project02.language',
+    value: 'ja',
+  });
+  await saveConfig(wire, kana, {kind: 'unset', path: 'project02.language'});
+  expect(await speaking()).toEqual([
+    ['kana', undefined],
+    ['mira', 'ja'],
+  ]);
+
+  model.answer(completion('もう一杯？'), reply('うん。'), completion('Yes.'));
+  await say('Another cup?', 'more');
+  expect(messagesOf(model.requests[1])[0]).toEqual({
+    role: 'system',
+    content: expect.stringContaining(
+      'Put Sam\'s message into Mira\'s language, the one with the language tag "ja".',
+    ) as string,
+  });
+  await expect(wire.history(conversationId)).resolves.toMatchObject({
+    messages: [
+      {role: 'user', text: written},
+      {role: 'character', text: 'Yes, please.'},
+      {role: 'user', text: 'もう一杯？', written: 'Another cup?'},
+      {role: 'character', text: 'うん。', translation: 'Yes.'},
+    ],
+  });
+
+  model.answer(reply('はい。'));
+  expect(await (await converse(wire, 'kana'))(written, 'kana')).toMatchObject({
+    status: 'completed',
+  });
+  expect(model.requests).toHaveLength(5);
+});
+
 it("translator.notes: the words and the tone her package brings are in her translator's requests from her first start, her words in both and how she sounds in her message's alone; her words changed in her settings are what the next request carries", async () => {
   const model = await startModelServer();
   const wire = wireOf(

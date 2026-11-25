@@ -151,7 +151,7 @@ export function labelOf(app: string): string | undefined {
  * under them, when it has them, the same words in the other's language —
  * the person's line as they wrote it over what she read, her message over
  * its translation. What is in `language`, the language she speaks when
- * her package names one, is marked with it: her words, and the person's
+ * she has one of her own, is marked with it: her words, and the person's
  * line as she read it.
  */
 export function drawnOf(message: Message, language?: string): Drawn {

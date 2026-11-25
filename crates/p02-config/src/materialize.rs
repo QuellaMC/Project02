@@ -121,11 +121,11 @@ pub(crate) fn merged_overlay(
 
 /// What her package contributes to her settings, as an overlay holding
 /// only that: each plugin of this build it expects switched on, the values
-/// it gives, and her translation notes, each made as a change on her own
-/// screen would make it. A plugin this build lacks configures nothing. A
-/// value her screen could not set is skipped, as is a credential, a server
-/// or a path: a package may come from a stranger, and those are the
-/// person's to choose.
+/// it gives, the language she speaks and her translation notes, each made
+/// as a change on her own screen would make it. A plugin this build lacks
+/// configures nothing. A value her screen could not set is skipped, as is
+/// a credential, a server or a path: a package may come from a stranger,
+/// and those are the person's to choose.
 pub(crate) fn package_document(
     sections: &Sections,
     character: &CharacterDefinition,
@@ -191,26 +191,34 @@ pub(crate) fn package_document(
         }
     }
 
-    let notes = [
+    let hers = [
+        (
+            "identity.language",
+            "language",
+            character
+                .language
+                .as_ref()
+                .map(|language| Value::from(language.as_str())),
+        ),
         (
             "translation.words",
             "translationWords",
-            character.translation.words(),
+            character.translation.words().cloned(),
         ),
         (
             "translation.tone",
             "translationTone",
-            character.translation.tone(),
+            character.translation.tone().cloned(),
         ),
     ];
 
-    for (place, name, value) in notes {
+    for (place, name, value) in hers {
         let Some(value) = value else {
             continue;
         };
         let set = Operation::Set {
             path: format!("project02.{name}"),
-            value: value.clone(),
+            value,
         };
         let made = Edit::new(sections, &target, &set).and_then(|edit| edit.apply(&mut document));
 

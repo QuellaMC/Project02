@@ -1,9 +1,10 @@
 /**
  * The translator in the settings window, for a character who speaks
- * another language than the person: whether anything of it shows, the
- * person's language as its menu offers it, her words and phrases as her
- * Translation Notes page shows them, and what does the translating, as AI
- * Model offers it. She never sees any of it. Nothing here touches the DOM.
+ * another language than the person: whether anything of it shows, her
+ * language and the person's as their menus offer them, her words and
+ * phrases as her Translation Notes page shows them, and what does the
+ * translating, as AI Model offers it. She never sees any of it. Nothing
+ * here touches the DOM.
  */
 import type {CharacterSummary} from '@project02/wire/contract';
 import {
@@ -43,31 +44,45 @@ export function languageName(tag: string): string {
   }
 }
 
-/** The language the person reads, the home's. */
+/** The language the person reads, the home's: Automatic while none is chosen. */
 export const yourLanguageRow: Row = hostRow(home, 'userLanguage');
 
 /**
- * Your Language as its menu offers it, once the home's view is read: the
- * language chosen, none while it is Automatic, and the languages its field
- * suggests under the names it gives them, then the one it holds when it
- * suggests no such, under that language's own name.
+ * The language she speaks, hers alone: the one her package brought or the
+ * person chose her.
  */
-export function yourLanguage(settings: Settings):
+export function herLanguageRow(characterId: string): Row {
+  return hostRow(characterTarget(characterId), 'language');
+}
+
+/** What her menu says while she has no language of her own: she answers in the one the person writes. */
+export const anyLanguage = 'Any Language';
+
+/**
+ * The language of `row`, hers or the person's, as its menu offers it once
+ * the view it is in is read: the language chosen, none while none is, and
+ * the languages its field suggests under the names it gives them, then
+ * the one it holds when it suggests no such, under that language's own
+ * name.
+ */
+export function languageAt(
+  settings: Settings,
+  row: Row,
+):
   | {
       readonly field: Field;
       readonly value?: string;
       readonly options: readonly Option[];
     }
   | undefined {
-  const view = viewOf(settings, home);
-  const field =
-    view === undefined ? undefined : fieldAt(view, yourLanguageRow.place);
+  const view = viewOf(settings, row.target);
+  const field = view === undefined ? undefined : fieldAt(view, row.place);
 
   if (field === undefined) {
     return undefined;
   }
 
-  const value = valueNow(settings, yourLanguageRow, field);
+  const value = valueNow(settings, row, field);
 
   return {
     field,

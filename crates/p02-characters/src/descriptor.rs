@@ -21,9 +21,9 @@ pub struct CharacterDefinition {
     /// What a person adding her from a file reads of her before she is
     /// added; nothing else reads it.
     pub about: Option<String>,
-    /// The language she speaks, as her package writes its tag: she and the
-    /// person then read each other through a translator. Without one,
-    /// nobody translates for her.
+    /// The language she speaks, as her package writes its tag, when her
+    /// story fixes one: it becomes her own setting, where the person can
+    /// change it.
     pub language: Option<LanguageTag>,
     pub persona: Persona,
     pub version: CharacterVersion,

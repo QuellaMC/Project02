@@ -67,7 +67,9 @@ import {
 } from './settings.ts';
 import type {SettingsPage} from './store.ts';
 import {
-  languageName,
+  anyLanguage,
+  herLanguageRow,
+  languageAt,
   mostNotes,
   noteLimit,
   notesHeld,
@@ -330,7 +332,7 @@ function CharacterCards({
         ))}
       </Group>
       <HerHeartbeat ctx={ctx} characterId={character.id} view={view} />
-      <HerLanguage ctx={ctx} character={character} />
+      <HerLanguage ctx={ctx} characterId={character.id} />
       <HerApps ctx={ctx} characterId={character.id} view={view} />
       <Group title="Telegram">
         <HerBot ctx={ctx} characterId={character.id} />
@@ -520,39 +522,53 @@ function HerHeartbeat({
 }
 
 /**
- * For a character who speaks another language than the person: what she
- * speaks, under its own name in its own letterforms, and her Translation
- * Notes, with how many words and phrases she has when she has any.
+ * What she speaks, a menu saved at the choice: the language her package
+ * brought or the person chose her, or Any Language, and she answers in the
+ * one the person writes. With a language of her own she and the person
+ * read each other through the translator, and her Translation Notes open
+ * from here, with how many words and phrases she has when she has any.
  */
 function HerLanguage({
   ctx,
-  character,
+  characterId,
 }: {
   readonly ctx: Ctx;
-  readonly character: CharacterSummary;
+  readonly characterId: string;
 }) {
-  const {id, language} = character;
-  const notes = notesHeld(ctx.settings, id).length;
+  const row = herLanguageRow(characterId);
+  const language = languageAt(ctx.settings, row);
+  const notes = notesHeld(ctx.settings, characterId).length;
 
   return language === undefined ? null : (
     <Group
       title="Language"
-      footer="Her words show with a translation under them, and yours reach her in her language. She never sees any of it."
+      footer={
+        language.value === undefined
+          ? 'She answers in the language you write. Choose one for her, and your words reach her in it and hers show with a translation.'
+          : 'Her words show with a translation under them, and yours reach her in her language. She never sees any of it.'
+      }
     >
-      <Cell>
-        <Label name="Speaks" />
-        <span className="value value-label" lang={language}>
-          {languageName(language)}
-        </span>
-      </Cell>
-      <LinkCell
-        {...(notes === 0 ? {} : {value: String(notes)})}
-        onClick={() => {
-          ctx.session.goTo({kind: 'translation-notes', characterId: id});
+      <MenuRow
+        ctx={ctx}
+        row={row}
+        field={language.field}
+        value={language.value}
+        options={language.options}
+        none={anyLanguage}
+        onChoose={value => {
+          void ctx.session.choose(row, value);
         }}
-      >
-        <Label name="Translation Notes" />
-      </LinkCell>
+      />
+      {language.value === undefined ? null : (
+        <LinkCell
+          {...(notes === 0 ? {} : {value: String(notes)})}
+          onClick={() => {
+            ctx.session.goTo({kind: 'translation-notes', characterId});
+          }}
+        >
+          <Label name="Translation Notes" />
+        </LinkCell>
+      )}
     </Group>
   );
 }

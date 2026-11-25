@@ -141,7 +141,7 @@ export type OnScreen =
       readonly messages: readonly Message[];
       /** The person, by the name their newest message goes by; none before they wrote. */
       readonly person?: string | undefined;
-      /** The language she speaks, which every message on her phone is in; none while her package names none. */
+      /** The language she speaks, which every message on her phone is in; none while she has none of her own. */
       readonly language?: string | undefined;
       /** Why her conversation cannot be shown, in a sentence. */
       readonly message?: string | undefined;

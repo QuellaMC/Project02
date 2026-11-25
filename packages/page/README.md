@@ -153,14 +153,15 @@ between Mind & Body and Telegram: one row of choices, saved at the
 click. The chat and the window draw from one set of tokens in
 `styles.css`, light and dark.
 
-While a character speaks another language, as health says, the window
-has the translator, by the rules of `translator.ts`, pure and tested in
-Node, and none of it while none does: the person's page has Your
-Language, a menu of Automatic, which unsets it, and the languages its
-field suggests, with one it holds that it does not suggest under that
-language's own name; AI Model has what translates, under Helpers; and
-her page, after her heartbeat, what she speaks under its own name in
-her letterforms, and her Translation Notes. Their page holds her words
+Every character's page has, after her heartbeat, what she speaks: a
+menu of Any Language, which unsets it, and the languages its field
+suggests, with one it holds that it does not suggest under that
+language's own name. While a character speaks a language of her own, as
+health says, the window has the translator, by the rules of
+`translator.ts`, pure and tested in Node, and none of it while none
+does: the person's page has Your Language, a menu as hers is, of
+Automatic and the languages; AI Model has what translates, under
+Helpers; and her page has her Translation Notes. Their page holds her words
 and phrases, a pair of boxes each, her words in her language, each pair
 removable, and Add a Note while she has fewer than a hundred; they are
 saved as any box is, her settings holding the pairs both of whose boxes

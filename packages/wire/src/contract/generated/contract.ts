@@ -211,8 +211,8 @@ export type CharacterRuntimeState = "starting" | "ready" | "needs_model" | "stop
  */
 export type CharacterSummary = { id: Identifier, displayName: SpeakerName, 
 /**
- * The language she speaks, as her package names it, when it names
- * one: she and the person read each other through a translator.
+ * The language she speaks, when her settings say one: she and the
+ * person read each other through a translator.
  */
 language?: LanguageTag, enabled: boolean, 
 /**

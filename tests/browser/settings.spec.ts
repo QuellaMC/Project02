@@ -980,7 +980,48 @@ test("page.settings-your-language: with a character who speaks another language,
   await expect(translator).toHaveCount(0);
 });
 
-test('page.settings-translation-notes: her page says what she speaks under its own name, in her language; her Translation Notes open on what her package brought; a pair added and filled is in her settings as typed, one removed is gone, and how she sounds, typed over several lines, is kept', async ({
+test('page.settings-her-language: a character whose package names no language says Any Language on her page, with no Translation Notes, and nothing of the translator shows on You; a language chosen for her is in her settings, her Translation Notes are offered and Your Language shows; back on Any Language it is gone from her settings, and so are they', async ({
+  page,
+}) => {
+  const {home, daemon} = await miraHome({});
+  const speaks = page.getByRole('combobox', {name: 'Speaks'});
+  const notes = link(page.getByRole('main'), 'Translation Notes');
+  const yours = page.getByRole('combobox', {name: 'Your Language'});
+
+  await page.goto(daemon.url);
+  await page.getByRole('button', {name: 'Settings for Mira'}).click();
+  await expect(speaks.locator('option:checked')).toHaveText('Any Language');
+  await expect(notes).toHaveCount(0);
+  await entry(page, 'You').click();
+  await expect(
+    page.getByRole('heading', {name: 'You', exact: true}),
+  ).toBeVisible();
+  await expect(yours).toHaveCount(0);
+
+  await entry(page, 'Mira').click();
+  await speaks.selectOption('en');
+  await expect
+    .poll(() => characterConfig(home, 'mira'))
+    .toMatchObject({project02: {language: 'en'}});
+  await expect(speaks.locator('option:checked')).toHaveText('English');
+  await expect(notes).toBeVisible();
+  await entry(page, 'You').click();
+  await expect(yours.locator('option:checked')).toHaveText('Automatic');
+
+  await entry(page, 'Mira').click();
+  await speaks.selectOption('');
+  await expect
+    .poll(() => characterConfig(home, 'mira'))
+    .not.toHaveProperty(['project02', 'language']);
+  await expect(notes).toHaveCount(0);
+  await entry(page, 'You').click();
+  await expect(
+    page.getByRole('heading', {name: 'You', exact: true}),
+  ).toBeVisible();
+  await expect(yours).toHaveCount(0);
+});
+
+test('page.settings-translation-notes: her page says the language her package brought her, under its own name; her Translation Notes open on what her package brought; a pair added and filled is in her settings as typed, one removed is gone, and how she sounds, typed over several lines, is kept', async ({
   page,
 }) => {
   const darling = {hers: 'ダーリン', shown: 'Darling'};
@@ -1006,7 +1047,7 @@ test('page.settings-translation-notes: her page says what she speaks under its o
   await page.goto(daemon.url);
   await page.getByRole('button', {name: 'Settings for Kana'}).click();
   await expect(
-    page.locator('.cell').filter({hasText: 'Speaks'}).locator('[lang="ja"]'),
+    page.getByRole('combobox', {name: 'Speaks'}).locator('option:checked'),
   ).toHaveText('日本語');
   await expect(notes).toContainText('2');
   await notes.click();

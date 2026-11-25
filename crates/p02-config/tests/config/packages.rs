@@ -32,11 +32,11 @@ fn start(world: &World, character: &str) -> Result<CharacterData, MaterializeErr
     )
 }
 
-/// Her package's notes become her own, and nothing else of the host's: a
-/// package that names a host field sets none.
+/// Her package's language and notes become her own, and nothing else of
+/// the host's: a package that names a host field sets none.
 #[test]
-fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_has_and_her_notes()
-{
+fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_has_her_language_and_her_notes()
+ {
     let world = World::new();
     let darling = json!([{"hers": "ダーリン", "shown": "Darling"}]);
 
@@ -52,6 +52,7 @@ fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_
                     "recommended": ["ghost"],
                     "config": {"reply-style": {"tone": "warm"}, "ghost": {"apiKey": "sk-shipped"}},
                 },
+                "identity": {"id": "nova", "displayName": "nova", "language": "ja"},
                 "translation": {"words": darling, "tone": "Playful and teasing."},
                 "project02": {"userDisplayName": "Stranger"},
             }),
@@ -68,7 +69,11 @@ fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_
     assert_eq!(
         overlay_of(&world, "nova"),
         document(json!({
-            "project02": {"translationWords": darling, "translationTone": "Playful and teasing."},
+            "project02": {
+                "language": "ja",
+                "translationWords": darling,
+                "translationTone": "Playful and teasing.",
+            },
             "plugins": {
                 "reply-style": {"enabled": true, "config": {"tone": "warm"}},
                 "session-history": {"enabled": true},
