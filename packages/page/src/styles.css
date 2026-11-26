@@ -57,6 +57,20 @@
   --telegram-glyph: #2f7fc4;
   --float-shadow:
     0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 8px 24px rgba(0, 0, 0, 0.16);
+  /* A bar floating over what scrolls under it, as tabs do. */
+  --lift-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.14);
+  --fill-strong: rgba(118, 118, 128, 0.2);
+  /* The edge that keeps a dark tile's shape on a dark ground: none in light. */
+  --tile-edge: none;
+  /*
+   * A panel's corner, the margin everything in it keeps, a card's corner,
+   * which is the panel's less that margin, and where a card's words start.
+   */
+  --panel-corner: 38px;
+  --margin: 16px;
+  --card-corner: calc(var(--panel-corner) - var(--margin));
+  --text-inset: 16px;
   --device-shadow: 0 24px 60px rgba(0, 0, 0, 0.3);
   --wall-mix: 10%;
   --ask-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 2px 12px rgba(0, 0, 0, 0.08);
@@ -140,6 +154,10 @@
     --telegram-glyph: #4da3ff;
     --float-shadow:
       0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.5);
+    --lift-shadow:
+      0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 6px 20px rgba(0, 0, 0, 0.6);
+    --fill-strong: rgba(118, 118, 128, 0.36);
+    --tile-edge: inset 0 0 0 0.5px rgba(255, 255, 255, 0.14);
     --device-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
     --wall-mix: 16%;
     --ask-shadow:
@@ -1644,9 +1662,6 @@ button.bubble {
  * as an app's on her phone and what the card that asks is about.
  */
 .tile-solid {
-  flex: none;
-  display: grid;
-  place-items: center;
   color: #ffffff;
 }
 
@@ -1715,7 +1730,7 @@ button.bubble {
 .face-bar {
   width: 24px;
   height: 24px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
 }
 
@@ -1763,6 +1778,7 @@ button.bubble {
 
 .switch-track {
   position: relative;
+  flex: none;
   display: block;
   width: 44px;
   height: 26px;
@@ -2451,9 +2467,296 @@ a.button-pill {
 }
 
 /*
+ * The parts a window is drawn with, laid out as Apple lays out words in
+ * round shapes; her phone is drawn with them. What is on a panel keeps a
+ * margin from its edges, and a card's corner is the panel's less that
+ * margin:
+ *   - words start at least six tenths of a corner's radius in from its
+ *     edge, so a card's words start 16 in;
+ *   - a header above a card lines up with the words in it, and the line
+ *     between two rows runs from where their words start to as far before
+ *     the edge;
+ *   - a bar that would touch a round corner floats, inset from the panel's
+ *     edges, and what scrolls under it keeps its room free at its end;
+ *   - what scrolls dissolves at the panel's edges instead of being cut;
+ *   - a label in a capsule sits on its capitals: its line is trimmed to
+ *     them where the browser can, and elsewhere keeps its leading.
+ * Where the browser draws a continuous corner, a panel and a card take it,
+ * 1.6 times as large to look as round; capsules and circles keep theirs.
+ */
+.ui-panel {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border-radius: var(--panel-corner);
+  background: var(--bg);
+}
+
+/*
+ * What scrolls on a panel, on its margin; each piece keeps its height. It
+ * dissolves over --fade-top at its top, and at its foot over --fade-foot
+ * down to --fade-gone above its end, below which nothing of it shows: where
+ * it stands on the panel sets the three.
+ */
+.ui-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0 var(--margin);
+  overflow-y: auto;
+  scrollbar-width: none;
+  mask-image: linear-gradient(
+    transparent,
+    #000 var(--fade-top),
+    #000 calc(100% - var(--fade-gone) - var(--fade-foot)),
+    transparent calc(100% - var(--fade-gone))
+  );
+}
+
+.ui-scroll > * {
+  flex: none;
+}
+
+.ui-large {
+  margin: 0;
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+/* A list: its header, then its card of rows. */
+.ui-section {
+  display: flex;
+  flex-direction: column;
+}
+
+.ui-head {
+  margin: 0;
+  padding: 0 var(--text-inset) 8px;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+  color: var(--secondary);
+  overflow-wrap: anywhere;
+}
+
+/* A small quiet line under what it follows. */
+.ui-foot {
+  margin: 0;
+  padding: 0 var(--text-inset);
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--secondary);
+  overflow-wrap: anywhere;
+}
+
+.ui-card {
+  overflow: hidden;
+  border-radius: var(--card-corner);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+
+/* A row of a card: 46 tall at least, and 60 with a second line or a tile. */
+.ui-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 46px;
+  padding: 7px var(--text-inset);
+}
+
+.ui-row-two {
+  min-height: 60px;
+  padding-block: 10px;
+}
+
+/* The line above a row starts where its words do, which a row with a tile sets. */
+.ui-row + .ui-row::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: var(--words-start, var(--text-inset));
+  right: var(--text-inset);
+  height: 1px;
+  background: var(--divider);
+}
+
+.ui-title {
+  font-size: 15px;
+  line-height: 20px;
+}
+
+/* A small line of a row's, or under a name. */
+.ui-detail {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--secondary);
+}
+
+/* What a row says at the end of its title's line. */
+.ui-value {
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A state said in a word: in the warning's tint and ink, quiet in the fill, or filled in the page's blue. */
+.ui-badge {
+  flex: none;
+  display: inline-block;
+  height: 22px;
+  padding: 2px 9px;
+  align-content: center;
+  border-radius: 11px;
+  background: var(--warn-tint);
+  color: var(--orange-glyph);
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  white-space: nowrap;
+  text-box: trim-both cap alphabetic;
+}
+
+.ui-badge-quiet {
+  background: var(--fill);
+  color: var(--secondary);
+}
+
+.ui-badge-filled {
+  background: var(--link);
+  color: #ffffff;
+}
+
+/* A round button, as far into a corner as the margin: its glyph quiet, or in the link's colour where it leads back. */
+.ui-round {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: var(--fill);
+  color: var(--secondary);
+}
+
+.ui-round-link {
+  color: var(--link);
+}
+
+/* The tab bar: a capsule whose tabs share its width, the one shown in the fill and the link's colour. */
+.ui-tabs {
+  display: flex;
+  padding: 4px;
+  border-radius: 27px;
+  background: var(--card);
+  box-shadow: var(--lift-shadow);
+}
+
+.ui-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  height: 46px;
+  padding: 0 2px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: none;
+  border-radius: 23px;
+  background: transparent;
+  color: var(--label);
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: 600;
+}
+
+.ui-tab[aria-current='page'] {
+  background: var(--fill);
+  color: var(--link);
+}
+
+.ui-tab-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A window's own bar: a capsule floating above its panel, its round buttons at its end. */
+.ui-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 4px 0 8px;
+  border-radius: 20px;
+  background: var(--card);
+  box-shadow: var(--float-shadow);
+}
+
+/* In a window without a frame of its own, the bar moves the window. */
+.ui-bar-moves {
+  cursor: grab;
+}
+
+/* Its title, cut short where it must; its clip reaches past the trimmed line, so no letter loses a stroke. */
+.ui-bar-title {
+  min-width: 0;
+  margin: -0.3em 0;
+  padding: 0.3em 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 600;
+  text-box: trim-both cap alphabetic;
+}
+
+.ui-bar .ui-round {
+  width: 32px;
+  height: 32px;
+  margin-left: auto;
+  background: transparent;
+}
+
+.ui-bar .ui-round + .ui-round {
+  margin-left: 0;
+}
+
+/* Pressed in, as the pin is while the window stays on top of other windows. */
+.ui-bar .ui-round[aria-pressed='true'] {
+  background: var(--fill);
+  color: var(--link);
+}
+
+@supports (corner-shape: squircle) {
+  .ui-panel {
+    corner-shape: squircle;
+    border-radius: calc(var(--panel-corner) * 1.6);
+  }
+
+  .ui-card {
+    corner-shape: squircle;
+    border-radius: calc(var(--card-corner) * 1.6);
+  }
+}
+
+/*
  * Her phone's window: a bar, her phone and a line under it, at the design's
  * size, with nothing around them; a window that can show what is behind it
- * does, and a browser's popup shows its own background.
+ * does, and a browser's popup shows its own background. The bar floats 6
+ * above her phone, and the line 8 under it.
  */
 body:has(> #root > .phone-window) {
   background: transparent;
@@ -2467,94 +2770,44 @@ body:has(> #root > .phone-window) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
-  font-size: 14px;
-  line-height: 1.3;
+  gap: 6px;
 }
 
-.phone-bar {
-  flex: none;
+.phone-window > .ui-bar {
   align-self: stretch;
-  height: 40px;
-  padding: 0 4px 0 8px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border-radius: 20px;
-  background: var(--card);
-  box-shadow: var(--float-shadow);
 }
 
-/* In a window without a frame of its own, the bar moves the window. */
-.phone-bar-moves {
-  cursor: grab;
-}
-
-.phone-bar-title {
-  min-width: 0;
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 14px;
-  font-weight: 600;
-}
-
+/* That the person is watching: a quiet badge, an eye before its word. */
 .phone-watching {
-  flex: none;
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  height: 22px;
-  padding: 0 9px;
-  border-radius: 11px;
-  background: var(--fill);
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--secondary);
 }
 
-.phone-pin,
-.phone-close {
-  flex: none;
-  display: inline-grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  margin-left: auto;
-  padding: 0;
-  border: none;
-  border-radius: 16px;
-  background: transparent;
-  color: var(--secondary);
+.phone-watching > span {
+  text-box: trim-both cap alphabetic;
 }
 
-.phone-pin + .phone-close {
-  margin-left: 0;
-}
-
-/* Pressed while the window stays on top of other windows. */
-.phone-pin[aria-pressed='true'] {
-  background: var(--fill);
-  color: var(--link);
-}
-
-/* Said where her phone would be, when it cannot be shown. */
+/* Said where her phone would be, when it cannot be shown, on a panel of its size. */
 .phone-said {
   flex: none;
-  display: grid;
-  place-items: center;
   width: 340px;
   height: 700px;
-  margin: 0;
-  padding: 0 28px;
+  justify-content: center;
+  padding: 0 var(--margin);
+  box-shadow: var(--device-shadow);
   text-align: center;
   font-size: 15px;
-  line-height: 1.4;
+  line-height: 21px;
   color: var(--secondary);
   overflow-wrap: anywhere;
 }
 
+.phone-said > p {
+  margin: 0;
+}
+
+/* The line under her phone: its dot, what she did, and when. */
 .phone-line {
   flex: none;
   display: inline-flex;
@@ -2562,12 +2815,13 @@ body:has(> #root > .phone-window) {
   gap: 7px;
   max-width: 100%;
   height: 30px;
-  margin: 0;
-  padding: 0 12px;
+  margin: 2px 0 0;
+  padding: 0 13px;
   border-radius: 15px;
   background: var(--card);
   box-shadow: var(--float-shadow);
   font-size: 13px;
+  line-height: 18px;
   color: var(--secondary);
   white-space: nowrap;
 }
@@ -2584,15 +2838,23 @@ body:has(> #root > .phone-window) {
   background: var(--green);
 }
 
+.phone-line-what,
+.phone-line-when {
+  text-box: trim-both cap alphabetic;
+}
+
+/* What she did, cut short where it must; its clip reaches past the trimmed line, so no letter loses a stroke. */
 .phone-line-what {
   min-width: 0;
+  margin: -0.3em 0;
+  padding: 0.3em 0;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 600;
   color: var(--label);
 }
 
-/* Her phone: the bezel, and its screen inside it. */
+/* Her phone: a bezel of 8 around its screen, which is a panel. */
 .phone {
   flex: none;
   width: 340px;
@@ -2602,18 +2864,15 @@ body:has(> #root > .phone-window) {
   background: #0c0c0e;
   box-shadow: var(--device-shadow);
   font-size: 15px;
+  line-height: 20px;
 }
 
 .phone-screen {
   height: 100%;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  border-radius: 38px;
-  background: var(--bg);
   color: var(--label);
 }
 
+/* The person's own clock, at the foot of the status row. */
 .phone-status {
   flex: none;
   display: flex;
@@ -2621,6 +2880,7 @@ body:has(> #root > .phone-window) {
   justify-content: center;
   height: 36px;
   font-size: 14px;
+  line-height: 18px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
@@ -2629,11 +2889,11 @@ body:has(> #root > .phone-window) {
   flex: 1 1 auto;
 }
 
-/* Her home screen: her apps four to a row, on a wallpaper of her colour. */
+/* Her home screen: her apps four to a row, 30 under the status row, on a wallpaper of her colour. */
 .phone-home {
   flex: 1 1 auto;
   min-height: 0;
-  padding: 30px 14px 0;
+  padding: 30px 14px 34px;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 22px 4px;
@@ -2653,7 +2913,17 @@ body:has(> #root > .phone-window) {
   gap: 6px;
 }
 
-/* An app's tile: on her home screen, at a row of the App Store, and large at the head of an app's page there. */
+.phone-app-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  line-height: 14px;
+  font-weight: 500;
+}
+
+/* An app's tile, its corner a quarter of its size: on her home screen, at a row's start, and at the head of an app's page. */
 .phone-tile-home {
   width: 56px;
   height: 56px;
@@ -2661,230 +2931,216 @@ body:has(> #root > .phone-window) {
 }
 
 .phone-tile-row {
-  width: 44px;
-  height: 44px;
-  border-radius: 11px;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
 }
 
 .phone-tile-header {
-  width: 76px;
-  height: 76px;
-  border-radius: 18px;
+  width: 68px;
+  height: 68px;
+  border-radius: 17px;
 }
 
-.phone-app-name {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 11.5px;
-  font-weight: 500;
+/* In dark, a hairline keeps a dark tile's shape on her wallpaper, a card or the screen. */
+.phone-tile-home,
+.phone-tile-row,
+.phone-tile-header {
+  box-shadow: var(--tile-edge);
 }
 
-/* A view of an app: its title, its pieces top to bottom, and its views as tabs. */
+/* A view of an app: its title, 16 under the status row, then its pieces. */
 .phone-view {
   flex: 1 1 auto;
   min-height: 0;
-  padding-top: 4px;
   display: flex;
   flex-direction: column;
 }
 
 .phone-view-title {
   flex: none;
-  margin: 6px 20px 12px;
-  font-size: 30px;
-  line-height: 1.2;
-  font-weight: 700;
+  padding: 16px var(--margin) 0;
 }
 
+/*
+ * What scrolls keeps 14 at its top, under the title or the status row, and
+ * dissolves over the first 12 of it, so its first piece is whole at rest.
+ * It ends 34 above the screen's foot and dissolves from there to 14 above
+ * it, gone above the home bar's line and before the round corners; under
+ * the tabs it ends 96 above it and dissolves from 92 to the tabs' middle,
+ * 49 above it.
+ */
 .phone-pieces {
-  flex: 1 1 auto;
-  min-height: 0;
-  padding: 0 16px 16px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  overflow-y: auto;
-  scrollbar-width: none;
+  --fade-top: 12px;
+  --fade-foot: 20px;
+  --fade-gone: 14px;
+  padding-top: 14px;
+  padding-bottom: 34px;
 }
 
-/* A piece keeps its height, a card that clips its rows too: the view scrolls. */
-.phone-pieces > * {
-  flex: none;
+.phone-pieces-tabbed {
+  --fade-foot: 43px;
+  --fade-gone: 49px;
+  padding-bottom: 96px;
+}
+
+/* Pieces stand 16 apart, a list 22 under the piece above it, a note 8 under what it follows, and one conversation's bubbles 10 apart. */
+.phone-pieces > :not(:first-child) {
+  margin-top: 16px;
+}
+
+.phone-pieces > * + .ui-section {
+  margin-top: 22px;
+}
+
+.phone-pieces > * + .ui-foot {
+  margin-top: 8px;
+}
+
+.phone-pieces > .phone-bubble + .phone-bubble {
+  margin-top: 10px;
 }
 
 /* A reading or a line alone on its view stands in the middle of it. */
 .phone-pieces > .phone-readout:only-child,
 .phone-pieces > .phone-quiet:only-child {
   margin: auto 0;
-  padding-bottom: 60px;
+  padding-bottom: 40px;
 }
 
 .phone-quiet {
   margin: 0;
   text-align: center;
   font-size: 17px;
+  line-height: 22px;
   color: var(--secondary);
-}
-
-/* Words among a screen's other pieces: a paragraph, as an app's summary on its page in the App Store. */
-.phone-text {
-  margin: 0;
-  font-size: 15px;
-  line-height: 1.4;
   overflow-wrap: anywhere;
 }
 
-.phone-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+/* Words among a screen's other pieces: a paragraph, as an app's summary on its page, lined up with the words of the cards. */
+.phone-text {
+  margin: 0;
+  padding: 0 var(--text-inset);
+  font-size: 15px;
+  line-height: 21px;
+  overflow-wrap: anywhere;
 }
 
-.phone-list-header {
-  margin: 0 4px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--secondary);
-}
-
-.phone-card {
-  overflow: hidden;
-  border-radius: 14px;
-  background: var(--card);
-  box-shadow: var(--card-shadow);
-}
-
-.phone-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 14px;
-}
-
-.phone-row + .phone-row {
-  border-top: 1px solid var(--divider);
-}
-
-.phone-row-fresh {
-  background: var(--blue-tile);
-}
-
-.phone-row-off .phone-row-words,
-.phone-row-off .phone-row-end {
-  color: var(--secondary);
-}
-
+/*
+ * A row's words: the small line above, its title or its time, and the
+ * small line below, each across the row; on the title's line, New after
+ * the title, and the row's value at its end, on the title's first line, so
+ * the line below keeps the row's whole width.
+ */
 .phone-row-words {
   flex: 1 1 auto;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto minmax(0, 1fr) auto;
+  align-items: baseline;
   overflow-wrap: anywhere;
 }
 
-.phone-row-caption {
-  font-size: 12px;
-  color: var(--secondary);
+.phone-row-words > * {
+  grid-row: 2;
 }
 
-.phone-row-title {
-  font-size: 17px;
+.phone-row-above {
+  grid-row: 1;
+  grid-column: 1 / -1;
 }
 
-.phone-row-timed .phone-row-title {
-  font-size: 20px;
+.phone-row-below {
+  grid-row: 3;
+  grid-column: 1 / -1;
 }
 
+.phone-row-new {
+  grid-column: 2;
+  align-self: center;
+  margin-left: 8px;
+}
+
+.phone-row-value {
+  grid-column: 4;
+  margin-left: 10px;
+  text-align: right;
+}
+
+/* A badge on the title's line leaves the line as tall as it was. */
+.phone-row-words > .ui-badge {
+  margin-block: -1px;
+}
+
+/* A row's time as its main reading, large and thin, its AM or PM after it; beside a title, at the row's end, a little smaller. */
 .phone-row-time,
 .phone-row-end {
   font-weight: 300;
-  letter-spacing: -0.5px;
-  line-height: 1.15;
   white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
 .phone-row-time {
-  font-size: 36px;
+  font-size: 34px;
+  line-height: 38px;
 }
 
 .phone-row-end {
   flex: none;
   font-size: 32px;
+  line-height: 38px;
 }
 
 .phone-period {
   font-size: 17px;
   font-weight: 400;
-  letter-spacing: 0;
 }
 
 .phone-row-end .phone-period {
   font-size: 15px;
 }
 
-.phone-row-subtitle {
-  font-size: 13px;
+/* A title with a time at the row's end, as a city's in the World Clock. */
+.phone-row-timed .ui-title {
+  font-size: 20px;
+  line-height: 25px;
 }
 
-.phone-row-new {
-  margin-top: 2px;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--link);
-}
-
-.phone-row-value {
-  flex: none;
-  font-size: 17px;
-  color: var(--secondary);
-  font-variant-numeric: tabular-nums;
-}
-
-.phone-row .switch-track {
-  flex: none;
-}
-
-/* An app's row, as the App Store lists it: its tile, its name, its summary, and how it stands on her phone. */
+/* An app's row, as the App Store lists it: its title semibold, and the line above it from its words. */
 .phone-row-tiled {
-  padding: 10px 12px;
+  --words-start: calc(var(--text-inset) + 40px + 10px);
 }
 
-.phone-row-tiled .phone-row-title {
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.phone-row-tiled .phone-row-subtitle {
-  color: var(--secondary);
-}
-
-.phone-row-tiled .phone-row-value {
-  font-size: 13px;
+.phone-row-tiled .ui-title {
   font-weight: 600;
 }
 
 /* A row about a page on the web, as a search lists one: where it is, its title as a link, and what it says. */
-.phone-row-linked {
-  padding: 11px 14px;
-}
-
-.phone-row-linked .phone-row-words {
-  gap: 2px;
-}
-
-.phone-row-linked .phone-row-title {
-  font-size: 15px;
+.phone-row-linked .ui-title {
   font-weight: 600;
   color: var(--link);
 }
 
-.phone-row-linked .phone-row-subtitle {
-  line-height: 1.35;
+.phone-row-linked .phone-row-above {
+  margin-bottom: 2px;
 }
 
-/* An app's header, at the head of its page in the App Store. */
+.phone-row-linked .phone-row-below {
+  margin-top: 2px;
+  color: var(--label);
+}
+
+/* A row whose switch is off is dimmed, and one new since she did something is tinted. */
+.phone-row-off .phone-row-words,
+.phone-row-off .phone-row-end {
+  opacity: 0.5;
+}
+
+.phone-row-fresh {
+  background: var(--blue-tile);
+}
+
+/* An app's header, at the head of its page in the App Store: its tile, its name, the line under it, and how it stands. */
 .phone-app-header {
   display: flex;
   align-items: center;
@@ -2895,45 +3151,22 @@ body:has(> #root > .phone-window) {
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: flex-start;
 }
 
 .phone-app-header-name {
   margin: 0;
   font-size: 22px;
+  line-height: 27px;
   font-weight: 700;
   overflow-wrap: anywhere;
 }
 
-.phone-app-header-subtitle {
-  font-size: 13px;
-  color: var(--secondary);
+.phone-app-header-words > .ui-badge {
+  margin-top: 6px;
 }
 
-.phone-pill {
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  height: 26px;
-  margin-top: 2px;
-  padding: 0 12px;
-  border-radius: 13px;
-  background: var(--fill);
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--secondary);
-}
-
-/* While she waits on the person to install an app, its row and its page say so in the warning's ink. */
-.phone-waiting {
-  color: var(--orange-glyph);
-}
-
-.phone-pill.phone-waiting {
-  background: var(--orange-tile);
-}
-
-/* One large reading; counting down, inside a ring of what is left of its whole. */
+/* One large reading, its label above and its caption under it; counting down, inside a ring of what is left of its whole. */
 .phone-readout {
   display: flex;
   flex-direction: column;
@@ -2944,15 +3177,15 @@ body:has(> #root > .phone-window) {
 
 .phone-readout-label,
 .phone-readout-caption {
-  font-size: 14px;
+  font-size: 15px;
+  line-height: 20px;
   color: var(--secondary);
 }
 
 .phone-readout-text {
   font-size: 60px;
+  line-height: 64px;
   font-weight: 200;
-  letter-spacing: -1px;
-  line-height: 1.1;
   font-variant-numeric: tabular-nums;
 }
 
@@ -2980,12 +3213,13 @@ body:has(> #root > .phone-window) {
 
 .phone-readout-ringed .phone-readout-text {
   font-size: 46px;
+  line-height: 50px;
   font-weight: 300;
-  letter-spacing: -0.5px;
 }
 
 .phone-readout-ringed .phone-readout-caption {
   font-size: 13px;
+  line-height: 18px;
 }
 
 .phone-ring-whole {
@@ -2993,7 +3227,7 @@ body:has(> #root > .phone-window) {
 }
 
 .phone-ring-left {
-  stroke: var(--orange-glyph);
+  stroke: var(--link);
 }
 
 /* A thing at a glance, in the middle: its title, its reading very large, how it is, and a quieter line under that. */
@@ -3005,39 +3239,37 @@ body:has(> #root > .phone-window) {
   overflow-wrap: anywhere;
 }
 
-/* At the head of its screen it stands where the view's title would. */
-.phone-pieces > .phone-glance:first-child {
-  margin-top: 6px;
-}
-
 .phone-glance-title {
   margin: 0;
   font-size: 26px;
+  line-height: 31px;
   font-weight: 600;
 }
 
 .phone-glance-text {
   font-size: 84px;
+  line-height: 88px;
   font-weight: 200;
-  line-height: 1.05;
-  letter-spacing: -2px;
+  font-variant-numeric: tabular-nums;
 }
 
 .phone-glance-caption {
   font-size: 17px;
+  line-height: 22px;
 }
 
 .phone-glance-detail {
   font-size: 15px;
+  line-height: 20px;
   color: var(--secondary);
 }
 
-/* Small readings side by side on one card, in equal columns, each a small label over its value. */
+/* Small readings side by side on one card, in equal cells, each a small label over its value. */
 .phone-strip {
   display: grid;
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
-  padding: 12px 6px;
+  padding: 12px 8px;
 }
 
 .phone-cell {
@@ -3051,18 +3283,21 @@ body:has(> #root > .phone-window) {
 
 .phone-cell-label {
   font-size: 12px;
+  line-height: 16px;
   color: var(--secondary);
 }
 
 .phone-cell-value {
   font-size: 15px;
+  line-height: 20px;
   font-weight: 600;
 }
 
 /*
- * Ranges: rows on one card, each its label, its low, a bar and its high.
- * The rows share the card's columns, each as wide as its widest words, so
- * every bar is drawn on the same track and the rows' scale reads across.
+ * Ranges: rows on one card, 42 tall, each its label, its low, a bar and its
+ * high. The rows share the card's columns, each as wide as its widest
+ * words, so every bar is drawn on the same track and the rows' scale reads
+ * across.
  */
 .phone-ranges {
   display: grid;
@@ -3074,13 +3309,8 @@ body:has(> #root > .phone-window) {
   grid-column: 1 / -1;
   display: grid;
   grid-template-columns: subgrid;
-  align-items: center;
-  padding: 10px 14px;
+  min-height: 42px;
   overflow-wrap: anywhere;
-}
-
-.phone-range + .phone-range {
-  border-top: 1px solid var(--divider);
 }
 
 .phone-range-label {
@@ -3113,14 +3343,14 @@ body:has(> #root > .phone-window) {
   background: var(--link);
 }
 
-/* What was typed into a box, such as a search's words, with an icon at its start. */
+/* What was typed into a box, such as a search's words: a capsule in the fill, its icon then its words. */
 .phone-field {
-  min-height: 36px;
+  min-height: 38px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  padding: 9px 14px 9px 11px;
+  border-radius: 19px;
   background: var(--fill);
 }
 
@@ -3132,33 +3362,22 @@ body:has(> #root > .phone-window) {
 .phone-field-text {
   min-width: 0;
   overflow-wrap: anywhere;
+  text-box: trim-both cap alphabetic;
 }
 
-/* A small quiet line under what it follows: a credit, or what something costs. */
-.phone-note {
-  margin: 0 4px;
-  font-size: 12px;
-  color: var(--secondary);
-  overflow-wrap: anywhere;
-}
-
-/* A turn of a conversation: hers at the end in the accent colour, the other's at the start on a card. */
+/* A turn of a conversation: hers at the line's end in the page's blue, the other's at its start on a card. */
 .phone-bubble {
   margin: 0;
+  padding: 8px 13px;
   border-radius: 18px;
+  line-height: 20px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-/* One conversation's bubbles sit closer than other pieces, as the design draws them. */
-.phone-pieces > .phone-bubble + .phone-bubble {
-  margin-top: -6px;
 }
 
 .phone-bubble-her {
   align-self: flex-end;
   max-width: 84%;
-  padding: 9px 13px;
   background: var(--link);
   color: #ffffff;
 }
@@ -3166,15 +3385,14 @@ body:has(> #root > .phone-window) {
 .phone-bubble-them {
   align-self: flex-start;
   max-width: 90%;
-  padding: 10px 13px;
-  line-height: 1.4;
   background: var(--card);
   box-shadow: var(--card-shadow);
 }
 
 /*
- * An app messages come in, as the design draws it: the person at its head,
- * what went through it, and a message box that is only drawn.
+ * An app messages come in: at its head the way back, on the margin, and
+ * the person in the middle; what went through it; and at its foot, 24 above
+ * the screen's, a message box that is only drawn.
  */
 .phone-thread {
   flex: 1 1 auto;
@@ -3190,43 +3408,41 @@ body:has(> #root > .phone-window) {
   flex-direction: column;
   align-items: center;
   gap: 3px;
-  padding: 4px 16px 8px;
+  min-height: 52px;
+  padding: 6px var(--margin) 10px;
   border-bottom: 1px solid var(--divider);
 }
 
 .phone-thread-back {
   position: absolute;
-  left: 6px;
-  top: 8px;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  display: grid;
-  place-items: center;
-  color: var(--link);
+  top: 6px;
+  left: var(--margin);
+}
+
+/* The chevron a little left of the circle's middle, where it looks centred. */
+.phone-thread-back svg {
+  margin-right: 2px;
 }
 
 .phone-thread-face {
   width: 40px;
   height: 40px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--fill);
+  background: var(--fill-strong);
+  color: var(--label);
   font-size: 17px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
 .phone-thread-name {
   margin: 0;
   font-size: 12px;
+  line-height: 16px;
   font-weight: 600;
 }
 
 .phone-thread-app {
   font-size: 11px;
+  line-height: 14px;
   color: var(--secondary);
 }
 
@@ -3236,7 +3452,7 @@ body:has(> #root > .phone-window) {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 8px 12px 6px;
+  padding: 10px var(--margin) 12px;
   overflow-y: auto;
   scrollbar-width: none;
 }
@@ -3260,6 +3476,7 @@ body:has(> #root > .phone-window) {
   margin: 0;
   text-align: center;
   font-size: 15px;
+  line-height: 21px;
   color: var(--secondary);
 }
 
@@ -3268,72 +3485,30 @@ body:has(> #root > .phone-window) {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 12px 2px;
-}
-
-.phone-thread-plus {
-  flex: none;
-  width: 30px;
-  height: 30px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  background: var(--fill);
-  color: var(--secondary);
-  font-size: 20px;
-  line-height: 1;
+  padding: 0 var(--margin) 24px;
 }
 
 .phone-thread-field {
   flex: 1 1 auto;
-  height: 32px;
-  padding: 0 12px;
-  display: flex;
-  align-items: center;
-  border: 1px solid var(--divider);
-  border-radius: 16px;
-  font-size: 14px;
-  color: var(--secondary);
-}
-
-.phone-tabs {
-  flex: none;
-  display: grid;
-  grid-auto-flow: column;
-  grid-auto-columns: minmax(0, 1fr);
-  padding: 6px 6px 0;
-  border-top: 1px solid var(--divider);
+  height: 36px;
+  padding: 8px 14px;
+  align-content: center;
+  border-radius: 18px;
   background: var(--card);
-}
-
-.phone-tab {
-  min-width: 0;
-  min-height: 44px;
-  padding: 0;
-  border: none;
-  background: transparent;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
+  box-shadow: var(--card-shadow);
   color: var(--secondary);
+  text-box: trim-both cap alphabetic;
 }
 
-.phone-tab[aria-current='page'] {
-  color: var(--orange-glyph);
+/* Her app's views, as tabs floating 16 from the screen's sides and 22 from its foot. */
+.phone-tabs {
+  position: absolute;
+  left: var(--margin);
+  right: var(--margin);
+  bottom: 22px;
 }
 
-.phone-tab-title {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 10.5px;
-  font-weight: 500;
-}
-
-/* What rings, over everything. */
+/* What rings, over everything: its icon on the warning's tint, the word above the time, the time, its title, and Ringing. */
 .phone-ringing {
   flex: 1 1 auto;
   min-height: 0;
@@ -3346,61 +3521,59 @@ body:has(> #root > .phone-window) {
   text-align: center;
 }
 
-.phone-ringing-badge {
+.phone-ringing-icon {
   display: grid;
   place-items: center;
   width: 64px;
   height: 64px;
   margin-bottom: 10px;
   border-radius: 50%;
-  background: var(--orange-tile);
+  background: var(--warn-tint);
   color: var(--orange-glyph);
 }
 
 .phone-ringing-title {
   font-size: 15px;
+  line-height: 20px;
   font-weight: 600;
   color: var(--secondary);
 }
 
 .phone-ringing-time {
   font-size: 80px;
+  line-height: 80px;
   font-weight: 200;
-  letter-spacing: -2px;
-  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 
 .phone-ringing-body {
   font-size: 20px;
+  line-height: 25px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }
 
-.phone-ringing-state {
+.phone-ringing > .ui-badge {
   margin-top: 10px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--orange-glyph);
 }
 
-/* The bar at the bottom, which goes to her home screen. */
+/* The bar at the screen's foot, which goes to her home screen. */
 .phone-home-bar {
-  flex: none;
-  display: grid;
-  place-items: center;
-  height: 28px;
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  width: 160px;
+  height: 22px;
+  margin-left: -80px;
   padding: 0;
   border: none;
+  display: grid;
+  place-items: center;
   background: transparent;
 }
 
-.phone-home-bar-tabbed {
-  background: var(--card);
-}
-
 .phone-home-bar:focus-visible {
-  outline-offset: -6px;
+  outline-offset: -4px;
 }
 
 .phone-home-indicator {
@@ -3408,7 +3581,22 @@ body:has(> #root > .phone-window) {
   height: 5px;
   border-radius: 3px;
   background: var(--label);
-  opacity: 0.3;
+  opacity: 0.28;
+}
+
+/* Her phone's bezel and her apps' tiles take the continuous corner too: the bezel's 1.6 times as large, a tile's 40% of its size. */
+@supports (corner-shape: squircle) {
+  .phone {
+    corner-shape: squircle;
+    border-radius: calc(46px * 1.6);
+  }
+
+  .phone-tile-home,
+  .phone-tile-row,
+  .phone-tile-header {
+    corner-shape: squircle;
+    border-radius: 40%;
+  }
 }
 
 /* A person who asked for less motion gets none: the card that asks is simply there, and simply gone. */

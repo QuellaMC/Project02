@@ -307,7 +307,12 @@ A character the daemon does not know, or whose settings give her no phone,
 is said in the daemon's sentence where her phone would be.
 `phone-window.tsx` and `phone-device.tsx` draw it as the design draws an
 iPhone, with nothing painted around it, so a window that can show what is
-behind it does. `window-calls.ts` tells, from the page's `window` and
+behind it does. They draw it with the page's shared parts, the `ui-`
+classes of `styles.css`: a panel and what scrolls on it, cards of rows,
+badges, round buttons, a floating tab bar and a window's own bar, laid out
+as Apple lays out words in round shapes by the rules at their head, so
+another window can be drawn with the same parts.
+`window-calls.ts` tells, from the page's `window` and
 importing nothing of the app, whether a page is in the desktop app and what
 its window answers, and has the app show a notification. The app's window
 for her phone has no frame of its own and answers four window calls: there

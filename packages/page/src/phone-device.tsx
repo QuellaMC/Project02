@@ -53,8 +53,8 @@ type FieldItem = Extract<ScreenItem, {kind: 'field'}>;
 /** An app's tile at each size her phone draws one: its icon's size and its stroke there. */
 const tileGlyphs = {
   home: {size: 30, weight: 1.7},
-  row: {size: 24, weight: 1.7},
-  header: {size: 40, weight: 1.6},
+  row: {size: 22, weight: 1.7},
+  header: {size: 36, weight: 1.6},
 } as const;
 
 /** The length of the ring a timer's readout is drawn in, whose radius is 100. */
@@ -70,13 +70,11 @@ export function PhoneDevice({
   readonly session: PhoneSession;
 }) {
   const drawn = screenOf(state);
-  // The bar takes the tabs' card under an app's views, her colour at home.
-  const tabbed = drawn.kind === 'view' && drawn.app.views.length > 1;
 
   return (
     <div className="phone">
       <div
-        className="phone-screen"
+        className="ui-panel phone-screen"
         style={
           drawn.kind === 'home'
             ? {
@@ -96,7 +94,7 @@ export function PhoneDevice({
         ) : (
           <button
             type="button"
-            className={`phone-home-bar${tabbed ? ' phone-home-bar-tabbed' : ''}`}
+            className="phone-home-bar"
             aria-label="Home"
             onClick={session.goHome}
           >
@@ -170,6 +168,7 @@ function AppView({
   const pieces = useRef<HTMLDivElement>(null);
   const title =
     app.views.find(candidate => candidate.id === viewId)?.title ?? app.name;
+  const tabbed = app.views.length > 1;
 
   // A glance at the head of a screen names what the view shows, as the
   // design heads a place's weather: the view's own title over it would
@@ -182,8 +181,11 @@ function AppView({
   return (
     <>
       <div className="phone-view">
-        {headed ? null : <h2 className="phone-view-title">{title}</h2>}
-        <div ref={pieces} className="phone-pieces">
+        {headed ? null : <h2 className="ui-large phone-view-title">{title}</h2>}
+        <div
+          ref={pieces}
+          className={`ui-scroll phone-pieces${tabbed ? ' phone-pieces-tabbed' : ''}`}
+        >
           {view.message === undefined ? (
             view.screen?.items.map((item, at, items) => (
               <Piece
@@ -200,20 +202,20 @@ function AppView({
           )}
         </div>
       </div>
-      {app.views.length > 1 ? (
-        <nav className="phone-tabs" aria-label={app.name}>
+      {tabbed ? (
+        <nav className="ui-tabs phone-tabs" aria-label={app.name}>
           {app.views.map(tab => (
             <button
               key={tab.id}
               type="button"
-              className="phone-tab"
+              className="ui-tab"
               aria-current={tab.id === viewId ? 'page' : undefined}
               onClick={() => {
                 session.look(app.id, tab.id);
               }}
             >
-              <Icon name={iconOf(tab.icon)} size={22} weight={1.7} />
-              <span className="phone-tab-title">{tab.title}</span>
+              <Icon name={iconOf(tab.icon)} size={22} weight={1.8} />
+              <span className="ui-tab-name">{tab.title}</span>
             </button>
           ))}
         </nav>
@@ -255,27 +257,27 @@ function ThreadView({
       <header className="phone-thread-head">
         <button
           type="button"
-          className="phone-thread-back"
+          className="ui-round ui-round-link phone-thread-back"
           aria-label="Back"
           onClick={session.goHome}
         >
           <svg
-            viewBox="0 0 24 24"
-            width="22"
-            height="22"
+            viewBox="0 0 10 18"
+            width="9"
+            height="16"
             fill="none"
             stroke="currentColor"
-            strokeWidth="2.2"
+            strokeWidth="2.4"
             strokeLinecap="round"
             strokeLinejoin="round"
             aria-hidden="true"
           >
-            <path d="M15 5l-7 7 7 7" />
+            <path d="M8 2L2 9l6 7" />
           </svg>
         </button>
         {person === undefined ? null : (
           <>
-            <span className="phone-thread-face" aria-hidden="true">
+            <span className="face phone-thread-face" aria-hidden="true">
               {initialOf(person)}
             </span>
             <h2 className="phone-thread-name">{person}</h2>
@@ -305,7 +307,9 @@ function ThreadView({
         <div className="slack" ref={following.slack} aria-hidden="true" />
       </div>
       <div className="phone-thread-foot" aria-hidden="true">
-        <span className="phone-thread-plus">+</span>
+        <span className="ui-round">
+          <Icon name="plus" size={16} weight={2.25} />
+        </span>
         <span className="phone-thread-field">Message</span>
       </div>
     </div>
@@ -337,11 +341,11 @@ function Piece({
   switch (item.kind) {
     case 'list':
       return (
-        <section className="phone-list">
+        <section className="ui-section">
           {item.header === undefined ? null : (
-            <h3 className="phone-list-header">{item.header}</h3>
+            <h3 className="ui-head">{item.header}</h3>
           )}
-          <div className="phone-card">
+          <div className="ui-card">
             {item.rows.map((row, at) => (
               <Row
                 key={at}
@@ -374,7 +378,7 @@ function Piece({
     case 'field':
       return <Field field={item} />;
     case 'note':
-      return <p className="phone-note">{item.text}</p>;
+      return <p className="ui-foot">{item.text}</p>;
     case 'bubble':
       return (
         <p className={`phone-bubble phone-bubble-${item.from}`}>{item.text}</p>
@@ -410,13 +414,14 @@ function useConversationEnd(
 
 /**
  * A row: an app's tile, the small line above, its title or else its clock
- * reading, the small line below, and at its end a clock reading beside a
- * title, a value and a switch. A row whose switch is off is dimmed, one
- * that is new since she did something is tinted and says so, and an app's
- * row, which the App Store lists, says at its end how the app stands on
- * her phone, or that she waits on the person to install it. A row about a
- * page on the web draws its title as a link, which opens nothing: the
- * person watches her phone, and does not use it.
+ * reading, the small line below, a clock reading beside a title at the
+ * row's end, and a switch. New stands after the title, and a value at the
+ * end of the title's line. A row whose switch is off is dimmed, one that
+ * is new since she did something is tinted and says so, and an app's row,
+ * which the App Store lists, says how the app stands on her phone, or that
+ * she waits on the person to install it. A row about a page on the web
+ * draws its title as a link, which opens nothing: the person watches her
+ * phone, and does not use it.
  */
 function Row({
   row,
@@ -430,38 +435,37 @@ function Row({
   // A row has a title, a time or both: a time beside a title goes to its end.
   const end = row.title === undefined ? undefined : row.time;
   const value = waiting ? 'Waiting' : row.value;
-  const looks = [
-    end === undefined ? '' : ' phone-row-timed',
-    row.tile === undefined ? '' : ' phone-row-tiled',
-    row.url === undefined ? '' : ' phone-row-linked',
-    row.switch === false ? ' phone-row-off' : '',
-    fresh ? ' phone-row-fresh' : '',
-  ].join('');
 
+  // The words keep the order a reader of the screen hears them in, and
+  // their grid sets New and the value on the title's line.
   return (
-    <div className={`phone-row${looks}`}>
+    <div className={`ui-row${looksOf(row, fresh, end)}`}>
       {row.tile === undefined ? null : <AppTile tile={row.tile} size="row" />}
       <span className="phone-row-words">
         {row.caption === undefined ? null : (
-          <span className="phone-row-caption">{row.caption}</span>
+          <span className="ui-detail phone-row-above">{row.caption}</span>
         )}
         {row.title === undefined ? (
           <Clock time={row.time ?? ''} className="phone-row-time" />
         ) : (
-          <span className="phone-row-title">{row.title}</span>
+          <span className="ui-title">{row.title}</span>
         )}
         {row.subtitle === undefined ? null : (
-          <span className="phone-row-subtitle">{row.subtitle}</span>
+          <span className="ui-detail phone-row-below">{row.subtitle}</span>
         )}
-        {fresh ? <span className="phone-row-new">New</span> : null}
+        {fresh ? (
+          <span className="ui-badge ui-badge-filled phone-row-new">New</span>
+        ) : null}
+        {value === undefined ? null : (
+          <span
+            className={`${waiting ? 'ui-badge' : 'ui-value'} phone-row-value`}
+          >
+            {value}
+          </span>
+        )}
       </span>
       {end === undefined ? null : (
         <Clock time={end} className="phone-row-end" />
-      )}
-      {value === undefined ? null : (
-        <span className={`phone-row-value${waiting ? ' phone-waiting' : ''}`}>
-          {value}
-        </span>
       )}
       {row.switch === undefined ? null : (
         <span
@@ -474,6 +478,31 @@ function Row({
       )}
     </div>
   );
+}
+
+/**
+ * What a row adds to a plain row's look: room for a second line or a tile,
+ * and the look of a time at its `end`, of a tile, of a link, of a switch
+ * that is off and of being new.
+ */
+function looksOf(
+  row: ScreenRow,
+  fresh: boolean,
+  end: string | undefined,
+): string {
+  const tall =
+    row.caption !== undefined ||
+    row.subtitle !== undefined ||
+    row.tile !== undefined;
+
+  return [
+    tall ? ' ui-row-two' : '',
+    end === undefined ? '' : ' phone-row-timed',
+    row.tile === undefined ? '' : ' phone-row-tiled',
+    row.url === undefined ? '' : ' phone-row-linked',
+    row.switch === false ? ' phone-row-off' : '',
+    fresh ? ' phone-row-fresh' : '',
+  ].join('');
 }
 
 /**
@@ -494,8 +523,8 @@ function AppHeader({
       <AppTile tile={app.tile} size="header" />
       <div className="phone-app-header-words">
         <h3 className="phone-app-header-name">{app.name}</h3>
-        <span className="phone-app-header-subtitle">{app.subtitle}</span>
-        <span className={`phone-pill${waiting ? ' phone-waiting' : ''}`}>
+        <span className="ui-detail">{app.subtitle}</span>
+        <span className={`ui-badge${waiting ? '' : ' ui-badge-quiet'}`}>
           {waiting ? 'Waiting for you' : app.status}
         </span>
       </div>
@@ -534,7 +563,7 @@ function Glance({
 /** Small readings side by side on one card, in equal columns: each a small label over its value. */
 function Strip({cells}: {readonly cells: readonly ScreenCell[]}) {
   return (
-    <div className="phone-card phone-strip">
+    <div className="ui-card phone-strip">
       {cells.map((cell, at) => (
         <span key={at} className="phone-cell">
           <span className="phone-cell-label">{cell.label}</span>
@@ -552,9 +581,9 @@ function Strip({cells}: {readonly cells: readonly ScreenCell[]}) {
  */
 function Ranges({rows}: {readonly rows: readonly ScreenRange[]}) {
   return (
-    <div className="phone-card phone-ranges">
+    <div className="ui-card phone-ranges">
       {rows.map((range, at) => (
-        <div key={at} className="phone-range">
+        <div key={at} className="ui-row phone-range">
           <span className="phone-range-label">{range.label}</span>
           <span className="phone-range-low">{range.low}</span>
           <span className="phone-range-track" aria-hidden="true">
@@ -580,7 +609,7 @@ function Field({field}: {readonly field: FieldItem}) {
       {field.icon === undefined ? null : (
         <Icon
           name={iconOf(field.icon)}
-          size={16}
+          size={17}
           weight={2}
           className="phone-field-icon"
         />
@@ -602,7 +631,7 @@ function AppTile({
 
   return (
     <span
-      className={`tile-solid phone-tile-${size} tint-${tintOf(tile.tint)}`}
+      className={`tile tile-solid phone-tile-${size} tint-${tintOf(tile.tint)}`}
       aria-hidden="true"
     >
       <Icon name={iconOf(tile.icon)} size={glyph.size} weight={glyph.weight} />
@@ -706,7 +735,7 @@ function Readout({
 function Ringing({ring}: {readonly ring: PhoneRing}) {
   return (
     <div className="phone-ringing" role="status">
-      <span className="phone-ringing-badge" aria-hidden="true">
+      <span className="phone-ringing-icon" aria-hidden="true">
         <Icon name="alarm" size={32} weight={1.7} />
       </span>
       <span className="phone-ringing-title">{ring.title}</span>
@@ -716,7 +745,7 @@ function Ringing({ring}: {readonly ring: PhoneRing}) {
       {ring.body === undefined ? null : (
         <span className="phone-ringing-body">{ring.body}</span>
       )}
-      <span className="phone-ringing-state">Ringing</span>
+      <span className="ui-badge">Ringing</span>
     </div>
   );
 }

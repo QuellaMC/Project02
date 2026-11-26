@@ -209,7 +209,7 @@ test("page.phone-follows-her: her phone's address shows her home screen with the
   );
   await say('Wake me at seven.', 'wake');
   await expect(page.getByRole('heading', {name: 'Alarms'})).toBeVisible();
-  await expect(page.locator('.phone-row')).toContainText('7:00 AMWake Sam');
+  await expect(page.locator('.ui-row')).toContainText('7:00 AMWake Sam');
   await expect(page.getByRole('img', {name: 'On'})).toBeVisible();
   await expect(line).toContainText('Set an alarm');
 
@@ -277,6 +277,48 @@ test("page.phone-rings: while a moment of hers that a ring began runs, her phone
   asked.release(reply('Up you get, Sam.'));
   await expect(ringing).toHaveCount(0);
   await expect(clockIcon(page)).toBeVisible();
+});
+
+test('page.phone-view-end: a view of an app whose views are tabs, longer than her screen, scrolled to its end shows its last row above the tabs, not under them', async ({
+  page,
+}) => {
+  const model = await startModelServer();
+  // Her Clock holds twelve alarms, all off: more than her screen shows.
+  const daemon = await startDaemon(
+    quietHome(model, {
+      storage: {
+        issued: {a: 12},
+        alarms: Array.from({length: 12}, (_, at) => ({
+          id: `a${String(at + 1)}`,
+          hour: 6 + at,
+          minute: 0,
+          label: `Alarm ${String(at + 1)}`,
+          days: [],
+          on: false,
+        })),
+      },
+    }),
+  );
+  const rows = page.locator('.ui-row');
+
+  await page.goto(phoneOf(daemon, 'mira'));
+  await clockIcon(page).click();
+  await expect(rows).toHaveCount(12);
+
+  const runsPast = await page.evaluate<boolean>(`(() => {
+    const view = document.querySelector('.phone-pieces');
+    view.scrollTop = view.scrollHeight;
+    return view.scrollHeight > view.clientHeight;
+  })()`);
+  const [last, tabs] = await Promise.all([
+    boxOf(rows.last()),
+    boxOf(page.getByRole('navigation', {name: 'Clock'})),
+  ]);
+
+  expect({runsPast, lastAboveTabs: under(last, tabs)}).toEqual({
+    runsPast: true,
+    lastAboveTabs: true,
+  });
 });
 
 test("page.phone-button: her chat's Her Phone button opens her phone's address in a window and is pressed while that window shows her phone, a browser's popup with no pin; closing the window, or clicking the button again, leaves it plain; with her phone open, another character's takes the same window; a browser that blocks the window is told what to allow; once her settings switch her phone off, her chat has no button", async ({
@@ -392,7 +434,7 @@ test("page.store-app-approved: her phone's window shows the App Store's list as 
   const card = page.getByRole('group', {
     name: 'Mira wants to install Reminders',
   });
-  const pill = phone.locator('.phone-pill');
+  const pill = phone.locator('.phone-app-header .ui-badge');
 
   expect(await wireOf(daemon).installApp('mira', 'notes')).toMatchObject({
     status: 'ok',
@@ -406,7 +448,7 @@ test("page.store-app-approved: her phone's window shows the App Store's list as 
   await tellMira(page, 'Is there an app for reminders?');
   await looking.arrived();
   await expect(phone.getByRole('heading', {name: 'App Store'})).toBeVisible();
-  await expect(phone.locator('.phone-row')).toHaveText([
+  await expect(phone.locator('.ui-row')).toHaveText([
     'RemindersThings to do, on a day and time',
     'NotesNotes, quietlyInstalled',
   ]);
@@ -457,7 +499,7 @@ test("page.store-app-denied: while her ask to install an app on the App Store's 
   const card = page.getByRole('group', {
     name: 'Mira wants to install Reminders',
   });
-  const row = phone.locator('.phone-row');
+  const row = phone.locator('.ui-row');
 
   await phone.goto(phoneOf(daemon, 'mira'));
   await page.goto(daemon.url);
@@ -518,7 +560,7 @@ test("page.phone-pieces: an app's view draws each piece where the design puts it
     'Thu7°12°',
     'Sat5°10°',
   ]);
-  await expect(page.locator('.phone-note')).toHaveText(
+  await expect(page.locator('.ui-foot')).toHaveText(
     'Weather data by Open-Meteo.com',
   );
   await expect(page.locator('.phone-field')).toHaveText(
@@ -541,7 +583,7 @@ test("page.phone-pieces: an app's view draws each piece where the design puts it
     boxOf(page.locator('.phone-strip')),
     boxOf(page.locator('.phone-ranges')),
     boxOf(page.locator('.phone-range-track').first()),
-    boxOf(page.locator('.phone-note')),
+    boxOf(page.locator('.ui-foot')),
   ]);
   const onTrack = (at: number): number =>
     Math.round(((at - track.x) / track.width) * 100);

@@ -36,7 +36,7 @@ export function PhoneWindow({session}: {readonly session: PhoneSession}) {
   return (
     <div className="phone-window">
       <header
-        className={`phone-bar${frame === undefined ? '' : ' phone-bar-moves'}`}
+        className={`ui-bar${frame === undefined ? '' : ' ui-bar-moves'}`}
         onMouseDown={
           frame === undefined
             ? undefined
@@ -58,19 +58,19 @@ export function PhoneWindow({session}: {readonly session: PhoneSession}) {
         {name === undefined ? null : (
           <>
             <Face id={state.characterId} name={name} size="bar" />
-            <h1 className="phone-bar-title">{`${name}'s Phone`}</h1>
+            <h1 className="ui-bar-title">{`${name}'s Phone`}</h1>
           </>
         )}
         {said === undefined ? (
-          <span className="phone-watching">
+          <span className="ui-badge ui-badge-quiet phone-watching">
             <Icon name="eye" size={13} />
-            Watching
+            <span>Watching</span>
           </span>
         ) : null}
         {frame === undefined ? null : (
           <button
             type="button"
-            className="phone-pin"
+            className="ui-round"
             aria-label="Keep on top of other windows"
             aria-pressed={frame.pinned}
             onClick={() => {
@@ -82,19 +82,19 @@ export function PhoneWindow({session}: {readonly session: PhoneSession}) {
         )}
         <button
           type="button"
-          className="phone-close"
+          className="ui-round"
           aria-label="Close her phone"
           onClick={session.close}
         >
-          <Icon name="cross" size={19} weight={1.65} />
+          <Icon name="cross" size={16} weight={2.1} />
         </button>
       </header>
       {said === undefined ? (
         <PhoneDevice state={state} now={now} session={session} />
       ) : (
-        <p className="phone-said" role="status">
-          {said}
-        </p>
+        <div className="ui-panel phone-said">
+          <p role="status">{said}</p>
+        </div>
       )}
       {line === undefined ? null : (
         <p className="phone-line">
@@ -103,7 +103,9 @@ export function PhoneWindow({session}: {readonly session: PhoneSession}) {
             aria-hidden="true"
           />
           <span className="phone-line-what">{line.what}</span>
-          {line.when === undefined ? null : <span>{line.when}</span>}
+          {line.when === undefined ? null : (
+            <span className="phone-line-when">{line.when}</span>
+          )}
         </p>
       )}
     </div>
