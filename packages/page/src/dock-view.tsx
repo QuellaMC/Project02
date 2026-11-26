@@ -368,7 +368,7 @@ function AskCard({
       className={cardClasses(arrived, leaving, settled)}
     >
       <span
-        className={`ask-tile tile-solid tint-${words.tile.tint}`}
+        className={`ask-tile tile tile-solid tint-${words.tile.tint}`}
         aria-hidden="true"
       >
         <Icon name={words.tile.icon} size={22} weight={1.7} />
