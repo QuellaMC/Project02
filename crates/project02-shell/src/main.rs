@@ -16,10 +16,8 @@ use std::thread;
 
 use p02_shared::{read_text_lossy, sentence};
 use project02::ADDRESS_PREFIX;
+use project02_shell::her_windows::{Area, HerWindow, Memory, Point, Remembered};
 use project02_shell::home;
-use project02_shell::phone::{
-    self, Area, Point, REMEMBERED, Remembered, character_of, is_phone_address, phone_address, place,
-};
 use project02_shell::run::{self, DAEMON_LOG, Running};
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{TrayIcon, TrayIconBuilder};
@@ -34,14 +32,9 @@ use tauri_plugin_dialog::{DialogExt as _, MessageDialogKind};
 /// `tauri.conf.json` names.
 const WINDOW: &str = "main";
 
-/// The label of her phone's window, which the capability `phone-window` in
-/// `tauri.conf.json` names. There is one: another character's phone takes
-/// it to her address.
-const PHONE: &str = "phone";
-
 /// What the shell holds while it runs: the two folders the tray opens, the
 /// tray, the two services Quit stops, taken once, and what it remembers of
-/// her phone's window.
+/// the windows of hers.
 struct Shell {
     home: PathBuf,
     logs: PathBuf,
@@ -50,10 +43,9 @@ struct Shell {
     /// Set once the daemon ended without an address or the window could
     /// not open, so whichever quit follows ends the app with 1.
     start_failed: AtomicBool,
-    /// The file the app remembers her phone's window in.
-    phone_file: PathBuf,
-    /// What it remembers; whoever writes the file holds this.
-    remembered: Mutex<Remembered>,
+    /// What it remembers of the windows of hers; whoever writes one's file
+    /// holds this.
+    memory: Mutex<Memory>,
 }
 
 fn main() -> ExitCode {
@@ -106,7 +98,7 @@ fn start(app: &mut App, named: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
         None => home::per_user(&app.path().data_dir()?),
     };
     let logs = app.path().app_log_dir()?;
-    let phone_file = app.path().app_config_dir()?.join(REMEMBERED);
+    let memory = Memory::read(app.path().app_config_dir()?);
 
     // Before the two start, so a desktop that refuses a tray starts nothing.
     let tray = tray(app)?;
@@ -118,8 +110,7 @@ fn start(app: &mut App, named: Option<PathBuf>) -> Result<(), Box<dyn Error>> {
         tray,
         running: Mutex::new(Some(running)),
         start_failed: AtomicBool::new(false),
-        remembered: Mutex::new(Remembered::read(&phone_file)),
-        phone_file,
+        memory: Mutex::new(memory),
     });
 
     let app = app.handle().clone();
@@ -183,8 +174,8 @@ fn open_when_served(app: &AppHandle, address: &Receiver<String>) {
     }
 }
 
-/// The main window, on the daemon's page at `address`, and her phone's
-/// window again when the app last ended with it open. The main window's
+/// The main window, on the daemon's page at `address`, and each window of
+/// hers again that was open when the app last ended. The main window's
 /// page gets nothing of Tauri but a notification and the system's
 /// permission for one.
 fn open(app: &AppHandle, address: &str) -> tauri::Result<()> {
@@ -198,11 +189,14 @@ fn open(app: &AppHandle, address: &str) -> tauri::Result<()> {
         .on_new_window(move |url, _| answer_new_window(&opener, &page, url))
         .build()?;
 
-    let open = lock(&app.state::<Shell>().remembered).open.clone();
+    for hers in HerWindow::ALL {
+        let open = lock(&app.state::<Shell>().memory).of(hers).open;
 
-    if let Some(character) = open {
-        // One that cannot open again stops nothing: Her Phone opens it.
-        let _ = open_phone(app, phone_address(&daemon, &character));
+        if let Some(character) = open {
+            // One that cannot open again stops nothing: its button in her
+            // chat opens it.
+            let _ = open_her_window(app, hers, hers.address(&daemon, &character));
+        }
     }
 
     Ok(())
@@ -210,20 +204,20 @@ fn open(app: &AppHandle, address: &str) -> tauri::Result<()> {
 
 /// Answers a `window.open` of the main window's page, or a link of it
 /// that leads to a new window, with no window of the page's own. One for
-/// her phone's address on the daemon at `daemon` has the app open her
-/// phone's window itself, so that it is the app's own on every system: on
-/// a Mac a window given to the page reaches Tauri as the page does. A
-/// thread of its own opens it, so the event loop builds it after this
-/// answer. One for an outside address over https, as the link to OpenAI's
-/// sign-in page is, opens in the person's browser; any other opens
-/// nothing.
+/// the address of a window of hers on the daemon at `daemon`, her phone's
+/// or her world's, has the app open that window itself, so that it is the
+/// app's own on every system: on a Mac a window given to the page reaches
+/// Tauri as the page does. A thread of its own opens it, so the event loop
+/// builds it after this answer. One for an outside address over https, as
+/// the link to OpenAI's sign-in page is, opens in the person's browser; any
+/// other opens nothing.
 fn answer_new_window(app: &AppHandle, daemon: &Url, url: Url) -> NewWindowResponse<Wry> {
-    if is_phone_address(&url, daemon) {
+    if let Some(hers) = HerWindow::of(&url, daemon) {
         let app = app.clone();
         // One that cannot open says nothing: the button stays plain.
         let _ = thread::Builder::new()
-            .name("phone".to_owned())
-            .spawn(move || open_phone(&app, url));
+            .name(hers.name().to_owned())
+            .spawn(move || open_her_window(&app, hers, url));
     } else if url.scheme() == "https" {
         // One the system opens nothing for says nothing: the link stays.
         let _ = tauri_plugin_opener::open_url(url.as_str(), None::<&str>);
@@ -232,28 +226,29 @@ fn answer_new_window(app: &AppHandle, daemon: &Url, url: Url) -> NewWindowRespon
     NewWindowResponse::Deny
 }
 
-/// Her phone's window at `url`: the one open, taken there and brought to
-/// the front, or a new one where the app remembers it, pinned as it was.
-/// Off the event loop, which builds the window and answers what this asks
-/// of it.
-fn open_phone(app: &AppHandle, url: Url) -> tauri::Result<()> {
-    if let Some(open) = phone_window(app) {
+/// The window of hers `hers` at `url`: the one open, taken there and
+/// brought to the front, or a new one where the app remembers it, pinned
+/// as it was. Off the event loop, which builds the window and answers what
+/// this asks of it.
+fn open_her_window(app: &AppHandle, hers: HerWindow, url: Url) -> tauri::Result<()> {
+    if let Some(open) = app.get_webview_window(hers.name()) {
         open.navigate(url)?;
         return open.set_focus();
     }
 
-    let left = lock(&app.state::<Shell>().remembered).clone();
+    let left = lock(&app.state::<Shell>().memory).of(hers);
     let main = app.get_webview_window(WINDOW);
-    let at = place(
+    let at = hers.place(
         left.place,
         &main.as_ref().map(screens).unwrap_or_default(),
         main.as_ref().and_then(area).unwrap_or_default(),
     );
 
-    // The phone alone, its page drawing the bar that moves and closes it.
-    WebviewWindowBuilder::new(app, PHONE, WebviewUrl::External(url))
-        .title("Her Phone")
-        .inner_size(phone::WIDTH, phone::HEIGHT)
+    // Her phone or her world alone, its page drawing the bar that moves and
+    // closes it.
+    WebviewWindowBuilder::new(app, hers.name(), WebviewUrl::External(url))
+        .title(hers.title())
+        .inner_size(hers.width(), HerWindow::HEIGHT)
         .resizable(false)
         .decorations(false)
         .transparent(true)
@@ -267,16 +262,11 @@ fn open_phone(app: &AppHandle, url: Url) -> tauri::Result<()> {
     Ok(())
 }
 
-/// Her phone's window, when it is open.
-fn phone_window(app: &AppHandle) -> Option<WebviewWindow> {
-    app.get_webview_window(PHONE)
-}
-
-/// What her phone's window says of itself now: whose phone it shows,
-/// where it is, and whether it stays on top.
-fn said(window: &WebviewWindow) -> Remembered {
+/// What `window`, the window of hers `hers`, says of itself now: whose
+/// phone or world it shows, where it is, and whether it stays on top.
+fn said(hers: HerWindow, window: &WebviewWindow) -> Remembered {
     Remembered {
-        open: window.url().ok().as_ref().and_then(character_of),
+        open: window.url().ok().and_then(|url| hers.character_of(&url)),
         place: window
             .outer_position()
             .ok()
@@ -290,23 +280,21 @@ fn said(window: &WebviewWindow) -> Remembered {
     }
 }
 
-/// Keeps what her phone's window says of itself as the app's memory of
-/// it, `open` when the app ends with it and closed when it closes, and
-/// writes the file once that changed. One that cannot be written leaves
-/// the next start to open her phone where it first would.
-fn remember(app: &AppHandle, window: &WebviewWindow, open: bool) {
-    let shell = app.state::<Shell>();
-    let mut remembered = lock(&shell.remembered);
-    let mut now = said(window);
+/// Keeps what the window of hers `hers`, while it is open, says of itself
+/// as the app's memory of it, `open` when the app ends with it and closed
+/// when it closes. One that cannot be written leaves the next start to
+/// open it where it first would.
+fn remember(app: &AppHandle, hers: HerWindow, open: bool) {
+    let Some(window) = app.get_webview_window(hers.name()) else {
+        return;
+    };
+    let mut now = said(hers, &window);
 
     if !open {
         now.open = None;
     }
 
-    if now != *remembered {
-        let _ = now.write(&shell.phone_file);
-        *remembered = now;
-    }
+    let _ = lock(&app.state::<Shell>().memory).keep(hers, now);
 }
 
 /// The work area of each screen `window` can reach.
@@ -448,10 +436,7 @@ fn quit(app: &AppHandle) {
         return;
     };
 
-    for window in [app.get_webview_window(WINDOW), phone_window(app)]
-        .into_iter()
-        .flatten()
-    {
+    for window in app.webview_windows().into_values() {
         let _ = window.hide();
     }
 
@@ -471,12 +456,12 @@ fn quit(app: &AppHandle) {
 }
 
 /// The two to stop, taken once by whichever end comes first, which is
-/// when the app remembers her phone's window as it leaves it.
+/// when the app remembers each window of hers as it leaves it.
 fn take_running(app: &AppHandle) -> Option<Running> {
     let running = lock(&app.state::<Shell>().running).take()?;
 
-    if let Some(phone) = phone_window(app) {
-        remember(app, &phone, true);
+    for hers in HerWindow::ALL {
+        remember(app, hers, true);
     }
 
     Some(running)
@@ -485,7 +470,7 @@ fn take_running(app: &AppHandle) -> Option<Running> {
 fn on_event(app: &AppHandle, event: RunEvent) {
     match event {
         // Closing the main window hides it: the characters keep answering
-        // in Telegram until Quit. Her phone's window closes, however it is
+        // in Telegram until Quit. A window of hers closes, however it is
         // closed, and the app remembers where it was.
         RunEvent::WindowEvent {
             label,
@@ -498,10 +483,8 @@ fn on_event(app: &AppHandle, event: RunEvent) {
                 if let Some(window) = app.get_webview_window(WINDOW) {
                     let _ = window.hide();
                 }
-            } else if label == PHONE
-                && let Some(phone) = phone_window(app)
-            {
-                remember(app, &phone, false);
+            } else if let Some(hers) = HerWindow::labelled(&label) {
+                remember(app, hers, false);
             }
         }
         // An exit the stop order did not ask for waits for it; the one it

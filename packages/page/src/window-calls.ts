@@ -1,12 +1,12 @@
 /**
  * The desktop app, as far as a page in it can see: Tauri puts its `invoke`
  * on the `window` of every page the app draws, and lets each window call
- * through it only what the app gives that window. Her phone's window
- * answers four window calls: whether the window stays on top of other
- * windows, keeping it so, moving it with the pointer, and closing it. The
- * main window shows a notification, once the system allows it. A browser
- * has none of it. The page imports nothing of Tauri: it asks its `window`,
- * and does without.
+ * through it only what the app gives that window. A window of hers, her
+ * phone's or her world's, answers four window calls: whether the window
+ * stays on top of other windows, keeping it so, moving it with the
+ * pointer, and closing it. The main window shows a notification, once the
+ * system allows it. A browser has none of it. The page imports nothing of
+ * Tauri: it asks its `window`, and does without.
  */
 
 /** How Tauri lets a page reach the app: a command by its name, with its arguments. */

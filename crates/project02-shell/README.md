@@ -1,10 +1,10 @@
 # project02-shell
 
 The app a person installs: the daemon and the Telegram connector in its own
-process, a window on the daemon's page and one for her phone, and a tray
-that keeps them running while the main window is closed. It depends on
-p02-shared, p02-telegram and project02, and on Tauri 2 for the windows, the
-tray and the notifications.
+process, a window on the daemon's page, one for her phone and one for her
+world, and a tray that keeps them running while the main window is closed.
+It depends on p02-shared, p02-telegram and project02, and on Tauri 2 for
+the windows, the tray and the notifications.
 
 It builds only where a webview's development files are: on Linux, the
 packages the gate's Linux job installs (`pkg-config`,
@@ -32,18 +32,24 @@ Xcode's command line tools.
 - **A link that leads outside** the page, over https, as the one to
   OpenAI's sign-in page does, opens in the person's browser. The main
   window gives the page no window of its own for any request.
-- **Her phone's window** is the app's own. Her Phone in the chat calls
-  `window.open` on her phone's address; the main window answers that with
-  no window, as it answers every request, and the app opens her phone's
-  window itself at that address: 372 by 792, not resizable, without a
-  frame and transparent around the phone. There is one: another
-  character's phone takes it to her address. The capability `phone-window`
-  in `tauri.conf.json` gives that window, labelled `phone`, four of
-  Tauri's window calls, on 127.0.0.1, where the daemon serves, and nowhere
-  else: whether it stays on top, keeping it on top, starting a drag and
-  closing it, with which its page moves it by its bar, pins it and closes
-  it. However it is closed, it closes and does not hide; Quit hides it with
-  the main window before the stop order.
+- **The windows of hers**, her phone's and her world's, are the app's own.
+  Her Phone and Her World in the chat call `window.open` on her phone's
+  address, `/?phone=<character id>`, and on her world's,
+  `/?world=<character id>`; the main window answers that with no window,
+  as it answers every request, and the app opens that window itself at
+  that address: her phone's 372 by 792 and her world's 420 by 792, not
+  resizable, without a frame and transparent around what it shows. Her
+  phone's opens right of the main window and her world's left of it, so
+  the two do not open on top of each other; where a side has no room, as
+  near to it as the screen that holds the main window allows. There is one
+  of each: another character's phone or world takes it to her address. The
+  capability `her-windows` in `tauri.conf.json` gives those windows,
+  labelled `phone` and `world`, four of Tauri's window calls, on 127.0.0.1,
+  where the daemon serves, and nowhere else: whether it stays on top,
+  keeping it on top, starting a drag and closing it, with which its page
+  moves it by its bar, pins it and closes it. However one is closed, it
+  closes and does not hide; Quit hides them with the main window before
+  the stop order.
 - **A notification** is the system's own, through Tauri's notification
   plugin, and the main window's page asks for one for each message of hers
   in Messages while that window does not have the focus: closed, minimised
@@ -57,15 +63,15 @@ Xcode's command line tools.
   installer gives its shortcuts the app's identifier; a build run from
   `target` shows as PowerShell. What a click on one does is the system's:
   the app listens for none.
-- **What the app remembers** of her phone's window is in
-  `phone-window.json`, in the app's config folder
-  (`io.github.quellamc.project02` under the system's), written whole when
-  the window closes and when the app ends: where it was left, whether it
-  was pinned, and whose phone it showed when the app ended with it open.
-  At the next start, once the main window is on the daemon's address, that
-  phone opens again, pinned as it was and where it was, unless no screen
-  holds that place any more: then beside the main window, as the first
-  time. A file that cannot be read is no memory.
+- **What the app remembers** of each window of hers is in a file of its
+  own, `phone-window.json` and `world-window.json`, in the app's config
+  folder (`io.github.quellamc.project02` under the system's), written whole
+  when the window closes and when the app ends: where it was left, whether
+  it was pinned, and whose phone or world it showed when the app ended with
+  it open. At the next start, once the main window is on the daemon's
+  address, each that was open opens again, pinned as it was and where it
+  was, unless no screen holds that place any more: then beside the main
+  window, as the first time. A file that cannot be read is no memory.
 - **The logs** are `daemon.log` and `telegram.log` in the app's log folder,
   `~/Library/Logs/io.github.quellamc.project02` on macOS and
   `io.github.quellamc.project02/logs` under the local data folder
