@@ -16,6 +16,7 @@ mod phone;
 mod reconcile;
 mod rings;
 mod translator;
+mod world;
 
 pub use chatgpt::kept_sign_in;
 pub use daemon::{Daemon, DaemonSettings, Durations, Message, OpenDaemonError, Plugin, Presence};

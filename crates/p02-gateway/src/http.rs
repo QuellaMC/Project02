@@ -23,7 +23,8 @@ use p02_core::SpeakerName;
 use p02_shared::DaemonToken;
 use p02_wire::{
     AnswerBody, AppSignInBody, AppWakeBody, ConfigChange, ConfigTarget, ConnectorBotsBody,
-    ErrorBody, GatewayMessage, OpenConversationBody, PairingRequestBody, ReadBody, Refusal,
+    ErrorBody, GatewayMessage, LeaveThingBody, OpenConversationBody, PairingRequestBody, ReadBody,
+    Refusal,
 };
 use serde::Serialize;
 use serde::de::DeserializeOwned;
@@ -149,6 +150,12 @@ pub(crate) fn router(app: App) -> Router {
         .route(
             "/api/characters/{id}/phone/apps/{app}/views/{view}",
             get(phone_screen),
+        )
+        .route("/api/characters/{id}/world", get(world))
+        .route("/api/characters/{id}/world/things", post(leave_thing))
+        .route(
+            "/api/characters/{id}/world/things/{thing}",
+            delete(remove_thing),
         )
         .route("/api/conversations/open", post(open))
         .route("/api/turns", post(turn))
@@ -388,6 +395,28 @@ async fn sign_in_app(
         ),
         Err(refusal) => refusal.into_response(),
     }
+}
+
+async fn world(State(app): State<App>, Path(id): Path<String>) -> Response {
+    answer(&app.0.daemon.world_of(&id).await)
+}
+
+async fn leave_thing(
+    State(app): State<App>,
+    Path(id): Path<String>,
+    body: Result<Bytes, BytesRejection>,
+) -> Response {
+    match read::<LeaveThingBody>("The thing", body) {
+        Ok(thing) => answer(&app.0.daemon.leave_thing(&id, thing).await),
+        Err(refusal) => refusal.into_response(),
+    }
+}
+
+async fn remove_thing(
+    State(app): State<App>,
+    Path((id, thing)): Path<(String, String)>,
+) -> Response {
+    answer(&app.0.daemon.remove_thing(&id, &thing).await)
 }
 
 async fn open(State(app): State<App>, body: Result<Bytes, BytesRejection>) -> Response {

@@ -64,7 +64,12 @@ its name and its id, which puts her at its first place while she has none
 there yet, and she goes somewhere, makes something where she is and uses
 something there through three tools, `world.go`, `world.make` and
 `world.use`, each refused in a sentence she reads, with what is there when
-what she named is not.
+what she named is not. A thing the person left is said to her as not there
+before, with their note, the first time she is told what is where it is,
+before a call or in her going's answer, which is what makes it seen; from
+then it is said by its name alone, and using it gives the note again. She
+is never told who left a thing, and nothing tells her when one is left or
+removed.
 
 What a plugin says to her, in its tools, its notes and its answers, it
 says about her own situation, in the second person, and keeps beside its

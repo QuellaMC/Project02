@@ -417,7 +417,7 @@ committed: boolean, reason?: string, message?: string, } | { "kind": "confirmati
  * Present when a failure caused the change, or when she needs a
  * model: what to do about it.
  */
-message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "kind": "maintenance_failed", characterId: Identifier, at: Timestamp, message: string, } | { "kind": "phone_changed", characterId: Identifier, };
+message?: string, } | { "kind": "health_changed", health: GatewayHealth, } | { "kind": "maintenance_failed", characterId: Identifier, at: Timestamp, message: string, } | { "kind": "phone_changed", characterId: Identifier, } | { "kind": "world_changed", world: Identifier, };
 
 /**
  * The daemon's whole state in one read.
@@ -544,6 +544,22 @@ when?: LayoutWhen, };
  * What it guards has no effect otherwise, so a page may hide it then.
  */
 export type LayoutWhen = { field: Identifier, is: ReadonlyArray<string>, };
+
+/**
+ * A thing the person leaves her in a place of her world: its name, one
+ * line of 128 characters at most; its kind, by the id of one of the
+ * world's kinds; the place, by its id; and their note, when they write
+ * one, not blank and 280 characters at most, which may have several lines.
+ */
+export type LeaveThingBody = { name: string, kind: string, place: string, note?: string, };
+
+/**
+ * What came of leaving her a thing: the thing as her world now holds it;
+ * or why it was not left.
+ */
+export type LeaveThingOutcome = { "status": "ok", thing: WorldThing, } | { "status": "refused", reason: LeaveThingRefusal, message: string, } | { "status": "failed", message: string, };
+
+export type LeaveThingRefusal = "unknown_character" | "no_world" | "unknown_place" | "unknown_kind" | "invalid_name" | "invalid_note" | "no_room";
 
 /**
  * How a readout's reading moves, in milliseconds since the epoch.
@@ -852,6 +868,14 @@ export type Refusal = { code: string, message: string, };
 export type RemoveCharacterOutcome = { "status": "removed" } | { "status": "refused", reason: RemoveCharacterRefusal, message: string, } | { "status": "failed" } & StorageFailure;
 
 export type RemoveCharacterRefusal = "built_in" | "unknown_character";
+
+/**
+ * What came of removing a thing from her world: it is gone, whoever it
+ * was from; or why it was not removed.
+ */
+export type RemoveThingOutcome = { "status": "ok" } | { "status": "refused", reason: RemoveThingRefusal, message: string, } | { "status": "failed", message: string, };
+
+export type RemoveThingRefusal = "unknown_character" | "no_world" | "unknown_thing";
 
 /**
  * The services a character can think with, each by the value of
@@ -1220,3 +1244,72 @@ export type VisibleMessageRole = "character" | "user";
  * space, and something is left.
  */
 export type VisibleText = string;
+
+/**
+ * A character living in a world: her id and display name, the place she
+ * is in, by its id, and since when.
+ */
+export type WorldCharacter = { id: Identifier, displayName: SpeakerName, place: Identifier, since: Timestamp, };
+
+/**
+ * What a line of the journal says happened: she went somewhere, made a
+ * thing or used one, or the person left a thing or removed one.
+ */
+export type WorldDeed = "went" | "made" | "used" | "left" | "removed";
+
+/**
+ * A line of a world's journal: when, whose deed it was, what happened,
+ * and the place and the thing it was about.
+ */
+export type WorldEntry = { when: Timestamp, who: WorldHand, what: WorldDeed, place: WorldNamed, thing?: WorldNamed, };
+
+/**
+ * A hand that changes a world: the world itself, the person, or a
+ * character, by her id. A thing is from one, and a line of the journal
+ * says whose deed it was.
+ */
+export type WorldHand = { "kind": "world" } | { "kind": "person" } | { "kind": "character", id: Identifier, };
+
+/**
+ * A kind a thing can be left as: its id, the name a person reads, and the
+ * icon and the tint a thing of it is drawn with.
+ */
+export type WorldKind = { id: Identifier, name: string, icon: string, tint: string, };
+
+/**
+ * A place or a thing as a line of the journal names it: by its id, and by
+ * the name it had then.
+ */
+export type WorldNamed = { id: string, name: string, };
+
+/**
+ * The world a character lives in as it stands; or why it was not read.
+ */
+export type WorldOutcome = { "status": "ok" } & WorldView | { "status": "refused", reason: WorldRefusal, message: string, } | { "status": "failed", message: string, };
+
+/**
+ * A place of a world: its id, its name, its icon and tint, names of the
+ * page's own set, which falls back for one it does not know, and the
+ * things in it in the order they came.
+ */
+export type WorldPlace = { id: Identifier, name: string, icon: string, tint: string, things: ReadonlyArray<WorldThing>, };
+
+export type WorldRefusal = "unknown_character" | "no_world";
+
+/**
+ * A thing in a place: the id the world gave it, its name, icon and tint,
+ * whom it is from, when it came, the note the person left with it when
+ * they wrote one, and, for a thing the person left, the characters who
+ * have been told of it where it is. Until a character has, it is new to
+ * her; what the world itself brought and what she made never are.
+ */
+export type WorldThing = { id: string, name: string, icon: string, tint: string, from: WorldHand, came: Timestamp, note?: string, seen: ReadonlyArray<Identifier>, };
+
+/**
+ * Everything a person sees of a world: its id and name; its places in
+ * their order, each with its things in the order they came; who is where
+ * and since when, each character the home has by her display name; the
+ * newest 200 lines of its journal, newest first; and the kinds a thing
+ * can be left as.
+ */
+export type WorldView = { id: Identifier, name: string, places: ReadonlyArray<WorldPlace>, characters: ReadonlyArray<WorldCharacter>, journal: ReadonlyArray<WorldEntry>, kinds: ReadonlyArray<WorldKind>, };

@@ -64,9 +64,10 @@ with an outcome of p02-wire, never an error.
   message of hers the person read, with what rings, which her actor
   publishes while a ring's moment runs. A view of
   an app is read on request too, and changes nothing of hers. One whose settings switch her phone off has none to
-  read. The stream says her phone changed after a call of her phone's
-  tools came back accepted, and as a ring's moment begins and once its
-  rings went to their apps. The daemon makes the one reader of the App
+  read: whether her settings run a plugin is one rule, which her world is
+  judged by too. The stream says her phone changed after a call of her
+  phone's tools came back accepted, and as a ring's moment begins and once
+  its rings went to their apps. The daemon makes the one reader of the App
   Store's catalog, from the base the binary gives it, and the one seam
   that makes her apps' requests, at a stand-in the binary names under its
   test switch, and hands both to every host it builds her. It hands her
@@ -78,6 +79,16 @@ with an outcome of p02-wire, never an error.
 - **Her world.** A character whose package brings a world lives in it:
   every host the daemon builds her is handed that world and its files in
   the home, which her world's plugin reads and writes under their lease.
+  A client reads it whether she runs or not, under the same lease, waited
+  for as long as her phone's: its places with their things, who is where,
+  each character the home has by her display name, the journal's newest
+  lines and the kinds a thing can be left as. The person leaves a thing
+  there with a note and removes one, each their own act, which asks
+  nobody, and nothing tells her; one whose package brings no world, or
+  whose settings do not run it, has none. The stream says a world is to be
+  read again, by its id, after each change of the person's and after a
+  call of hers to its tools came back accepted: one rule says what such a
+  call changes, her phone or her world.
 - **The person's connections** her apps ask a model through are the
   person's AI services of OpenAI's, in the AI Model page's order: the
   ChatGPT plan while the home is signed in, and the OpenAI API while the

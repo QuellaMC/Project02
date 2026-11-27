@@ -2043,6 +2043,23 @@
             "characterId"
           ],
           "description": "Her phone is to be read again: a call of hers to it came back\naccepted, a ring's moment of hers began or ended, or the person gave\nher an app, removed one, said whether one may wake her or how one is\nsigned in, or read a message of hers."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "world": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "kind": {
+              "type": "string",
+              "const": "world_changed"
+            }
+          },
+          "required": [
+            "kind",
+            "world"
+          ],
+          "description": "A world is to be read again, named by its id: a call of a\ncharacter's to one of its tools came back accepted, or the person\nleft a thing in it or removed one."
         }
       ],
       "description": "What every surface hears."
@@ -2374,6 +2391,132 @@
         "is"
       ],
       "description": "A condition on a field of the same section that lists its allowed\nvalues: it holds while that field's value in effect is one of `is`.\nWhat it guards has no effect otherwise, so a page may hide it then."
+    },
+    "LeaveThingBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "place": {
+          "type": "string"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "kind",
+        "place"
+      ],
+      "description": "A thing the person leaves her in a place of her world: its name, one\nline of 128 characters at most; its kind, by the id of one of the\nworld's kinds; the place, by its id; and their note, when they write\none, not blank and 280 characters at most, which may have several lines."
+    },
+    "LeaveThingOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "thing": {
+              "$ref": "#/$defs/WorldThing"
+            },
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status",
+            "thing"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/LeaveThingRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ],
+          "description": "Nothing was left."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "Her world could not be read or written: it is as it was."
+        }
+      ],
+      "description": "What came of leaving her a thing: the thing as her world now holds it;\nor why it was not left."
+    },
+    "LeaveThingRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown_character"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "no_world",
+          "description": "Her package brings no world, or her settings do not run it."
+        },
+        {
+          "type": "string",
+          "const": "unknown_place",
+          "description": "The world holds no place of that id."
+        },
+        {
+          "type": "string",
+          "const": "unknown_kind",
+          "description": "The kind is none of the world's."
+        },
+        {
+          "type": "string",
+          "const": "invalid_name",
+          "description": "The name is not one line of 1 to 128 characters."
+        },
+        {
+          "type": "string",
+          "const": "invalid_note",
+          "description": "The note is blank or longer than 280 characters."
+        },
+        {
+          "type": "string",
+          "const": "no_room",
+          "description": "The place holds the most things it can."
+        }
+      ]
     },
     "LiveReading": {
       "oneOf": [
@@ -3492,6 +3635,81 @@
           "type": "string",
           "const": "unknown_character",
           "description": "No package of the home holds her."
+        }
+      ]
+    },
+    "RemoveThingOutcome": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/RemoveThingRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ],
+          "description": "Nothing was removed."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "Her world could not be read or written: it is as it was."
+        }
+      ],
+      "description": "What came of removing a thing from her world: it is gone, whoever it\nwas from; or why it was not removed."
+    },
+    "RemoveThingRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown_character"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "no_world",
+          "description": "Her package brings no world, or her settings do not run it."
+        },
+        {
+          "type": "string",
+          "const": "unknown_thing",
+          "description": "No place of the world holds a thing of that id."
         }
       ]
     },
@@ -4775,6 +4993,340 @@
     "VisibleText": {
       "type": "string",
       "description": "Text as a person sees it: line endings are `\\n`, neither end is blank\nspace, and something is left."
+    },
+    "WorldCharacter": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "displayName": {
+          "$ref": "#/$defs/SpeakerName"
+        },
+        "place": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "since": {
+          "$ref": "#/$defs/Timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "displayName",
+        "place",
+        "since"
+      ],
+      "description": "A character living in a world: her id and display name, the place she\nis in, by its id, and since when."
+    },
+    "WorldDeed": {
+      "type": "string",
+      "enum": [
+        "went",
+        "made",
+        "used",
+        "left",
+        "removed"
+      ],
+      "description": "What a line of the journal says happened: she went somewhere, made a\nthing or used one, or the person left a thing or removed one."
+    },
+    "WorldEntry": {
+      "type": "object",
+      "properties": {
+        "when": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "who": {
+          "$ref": "#/$defs/WorldHand"
+        },
+        "what": {
+          "$ref": "#/$defs/WorldDeed"
+        },
+        "place": {
+          "$ref": "#/$defs/WorldNamed"
+        },
+        "thing": {
+          "$ref": "#/$defs/WorldNamed"
+        }
+      },
+      "required": [
+        "when",
+        "who",
+        "what",
+        "place"
+      ],
+      "description": "A line of a world's journal: when, whose deed it was, what happened,\nand the place and the thing it was about."
+    },
+    "WorldHand": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "world"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "person"
+            }
+          },
+          "required": [
+            "kind"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "id": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "kind": {
+              "type": "string",
+              "const": "character"
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ]
+        }
+      ],
+      "description": "A hand that changes a world: the world itself, the person, or a\ncharacter, by her id. A thing is from one, and a line of the journal\nsays whose deed it was."
+    },
+    "WorldKind": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "name": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "tint": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "icon",
+        "tint"
+      ],
+      "description": "A kind a thing can be left as: its id, the name a person reads, and the\nicon and the tint a thing of it is drawn with."
+    },
+    "WorldNamed": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "description": "A place or a thing as a line of the journal names it: by its id, and by\nthe name it had then."
+    },
+    "WorldOutcome": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/WorldView",
+          "type": "object",
+          "properties": {
+            "status": {
+              "type": "string",
+              "const": "ok"
+            }
+          },
+          "required": [
+            "status"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "$ref": "#/$defs/WorldRefusal"
+            },
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "refused"
+            }
+          },
+          "required": [
+            "status",
+            "reason",
+            "message"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "const": "failed"
+            }
+          },
+          "required": [
+            "status",
+            "message"
+          ],
+          "description": "Her world could not be read."
+        }
+      ],
+      "description": "The world a character lives in as it stands; or why it was not read."
+    },
+    "WorldPlace": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "name": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "tint": {
+          "type": "string"
+        },
+        "things": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorldThing"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "icon",
+        "tint",
+        "things"
+      ],
+      "description": "A place of a world: its id, its name, its icon and tint, names of the\npage's own set, which falls back for one it does not know, and the\nthings in it in the order they came."
+    },
+    "WorldRefusal": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "unknown_character"
+          ]
+        },
+        {
+          "type": "string",
+          "const": "no_world",
+          "description": "Her package brings no world, or her settings do not run it."
+        }
+      ]
+    },
+    "WorldThing": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string"
+        },
+        "tint": {
+          "type": "string"
+        },
+        "from": {
+          "$ref": "#/$defs/WorldHand"
+        },
+        "came": {
+          "$ref": "#/$defs/Timestamp"
+        },
+        "note": {
+          "type": "string"
+        },
+        "seen": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Identifier"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "icon",
+        "tint",
+        "from",
+        "came",
+        "seen"
+      ],
+      "description": "A thing in a place: the id the world gave it, its name, icon and tint,\nwhom it is from, when it came, the note the person left with it when\nthey wrote one, and, for a thing the person left, the characters who\nhave been told of it where it is. Until a character has, it is new to\nher; what the world itself brought and what she made never are."
+    },
+    "WorldView": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "name": {
+          "type": "string"
+        },
+        "places": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorldPlace"
+          }
+        },
+        "characters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorldCharacter"
+          }
+        },
+        "journal": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorldEntry"
+          }
+        },
+        "kinds": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/WorldKind"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "places",
+        "characters",
+        "journal",
+        "kinds"
+      ],
+      "description": "Everything a person sees of a world: its id and name; its places in\ntheir order, each with its things in the order they came; who is where\nand since when, each character the home has by her display name; the\nnewest 200 lines of its journal, newest first; and the kinds a thing\ncan be left as."
     }
   }
 }

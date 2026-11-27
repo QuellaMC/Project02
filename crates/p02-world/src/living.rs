@@ -10,7 +10,7 @@
 use std::collections::BTreeMap;
 
 use p02_contracts::{LeasedFiles, StoreError};
-use p02_core::{SpeakerName, Timestamp};
+use p02_core::{SpeakerName, Timestamp, VisibleText};
 use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -27,6 +27,12 @@ const JOURNAL: &str = "journal.jsonl";
 const MOST_PLACES: usize = 64;
 const MOST_THINGS: usize = 64;
 
+/// The longest note the person leaves with a thing, in characters.
+const MOST_NOTE: usize = 280;
+
+/// How many of the journal's newest lines a person sees.
+const NEWEST_LINES: usize = 200;
+
 const UNREAD_WORLD: &str =
     "the world's own file does not read, and the world was made again from her package's";
 
@@ -41,30 +47,70 @@ pub struct Place {
 }
 
 /// A thing in a place: its own id, which the world gave it, its name, the
-/// icon and the tint it is drawn with, whom it is from and when it came.
+/// icon and the tint it is drawn with, whom it is from and when it came; a
+/// thing the person left also has their note, when they wrote one, and the
+/// characters who have seen it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Thing {
     id: String,
     name: String,
     icon: String,
     tint: String,
-    from: Origin,
+    from: Hand,
     came: Timestamp,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    seen: Vec<Identifier>,
 }
 
-/// Whom a thing is from: the world itself, or a character, by id.
+/// A hand that changes a world: the world itself, the person, or a
+/// character, by id. A thing is from one, and a line of the journal says
+/// whose deed it was.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum Origin {
+pub enum Hand {
     World,
+    Person,
     Character(Identifier),
 }
 
 /// Where a character living in a world is, and since when.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-struct Whereabouts {
-    place: Identifier,
-    since: Timestamp,
+pub struct Whereabouts {
+    pub place: Identifier,
+    pub since: Timestamp,
+}
+
+/// What a line of the journal says happened.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Deed {
+    Went,
+    Made,
+    Used,
+    Left,
+    Removed,
+}
+
+/// A line of a world's journal: when, whose deed it was, what happened,
+/// and the place and the thing it was about.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Entry {
+    pub when: Timestamp,
+    pub who: Hand,
+    pub what: Deed,
+    pub place: Named,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thing: Option<Named>,
+}
+
+/// A place or a thing as a line of the journal names it: by its id, and by
+/// the name it had then.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Named {
+    pub id: String,
+    pub name: String,
 }
 
 /// A world as its files keep it, and what of them did not read, a sentence
@@ -77,13 +123,27 @@ pub struct LivingWorld {
     passed_over: Vec<String>,
 }
 
-/// Where a character is: her place, what is in it, and the world's other
-/// places, in its order.
+/// Where a character is, as she is told of it: her place, what is in it in
+/// the order it came, each thing as it stood before she was told, so that
+/// what was new to her says so, and the world's other places, in its
+/// order.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Here {
     pub place: Place,
     pub things: Vec<Thing>,
     pub others: Vec<Place>,
+}
+
+/// Everything a person sees of a world: its name, its places in their
+/// order, each with what is in it in the order it came, where each
+/// character living there is and since when, and the newest lines of its
+/// journal, newest first.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct View {
+    pub name: String,
+    pub places: Vec<(Place, Vec<Thing>)>,
+    pub characters: BTreeMap<Identifier, Whereabouts>,
+    pub journal: Vec<Entry>,
 }
 
 /// A thing she made, and the place it is in.
@@ -118,6 +178,34 @@ pub enum WorldError {
     Store(#[from] StoreError),
 }
 
+/// Why a thing the person leaves is not left, said to them, or the world's
+/// files failing.
+#[derive(Debug, thiserror::Error)]
+pub enum LeaveError {
+    #[error("there is no place \"{place}\" in {world}")]
+    NoPlace { place: String, world: String },
+    #[error("a name is one line of 1 to 128 characters")]
+    Name,
+    #[error("there is no kind of thing \"{kind}\"")]
+    NoKind { kind: String },
+    #[error("a note is not blank, and is {MOST_NOTE} characters at most")]
+    Note,
+    #[error("{place} has room for no more things: it holds {MOST_THINGS}")]
+    NoRoom { place: String },
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
+/// Why a thing the person removes is not removed, said to them, or the
+/// world's files failing.
+#[derive(Debug, thiserror::Error)]
+pub enum RemoveError {
+    #[error("there is no thing \"{thing}\" in {world}")]
+    NoThing { thing: String, world: String },
+    #[error(transparent)]
+    Store(#[from] StoreError),
+}
+
 impl Place {
     #[must_use]
     pub fn id(&self) -> &Identifier {
@@ -127,6 +215,16 @@ impl Place {
     #[must_use]
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    #[must_use]
+    pub fn icon(&self) -> &str {
+        &self.icon
+    }
+
+    #[must_use]
+    pub fn tint(&self) -> &str {
+        &self.tint
     }
 
     fn of(definition: &PlaceDefinition) -> Self {
@@ -152,11 +250,59 @@ impl Place {
 
 impl Thing {
     #[must_use]
+    pub fn id(&self) -> &str {
+        &self.id
+    }
+
+    #[must_use]
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    fn new(name: &str, icon: &str, tint: &str, from: Origin, came: &Timestamp) -> Self {
+    #[must_use]
+    pub fn icon(&self) -> &str {
+        &self.icon
+    }
+
+    #[must_use]
+    pub fn tint(&self) -> &str {
+        &self.tint
+    }
+
+    /// Whom it is from.
+    #[must_use]
+    pub fn from(&self) -> &Hand {
+        &self.from
+    }
+
+    /// When it came.
+    #[must_use]
+    pub fn came(&self) -> &Timestamp {
+        &self.came
+    }
+
+    /// The note the person left with it, when they wrote one.
+    #[must_use]
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
+    }
+
+    /// The characters who have been told of it where it is, for a thing the
+    /// person left.
+    #[must_use]
+    pub fn seen(&self) -> &[Identifier] {
+        &self.seen
+    }
+
+    /// Whether it is new to `character`: the person left it, and she has
+    /// not been told of it where it is. What the world itself brought and
+    /// what she made never are.
+    #[must_use]
+    pub fn is_new_to(&self, character: &Identifier) -> bool {
+        self.from == Hand::Person && !self.seen.contains(character)
+    }
+
+    fn new(name: &str, icon: &str, tint: &str, from: Hand, came: &Timestamp) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),
             name: name.to_owned(),
@@ -164,6 +310,8 @@ impl Thing {
             tint: tint.to_owned(),
             from,
             came: came.clone(),
+            note: None,
+            seen: Vec::new(),
         }
     }
 }
@@ -204,7 +352,8 @@ impl LivingWorld {
         &self.passed_over
     }
 
-    /// Where `character` is, and what is there.
+    /// Where `character` is and what is there, as she is told of it: what
+    /// was new to her there she has seen from now on.
     ///
     /// # Errors
     ///
@@ -217,13 +366,14 @@ impl LivingWorld {
     ) -> Result<Here, StoreError> {
         let place = self.place_of(files, character, now)?;
 
-        self.at(files, place)
+        self.told(files, character, place)
     }
 
     /// `character` goes to `place` at `now`: a place of the world's, named
     /// by its id or its name in any case, or else somewhere new of that
-    /// name, which the world then holds. Going where she is changes
-    /// nothing.
+    /// name, which the world then holds. Going where she is moves nothing.
+    /// She is told what is where she is then, as [`LivingWorld::here`]
+    /// tells her.
     ///
     /// # Errors
     ///
@@ -261,10 +411,17 @@ impl LivingWorld {
                 },
             );
             self.write(files)?;
-            happened(files, now, character, "went", &place, None)?;
+            happened(
+                files,
+                now,
+                Hand::Character(character.clone()),
+                Deed::Went,
+                &place,
+                None,
+            )?;
         }
 
-        Ok(self.at(files, place)?)
+        Ok(self.told(files, character, place)?)
     }
 
     /// `character` makes a thing called `name`, of `kind`, where she is, at
@@ -293,15 +450,22 @@ impl LivingWorld {
 
         let thing = Thing::new(
             name.as_str(),
-            kind.icon,
-            kind.tint,
-            Origin::Character(character.clone()),
+            kind.icon(),
+            kind.tint(),
+            Hand::Character(character.clone()),
             now,
         );
 
         things.push(thing.clone());
         files.write_json(&place.file(), &json!({"things": things}))?;
-        happened(files, now, character, "made", &place, Some(&thing))?;
+        happened(
+            files,
+            now,
+            Hand::Character(character.clone()),
+            Deed::Made,
+            &place,
+            Some(&thing),
+        )?;
         Ok(Made { place, thing })
     }
 
@@ -333,8 +497,138 @@ impl LivingWorld {
             });
         };
 
-        happened(files, now, character, "used", &place, Some(&thing))?;
+        happened(
+            files,
+            now,
+            Hand::Character(character.clone()),
+            Deed::Used,
+            &place,
+            Some(&thing),
+        )?;
         Ok(Used { place, thing })
+    }
+
+    /// The person leaves a thing called `name`, of the kind `kind` names,
+    /// in the place of id `place`, with their `note` when they wrote one,
+    /// at `now`. It is new to each character until she is told of it
+    /// there.
+    ///
+    /// # Errors
+    ///
+    /// [`LeaveError`] for a place the world does not hold, a name that is
+    /// not one line of 1 to 128 characters, a kind that is none of the
+    /// world's, a note that is blank or longer than 280 characters, a place
+    /// that holds the most it can, or the store's.
+    pub fn leave(
+        &mut self,
+        files: &mut dyn LeasedFiles,
+        place: &str,
+        name: &str,
+        kind: &str,
+        note: Option<&str>,
+        now: &Timestamp,
+    ) -> Result<Thing, LeaveError> {
+        let Some(place) = self
+            .places
+            .iter()
+            .find(|held| held.id.as_str() == place)
+            .cloned()
+        else {
+            return Err(LeaveError::NoPlace {
+                place: place.to_owned(),
+                world: self.name.clone(),
+            });
+        };
+        let name = SpeakerName::new(name.trim()).map_err(|_| LeaveError::Name)?;
+        let kind = Kind::named(kind).ok_or_else(|| LeaveError::NoKind {
+            kind: kind.to_owned(),
+        })?;
+        let note = note.map(written).transpose()?;
+        let mut things = self.things_in(files, &place)?;
+
+        if things.len() >= MOST_THINGS {
+            return Err(LeaveError::NoRoom { place: place.name });
+        }
+
+        let thing = Thing {
+            note,
+            ..Thing::new(name.as_str(), kind.icon(), kind.tint(), Hand::Person, now)
+        };
+
+        things.push(thing.clone());
+        files.write_json(&place.file(), &json!({"things": things}))?;
+        happened(files, now, Hand::Person, Deed::Left, &place, Some(&thing))?;
+        Ok(thing)
+    }
+
+    /// The person removes the thing of id `thing`, wherever it is and
+    /// whoever it is from, at `now`.
+    ///
+    /// # Errors
+    ///
+    /// [`RemoveError::NoThing`] when no place of the world holds it, or the
+    /// store's.
+    pub fn remove(
+        &mut self,
+        files: &mut dyn LeasedFiles,
+        thing: &str,
+        now: &Timestamp,
+    ) -> Result<(), RemoveError> {
+        for place in self.places.clone() {
+            let mut things = self.things_in(files, &place)?;
+            let Some(found) = things.iter().position(|held| held.id == thing) else {
+                continue;
+            };
+            let removed = things.remove(found);
+
+            files.write_json(&place.file(), &json!({"things": things}))?;
+            happened(
+                files,
+                now,
+                Hand::Person,
+                Deed::Removed,
+                &place,
+                Some(&removed),
+            )?;
+            return Ok(());
+        }
+
+        Err(RemoveError::NoThing {
+            thing: thing.to_owned(),
+            world: self.name.clone(),
+        })
+    }
+
+    /// Everything a person sees of the world, read for `character`, who is
+    /// at its first place from `now` on while she has none there yet.
+    ///
+    /// # Errors
+    ///
+    /// The store's, when it fails.
+    pub fn view(
+        &mut self,
+        files: &mut dyn LeasedFiles,
+        character: &Identifier,
+        now: &Timestamp,
+    ) -> Result<View, StoreError> {
+        self.place_of(files, character, now)?;
+
+        let mut places = Vec::with_capacity(self.places.len());
+
+        for place in self.places.clone() {
+            let things = self.things_in(files, &place)?;
+
+            places.push((place, things));
+        }
+
+        let journal = self.journal(files)?;
+
+        Ok(View {
+            name: self.name.clone(),
+            places,
+            characters: self.characters.clone(),
+            journal,
+        })
     }
 
     /// The world `document` keeps, read forgivingly: a place, or where a
@@ -418,7 +712,7 @@ impl LivingWorld {
                             thing.name.as_str(),
                             thing.icon.as_deref().unwrap_or(PLAIN_ICON),
                             thing.tint.as_deref().unwrap_or(PLAIN_TINT),
-                            Origin::World,
+                            Hand::World,
                             now,
                         )
                     })
@@ -478,9 +772,33 @@ impl LivingWorld {
         Ok(first)
     }
 
-    /// `place` with what is in it and the world's other places.
-    fn at(&mut self, files: &dyn LeasedFiles, place: Place) -> Result<Here, StoreError> {
+    /// `place`, where `character` is, with what is in it and the world's
+    /// other places, as she is told of it: each thing as it stood before,
+    /// and what was new to her there seen by her from now on.
+    fn told(
+        &mut self,
+        files: &mut dyn LeasedFiles,
+        character: &Identifier,
+        place: Place,
+    ) -> Result<Here, StoreError> {
         let things = self.things_in(files, &place)?;
+
+        if things.iter().any(|thing| thing.is_new_to(character)) {
+            let seen: Vec<Thing> = things
+                .iter()
+                .cloned()
+                .map(|mut thing| {
+                    if thing.is_new_to(character) {
+                        thing.seen.push(character.clone());
+                    }
+
+                    thing
+                })
+                .collect();
+
+            files.write_json(&place.file(), &json!({"things": seen}))?;
+        }
+
         let others = self
             .places
             .iter()
@@ -521,6 +839,27 @@ impl LivingWorld {
                     self.passed_over.push(format!(
                         "a thing in {} does not read, and was passed over: {error}",
                         place.name
+                    ));
+                    None
+                }
+            })
+            .collect())
+    }
+
+    /// The journal's newest lines, as many as a person sees, newest first:
+    /// a line that does not read is passed over and said.
+    fn journal(&mut self, files: &dyn LeasedFiles) -> Result<Vec<Entry>, StoreError> {
+        let lines = files.read_jsonl(JOURNAL)?;
+
+        Ok(lines
+            .iter()
+            .rev()
+            .take(NEWEST_LINES)
+            .filter_map(|line| match Entry::deserialize(line) {
+                Ok(entry) => Some(entry),
+                Err(error) => {
+                    self.passed_over.push(format!(
+                        "a line of the journal does not read, and was passed over: {error}"
                     ));
                     None
                 }
@@ -594,28 +933,42 @@ fn same(text: &str, other: &str) -> bool {
     text.to_lowercase() == other.to_lowercase()
 }
 
-/// Appends to the journal that `character` did `what` at `place`, at `now`,
-/// to `thing` when it was done to one, each by its id and its name now.
+/// The note the person wrote as it is kept, its line endings `\n` and its
+/// ends trimmed; refused when nothing is left or it is longer than a note
+/// may be.
+fn written(note: &str) -> Result<String, LeaveError> {
+    VisibleText::normalize(note)
+        .ok()
+        .map(|note| note.as_str().to_owned())
+        .filter(|note| note.chars().count() <= MOST_NOTE)
+        .ok_or(LeaveError::Note)
+}
+
+/// Appends to the journal that `who` did `what` at `place`, at `now`, to
+/// `thing` when it was done to one, each by its id and its name now.
 fn happened(
     files: &mut dyn LeasedFiles,
     now: &Timestamp,
-    character: &Identifier,
-    what: &str,
+    who: Hand,
+    what: Deed,
     place: &Place,
     thing: Option<&Thing>,
 ) -> Result<(), StoreError> {
-    let mut line = json!({
-        "when": now,
-        "who": {"character": character},
-        "what": what,
-        "place": {"id": place.id, "name": place.name},
-    });
+    let entry = Entry {
+        when: now.clone(),
+        who,
+        what,
+        place: Named {
+            id: place.id.to_string(),
+            name: place.name.clone(),
+        },
+        thing: thing.map(|thing| Named {
+            id: thing.id.clone(),
+            name: thing.name.clone(),
+        }),
+    };
 
-    if let Some(thing) = thing {
-        line["thing"] = json!({"id": thing.id, "name": thing.name});
-    }
-
-    files.append_jsonl(JOURNAL, &line)
+    files.append_jsonl(JOURNAL, &json!(entry))
 }
 
 #[cfg(test)]
@@ -927,6 +1280,10 @@ mod tests {
                 world.make(&mut files, &mira(), name, other, &morning()),
                 Err(WorldError::Name)
             ));
+            assert!(matches!(
+                world.leave(&mut files, "flat", name, "gift", None, &morning()),
+                Err(LeaveError::Name)
+            ));
         }
 
         for place in 2..64 {
@@ -950,10 +1307,14 @@ mod tests {
         let Err(full) = world.make(&mut files, &mira(), "One more", other, &morning()) else {
             panic!("the flat is full");
         };
+        let Err(left) = world.leave(&mut files, "flat", "One more", "gift", None, &morning())
+        else {
+            panic!("the flat is full for the person too");
+        };
 
         assert_eq!(
-            full.to_string(),
-            "The Flat has room for no more things: it holds 64"
+            [full.to_string(), left.to_string()],
+            ["The Flat has room for no more things: it holds 64"; 2]
         );
     }
 
@@ -1004,6 +1365,231 @@ mod tests {
                 .last()
                 .map(Thing::name),
             Some(made.thing.name())
+        );
+    }
+
+    #[test]
+    fn a_thing_the_person_leaves_is_new_to_each_character_until_she_is_told_of_it_where_it_is() {
+        let mut files = Files::default();
+        let mut world = LivingWorld::read(&mut files, &port(), &morning()).unwrap();
+        let juno = Identifier::new("juno").unwrap();
+        let crane = world
+            .make(&mut files, &mira(), "Paper crane", Kind::OTHER, &morning())
+            .unwrap()
+            .thing;
+        let honey = world
+            .leave(
+                &mut files,
+                "flat",
+                "Honey",
+                "food",
+                Some("For your toast."),
+                &morning(),
+            )
+            .unwrap();
+
+        world
+            .leave(&mut files, "studio", "Scarf", "clothing", None, &morning())
+            .unwrap();
+
+        // What she is told of says what was new to her then.
+        let new = |here: Here, her: &Identifier| -> Vec<String> {
+            here.things
+                .iter()
+                .filter(|thing| thing.is_new_to(her))
+                .map(|thing| thing.name().to_owned())
+                .collect()
+        };
+        let none: [&str; 0] = [];
+
+        assert_eq!(
+            new(
+                world.here(&mut files, &mira(), &morning()).unwrap(),
+                &mira()
+            ),
+            ["Honey"]
+        );
+        assert_eq!(
+            new(
+                world.here(&mut files, &mira(), &morning()).unwrap(),
+                &mira()
+            ),
+            none
+        );
+        assert_eq!(
+            new(world.here(&mut files, &juno, &morning()).unwrap(), &juno),
+            ["Honey"]
+        );
+        assert_eq!(
+            new(
+                world.go(&mut files, &mira(), "studio", &morning()).unwrap(),
+                &mira()
+            ),
+            ["Scarf"]
+        );
+        assert_eq!(
+            new(
+                world.go(&mut files, &mira(), "studio", &morning()).unwrap(),
+                &mira()
+            ),
+            none
+        );
+        assert!(!crane.is_new_to(&mira()) && !crane.is_new_to(&juno));
+        assert_eq!(
+            files.documents["places/flat.json"]["things"][3],
+            json!({
+                "id": honey.id(),
+                "name": "Honey",
+                "icon": "fork",
+                "tint": "orange",
+                "from": "person",
+                "came": "2026-11-26T09:00:00.000Z",
+                "note": "For your toast.",
+                "seen": ["mira", "juno"],
+            })
+        );
+        assert_eq!(
+            files.documents["places/studio.json"]["things"][1]["seen"],
+            json!(["mira"])
+        );
+    }
+
+    #[test]
+    fn what_the_person_leaves_is_of_a_kind_with_a_note_of_1_to_280_characters() {
+        let mut files = Files::default();
+        let mut world = LivingWorld::read(&mut files, &port(), &morning()).unwrap();
+        let (longest, longer) = ("n".repeat(280), "n".repeat(281));
+        let mut left = |kind: &str, note: Option<&str>| {
+            world.leave(&mut files, "flat", "A gift", kind, note, &morning())
+        };
+
+        for (kind, note, refusal) in [
+            ("vase", None, "there is no kind of thing \"vase\""),
+            (
+                "gift",
+                Some(" \r\n "),
+                "a note is not blank, and is 280 characters at most",
+            ),
+            (
+                "gift",
+                Some(longer.as_str()),
+                "a note is not blank, and is 280 characters at most",
+            ),
+        ] {
+            assert_eq!(left(kind, note).unwrap_err().to_string(), refusal);
+        }
+
+        let letter = left("letter", Some("  Dear Mira,\r\nEnjoy.\n")).unwrap();
+        let other = left("other", Some(longest.as_str())).unwrap();
+
+        assert_eq!(
+            (letter.icon(), letter.tint(), letter.from(), letter.note()),
+            (
+                "envelope",
+                "teal",
+                &Hand::Person,
+                Some("Dear Mira,\nEnjoy.")
+            )
+        );
+        assert_eq!(
+            (other.icon(), other.note()),
+            ("grid", Some(longest.as_str()))
+        );
+    }
+
+    #[test]
+    fn the_view_holds_its_places_in_order_who_is_where_and_the_newest_journal_lines_first() {
+        let mut files = Files::default();
+        let mut world = LivingWorld::read(&mut files, &port(), &morning()).unwrap();
+        let noon = at("2026-11-26T12:00:00.000Z");
+        // Each place by its id, with what is in it.
+        let places = |view: &View| -> Vec<String> {
+            view.places
+                .iter()
+                .map(|(place, things)| {
+                    let things: Vec<&str> = things.iter().map(Thing::name).collect();
+
+                    format!("{}: {}", place.id(), things.join("; "))
+                })
+                .collect()
+        };
+        let fresh = world.view(&mut files, &mira(), &morning()).unwrap();
+        let teapot = fresh.places[0].1[0].id().to_owned();
+
+        assert_eq!(fresh.name, "The Port");
+        assert_eq!(places(&fresh), ["flat: Teapot; Bike", "studio: Proofs"]);
+        assert_eq!(fresh.journal, []);
+
+        world
+            .make(&mut files, &mira(), "Toast", Kind::OTHER, &noon)
+            .unwrap();
+        world
+            .leave(&mut files, "studio", "Honey", "food", None, &noon)
+            .unwrap();
+        world.remove(&mut files, &teapot, &noon).unwrap();
+
+        let view = world.view(&mut files, &mira(), &noon).unwrap();
+
+        assert_eq!(
+            places(&view),
+            ["flat: Bike; Toast", "studio: Proofs; Honey"]
+        );
+        assert_eq!(
+            view.characters,
+            BTreeMap::from([(
+                mira(),
+                Whereabouts {
+                    place: Identifier::new("flat").unwrap(),
+                    since: morning(),
+                }
+            )])
+        );
+        assert_eq!(
+            view.journal
+                .iter()
+                .map(|entry| (
+                    entry.who.clone(),
+                    entry.what,
+                    entry.thing.as_ref().map(|thing| thing.name.as_str())
+                ))
+                .collect::<Vec<_>>(),
+            [
+                (Hand::Person, Deed::Removed, Some("Teapot")),
+                (Hand::Person, Deed::Left, Some("Honey")),
+                (Hand::Character(mira()), Deed::Made, Some("Toast")),
+            ]
+        );
+
+        let journal = files.logs.get_mut(JOURNAL).unwrap();
+
+        for place in 0..199 {
+            journal.push(json!({
+                "when": noon,
+                "who": {"character": "mira"},
+                "what": "went",
+                "place": {"id": format!("place-{place}"), "name": format!("Place {place}")},
+            }));
+        }
+
+        journal.push(Value::Null);
+
+        let mut world = LivingWorld::read(&mut files, &port(), &noon).unwrap();
+        let journal = world.view(&mut files, &mira(), &noon).unwrap().journal;
+
+        assert_eq!(
+            (
+                journal.len(),
+                journal[0].place.name.as_str(),
+                journal[198].place.name.as_str()
+            ),
+            (199, "Place 198", "Place 0")
+        );
+        assert_eq!(
+            world.passed_over(),
+            [
+                "a line of the journal does not read, and was passed over: invalid type: null, \
+              expected struct Entry"
+            ]
         );
     }
 }

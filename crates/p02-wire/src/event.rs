@@ -97,6 +97,12 @@ pub enum Event {
     PhoneChanged {
         character_id: Identifier,
     },
+    /// A world is to be read again, named by its id: a call of a
+    /// character's to one of its tools came back accepted, or the person
+    /// left a thing in it or removed one.
+    WorldChanged {
+        world: Identifier,
+    },
 }
 
 /// How a turn ended, as the frame announcing it says.

@@ -7,7 +7,10 @@ mod living;
 
 pub use definition::{WorldDefinition, WorldDefinitionError};
 pub use kind::Kind;
-pub use living::{Here, LivingWorld, Made, Place, Thing, Used, WorldError};
+pub use living::{
+    Deed, Entry, Hand, Here, LeaveError, LivingWorld, Made, Named, Place, RemoveError, Thing, Used,
+    View, Whereabouts, WorldError,
+};
 
 /// The plugin a character lives in her world through: her package switches
 /// it on when it brings a world, and it runs for no character whose package

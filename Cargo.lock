@@ -2866,6 +2866,7 @@ dependencies = [
  "p02-shared",
  "p02-store",
  "p02-wire",
+ "p02-world",
  "rand",
  "reqwest",
  "serde",

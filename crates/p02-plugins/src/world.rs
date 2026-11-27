@@ -4,7 +4,9 @@
 //! she is told where she is, what is there and where else she can go, and
 //! her tools let her go somewhere, make something where she is and use
 //! something there, each read and written under the lease of the hook that
-//! calls it.
+//! calls it. A thing the person left she is told of as new the first time
+//! she is told what is where it is, with their note; nobody tells her who
+//! left it, and nothing tells her when it is left or taken away.
 
 use std::sync::Arc;
 
@@ -149,7 +151,8 @@ impl RuntimePlugin for WorldPlugin {
 
     /// Says where she is, what is there, where else she can go and how she
     /// goes, makes and uses; telling her is what puts her at the world's
-    /// first place while she has none there yet.
+    /// first place while she has none there yet, and what makes a thing new
+    /// to her there seen.
     async fn before_role_model_call(
         &self,
         context: &HookContext,
@@ -159,9 +162,10 @@ impl RuntimePlugin for WorldPlugin {
             context.turn()?.character.id.clone(),
             Timestamp::now(),
         );
+        let told = her.clone();
         let (here, passed_over) = leased(store(context)?, move |files| {
             let mut living = LivingWorld::read(files, &world, &now)?;
-            let here = living.here(files, &her, &now)?;
+            let here = living.here(files, &told, &now)?;
 
             Ok((here, living.passed_over().to_vec()))
         })
@@ -174,7 +178,7 @@ impl RuntimePlugin for WorldPlugin {
             context_items: vec![ContextItem::new(
                 note,
                 ContextItemKind::RuntimeNote,
-                noted(&here),
+                noted(&here, &her),
             )],
             curated_sections: Vec::new(),
             evidence: vec![evidence(
@@ -254,7 +258,7 @@ impl Request {
                         "here": here
                             .things
                             .iter()
-                            .map(|thing| json!({"name": thing.name()}))
+                            .map(|thing| found(thing, her))
                             .collect::<Vec<_>>(),
                     }),
                     format!("Went to \"{}\" in her world.", here.place.id()),
@@ -280,7 +284,7 @@ impl Request {
                 let used = living.use_thing(files, her, &thing, now)?;
 
                 (
-                    json!({"used": {"name": used.thing.name()}}),
+                    json!({"used": with_note(&used.thing)}),
                     format!(
                         "Used \"{}\" in \"{}\" in her world.",
                         used.thing.name(),
@@ -309,13 +313,39 @@ fn named(place: &Place) -> Value {
     json!({"id": place.id(), "name": place.name()})
 }
 
-/// What she knows of where she is: the place, what is there, the other
-/// places, each by its name and its id, and how she goes, makes and uses.
-fn noted(here: &Here) -> String {
+/// A thing as she reads of it again: its name, and the note the person left
+/// with it, when they wrote one.
+fn with_note(thing: &Thing) -> Value {
+    let mut said = json!({"name": thing.name()});
+
+    if let Some(note) = thing.note() {
+        said["note"] = json!(note);
+    }
+
+    said
+}
+
+/// A thing where she arrives, as her going's answer says it: by its name,
+/// and, when it is new to `her`, that it is, with the person's note.
+fn found(thing: &Thing, her: &Identifier) -> Value {
+    if !thing.is_new_to(her) {
+        return json!({"name": thing.name()});
+    }
+
+    let mut said = with_note(thing);
+
+    said["new"] = json!(true);
+    said
+}
+
+/// What she knows of where she is: the place, what is there, a thing new to
+/// `her` said so, the other places, each by its name and its id, and how
+/// she goes, makes and uses.
+fn noted(here: &Here, her: &Identifier) -> String {
     let mut note = vec![format!("You are in {}.", here.place.name())];
 
     if !here.things.is_empty() {
-        let things: Vec<&str> = here.things.iter().map(Thing::name).collect();
+        let things: Vec<String> = here.things.iter().map(|thing| said(thing, her)).collect();
 
         note.push(format!("Here: {}.", things.join("; ")));
     }
@@ -335,6 +365,20 @@ fn noted(here: &Here) -> String {
          {USE}."
     ));
     note.join(" ")
+}
+
+/// A thing where she is, as her note says it: by its name, and, the first
+/// time she is told of a thing new to `her`, as something that was not
+/// there before, with the person's note when they wrote one.
+fn said(thing: &Thing, her: &Identifier) -> String {
+    match (thing.is_new_to(her), thing.note()) {
+        (false, _) => thing.name().to_owned(),
+        (true, None) => format!("{}, which was not here before", thing.name()),
+        (true, Some(note)) => format!(
+            "{}, which was not here before, with a note: \"{note}\"",
+            thing.name()
+        ),
+    }
 }
 
 /// `options` as a choice of them is said: `A`, `A or B`, `A, B or C`; none

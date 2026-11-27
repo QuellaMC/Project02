@@ -25,6 +25,8 @@ import {
   type GatewayHealth,
   type GatewayMessage,
   type HistoryOutcome,
+  type LeaveThingBody,
+  type LeaveThingOutcome,
   type OpenConversationBody,
   type OpenOutcome,
   type PairingRequest,
@@ -37,10 +39,12 @@ import {
   type ReadBody,
   type ReadOutcome,
   type RemoveCharacterOutcome,
+  type RemoveThingOutcome,
   type ScreenOutcome,
   type StartOutcome,
   type StoreOutcome,
   type SubmitOutcome,
+  type WorldOutcome,
 } from '../contract/index.ts';
 import {createSseFrameSplitter} from './sse.ts';
 
@@ -188,6 +192,23 @@ export type GatewayClient = {
     signIn: AppSignInBody,
     options?: GatewayCallOptions,
   ): Promise<AppSignInOutcome>;
+  /** The world she lives in as it stands, whether she runs or not; `world_changed` naming it says when to read it again. */
+  world(
+    characterId: string,
+    options?: GatewayCallOptions,
+  ): Promise<WorldOutcome>;
+  /** Leaves her a thing in a place of her world, with the person's note when they write one; nothing tells her, and she finds it when she is next there. */
+  leaveThing(
+    characterId: string,
+    thing: LeaveThingBody,
+    options?: GatewayCallOptions,
+  ): Promise<LeaveThingOutcome>;
+  /** Removes a thing from her world by its id, whoever it is from. */
+  removeThing(
+    characterId: string,
+    thingId: string,
+    options?: GatewayCallOptions,
+  ): Promise<RemoveThingOutcome>;
   openDirectConversation(
     characterId: string,
     options?: GatewayCallOptions,
@@ -304,6 +325,7 @@ const eventKinds: Readonly<Record<GatewayEvent['kind'], true>> = {
   health_changed: true,
   maintenance_failed: true,
   phone_changed: true,
+  world_changed: true,
 };
 
 export function createGatewayClient(
@@ -397,6 +419,22 @@ export function createGatewayClient(
       route.post<AppSignInOutcome>(
         `/api/characters/${segment(characterId)}/phone/apps/${segment(appId)}/sign-in`,
         signIn,
+        callOptions,
+      ),
+    world: (characterId, callOptions) =>
+      route.get<WorldOutcome>(
+        `/api/characters/${segment(characterId)}/world`,
+        callOptions,
+      ),
+    leaveThing: (characterId, thing, callOptions) =>
+      route.post<LeaveThingOutcome>(
+        `/api/characters/${segment(characterId)}/world/things`,
+        thing,
+        callOptions,
+      ),
+    removeThing: (characterId, thingId, callOptions) =>
+      route.delete<RemoveThingOutcome>(
+        `/api/characters/${segment(characterId)}/world/things/${segment(thingId)}`,
         callOptions,
       ),
     openDirectConversation: (characterId, callOptions) =>

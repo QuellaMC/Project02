@@ -542,6 +542,47 @@
             </td>
           </tr>
           <tr>
+            <td>her world</td>
+            <td><code>GET /api/characters/:id/world</code></td>
+            <td>
+              → <code>WorldOutcome</code>: <code>ok</code> with the world's
+              <code>id</code> and <code>name</code>, its
+              <code>places</code> with their <code>things</code>, who is
+              where as <code>characters</code>, its <code>journal</code>,
+              newest first, and the <code>kinds</code> a thing can be left
+              as; <code>refused</code> (<code>unknown_character</code>,
+              <code>no_world</code>, when her package brings none or her
+              settings do not run it); or <code>failed</code>. Read from the
+              home whether she is ready, stopped or failed. Described below.
+            </td>
+          </tr>
+          <tr>
+            <td>leave a thing</td>
+            <td><code>POST /api/characters/:id/world/things</code></td>
+            <td>
+              <code>{name, kind, place, note?}</code> →
+              <code>LeaveThingOutcome</code>: <code>ok</code> with the
+              <code>thing</code> as the view gives it; <code>refused</code>
+              (<code>unknown_character</code>, <code>no_world</code>,
+              <code>unknown_place</code>, <code>unknown_kind</code>,
+              <code>invalid_name</code>, <code>invalid_note</code>,
+              <code>no_room</code>), nothing left; or <code>failed</code>,
+              her world as it was. Then <code>world_changed</code>.
+              Described below.
+            </td>
+          </tr>
+          <tr>
+            <td>remove a thing</td>
+            <td><code>DELETE /api/characters/:id/world/things/:thing</code></td>
+            <td>
+              → <code>RemoveThingOutcome</code>: <code>ok</code>, the thing
+              gone whoever it was from; <code>refused</code>
+              (<code>unknown_character</code>, <code>no_world</code>,
+              <code>unknown_thing</code>), nothing removed; or
+              <code>failed</code>. Then <code>world_changed</code>.
+            </td>
+          </tr>
+          <tr>
             <td>open</td>
             <td><code>POST /api/conversations/open</code></td>
             <td>
@@ -1061,6 +1102,13 @@ data: {…}</code></pre>
               Described below.
             </td>
           </tr>
+          <tr>
+            <td><code>world_changed</code></td>
+            <td>
+              A <code>world</code>, by its id: that world is to be read
+              again. Described below.
+            </td>
+          </tr>
         </tbody>
       </table>
 
@@ -1449,6 +1497,72 @@ data: {…}</code></pre>
         <code>pluginId</code> is <code>phone</code>, accepted or not: the page
         says she is using her phone from it until her next reply begins or
         the turn ends.
+      </p>
+
+      <h2>Her world</h2>
+
+      <p class="rule">
+        Her world is hers to live in and the person's to see: they leave her
+        things and take things away, and nothing tells her. She finds what
+        was left when she is next told what is around her there.
+      </p>
+
+      <p>
+        <code>GET /api/characters/:id/world</code> reads the world her
+        package brings, as the home keeps it, whether she runs or not; she is
+        at its first place from then on while she has none there yet. Its
+        <code>places</code> come in their order, each with its
+        <code>id</code>, <code>name</code>, <code>icon</code> and
+        <code>tint</code>, names of the page's own set, which falls back for
+        one it does not know, and its <code>things</code> in the order they
+        came. A thing has the <code>id</code> the world gave it, its
+        <code>name</code>, <code>icon</code> and <code>tint</code>, whom it
+        is <code>from</code>, the moment it <code>came</code>, the person's
+        <code>note</code> when they wrote one, and <code>seen</code>: for a
+        thing the person left, the characters who have been told of it where
+        it is, by id. Until a character has, it is new to her; what the world
+        itself brought and what she made never are. Whom a thing is from, and
+        who did what in the journal, is <code>{kind: "world"}</code>,
+        <code>{kind: "person"}</code> or
+        <code>{kind: "character", id}</code>. <code>characters</code> says
+        who lives there: each by her <code>id</code> and
+        <code>displayName</code>, the <code>place</code> she is in by its id,
+        and <code>since</code> when; one the home no longer has is left out.
+        <code>journal</code> is the newest 200 lines of what happened, newest
+        first, each its moment <code>when</code>, <code>who</code>, what
+        happened as <code>what</code> — <code>went</code>,
+        <code>made</code>, <code>used</code>, <code>left</code> or
+        <code>removed</code> — and the <code>place</code> and the
+        <code>thing</code> it was about, each by its <code>id</code> and the
+        <code>name</code> it had then. <code>kinds</code> are the kinds a
+        thing is left as, each its <code>id</code>, the <code>name</code> a
+        person reads, its <code>icon</code> and its <code>tint</code>:
+        Gift, Food, Drink, Flower, Book, Clothing, Letter and Other.
+      </p>
+
+      <p>
+        The person leaves her a thing with
+        <code>POST /api/characters/:id/world/things</code>: its
+        <code>name</code>, one line of 128 characters at most; its
+        <code>kind</code>, by a kind's id; the <code>place</code> it is left
+        in, by its id; and, when they write one, a <code>note</code>, not
+        blank and 280 characters at most, which may have several lines. A
+        place holds 64 things. The person removes a thing by its id, whoever
+        it is from. Each is their own act, which asks nobody, and is a line
+        of the journal. Nothing tells her of either: no moment of hers
+        begins and nothing is put before her. The first time she is told
+        what is where a thing the person left is, before she thinks or as she
+        arrives there, it is said to her as not there before, with the
+        note, and from then she has seen it; she is never told who left it.
+      </p>
+
+      <p>
+        <code>world_changed</code> names a world, by its id, which every
+        character who lives there shares: it is to be read again after a
+        call of hers to one of its tools came back accepted, and once the
+        person left a thing in it or removed one. It is no part of
+        <code>ready</code>: a surface showing her world reads it again then,
+        and on every <code>ready</code>.
       </p>
 
       <h2>Signing in to a ChatGPT plan</h2>

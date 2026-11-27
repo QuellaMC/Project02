@@ -1061,6 +1061,9 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
     case 'phone_changed':
       // What her phone holds is her phone's window's to read.
       return state;
+    case 'world_changed':
+      // Nothing of her world shows in the chat.
+      return state;
     case 'confirmation_requested':
       return state.confirmations.some(pending => pending.id === event.id)
         ? state

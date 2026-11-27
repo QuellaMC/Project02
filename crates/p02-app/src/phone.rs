@@ -27,10 +27,10 @@ use p02_wire::{
 use crate::connections::Linked;
 use crate::daemon::{Daemon, WeakDaemon, World, blocking};
 use crate::history;
-use crate::reconcile::settings_now;
+use crate::reconcile::runs;
 
-/// How long her phone's store is waited for, which a call of her phone's
-/// tools holds a moment at most.
+/// How long a store of hers is waited for, her phone's or her world's
+/// files, which a call of her tools holds a moment at most.
 const LEASE: Duration = Duration::from_secs(10);
 
 /// Why her phone was not reached, in a sentence: the daemon knows no such
@@ -137,15 +137,12 @@ impl HerPhone {
         let definition = discovery
             .find(character)
             .map_err(|error| Unread::UnknownCharacter(error_sentence(&error)))?;
-        let settings = settings_now(world, definition);
         let plugin = world
             .plugins
             .iter()
             .map(|plugin| plugin.manifest().id())
             .find(|id| id.as_str() == PHONE_PLUGIN)
-            .filter(|phone| {
-                settings.is_none_or(|settings| settings.plugins().any(|(id, _)| id == *phone))
-            })
+            .filter(|_| runs(world, definition, PHONE_PLUGIN))
             .ok_or_else(|| {
                 Unread::NoPhone(format!(
                     "{} has no phone: her settings switch it off.",
@@ -203,8 +200,8 @@ impl Chats for HerChats {
     }
 }
 
-/// Her phone's store under its lease, waited for as long as a call of her
-/// phone's tools holds it at most.
+/// A store of hers under its lease, her phone's or her world's files,
+/// waited for as long as a call of her tools holds one at most.
 pub(crate) fn lease(store: &dyn FileStoreBackend) -> Result<Box<dyn LeasedFiles + '_>, StoreError> {
     store.lease(Instant::now() + LEASE)
 }

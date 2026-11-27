@@ -18,26 +18,46 @@ its callers run it on the blocking pool.
 - **The living world** is `world.json`, its name, its places and where each
   character living there is and since when; `places/<place id>.json`, the
   things in a place, each with the id the world gave it, its name, icon and
-  tint, whom it is from, the world itself or a character, and when it came;
-  and `journal.jsonl`, what happened, a line each: when, who, what, and the
-  place and the thing it was about, each by id and by the name it had then.
-  It is made from the definition its caller hands it the first time it is
-  read, the places in their order and their things the world's own, and
-  from then on stands by itself: a later definition changes nothing of it.
-  A character with no place there yet is at its first place from the moment
-  she is first told of it.
+  tint, whom it is from, the world itself, the person or a character, and
+  when it came, and a thing the person left with their note, when they
+  wrote one, and the characters who have seen it; and `journal.jsonl`, what
+  happened, a line each: when, who, what, and the place and the thing it
+  was about, each by id and by the name it had then. It is made from the
+  definition its caller hands it the first time it is read, the places in
+  their order and their things the world's own, and from then on stands by
+  itself: a later definition changes nothing of it. A character with no
+  place there yet is at its first place from the moment her world is first
+  read for her, she told of it or the person looking at it.
 - **What she does there.** She goes to a place by its id or its name, in
   any case; a name that is no place of the world's is somewhere new, which
   it then holds, with an id it makes of the name and the page's plainest
   icon and tint. She makes a thing where she is, of a kind, `gift`, `food`,
   `drink`, `flower`, `book`, `clothing`, `letter` or `other`, each standing
-  for an icon and a tint, `other` the plainest; and she uses a thing that is
-  where she is, named in any case, which changes nothing of it. Each is a
-  line of the journal. A name is one line of 1 to 128 characters; a world
-  holds 64 places and a place 64 things, and one more is refused in a
-  sentence, as is a thing that is not there, with what is.
+  for an icon and a tint and named for a person by its word, `other` the
+  plainest; and she uses a thing that is where she is, named in any case,
+  which changes nothing of it. Each is a line of the journal. A name is one
+  line of 1 to 128 characters; a world holds 64 places and a place 64
+  things, and one more is refused in a sentence, as is a thing that is not
+  there, with what is.
+- **The person's hand.** The person leaves a thing in a place by the
+  place's id: a name by the same rule, one of the kinds, and a note when
+  they write one, kept with its line endings `\n` and its ends trimmed,
+  not blank and 280 characters at most. They remove a thing by its id,
+  whoever it is from. Each is a line of the journal, and a place that is
+  not there, a kind that is none, a name or a note that breaks its rule, a
+  full place and a thing that is not there are refused in a sentence they
+  read.
+- **What is new to her.** A thing the person left is new to a character
+  until she is told what is where it is: told where she is, or arriving
+  there. What she is told says each thing as it stood, so a new one says
+  so once, and from then she has seen it. What the world itself brought
+  and what she made never are new.
+- **The view** is everything a person sees of a world, read in one lease:
+  its name, its places in their order, each with its things in the order
+  they came, where each character living there is and since when, and the
+  newest 200 lines of the journal, newest first.
 - **Reading.** Documents are written whole and the journal only appended
-  to. A place, a thing or where a character is that does not read is
-  passed over and said, and the rest of the world works; a world whose own
-  file does not read is made again from its definition, each place keeping
-  the things it keeps.
+  to. A place, a thing, a line of the journal or where a character is that
+  does not read is passed over and said, and the rest of the world works; a
+  world whose own file does not read is made again from its definition,
+  each place keeping the things it keeps.

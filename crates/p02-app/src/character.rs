@@ -261,10 +261,11 @@ fn not_ready(id: &Identifier, health: &CharacterHealth) -> String {
 /// when she was built: who she is, her data, the name the person goes by,
 /// the model she answers with, or what she needs for one, the model her
 /// translator asks when her settings choose it a service of its own, or
-/// what it needs for one, the plugins she answers with, her model's
-/// window, and those settings and the home's sign-in to the plan she or
-/// her translator thinks with, if either does, which her next request
-/// compares with what they are then.
+/// what it needs for one, the plugins she answers with, the world she lives
+/// in, by its id, when her package brings one, her model's window, and
+/// those settings and the home's sign-in to the plan she or her translator
+/// thinks with, if either does, which her next request compares with what
+/// they are then.
 #[derive(Debug)]
 struct Built {
     character: Character,
@@ -274,6 +275,7 @@ struct Built {
     model: Result<Arc<dyn RoleModelAdapter>, String>,
     translator: Option<Result<Arc<dyn RoleModelAdapter>, String>>,
     host: PluginHost,
+    lives_in: Option<Identifier>,
     settings: CharacterSettings,
     signed_in: Option<PlanAccount>,
 }
@@ -1311,6 +1313,7 @@ async fn take_turn(
     let line = cause.line();
     let committed = AtomicBool::new(line.is_none());
     let running = Mutex::new(turn);
+    let lives_in = built.lives_in.clone();
     let listener = |progress: Progress| {
         if matches!(progress, Progress::UserMessage { .. }) {
             committed.store(true, Ordering::Relaxed);
@@ -1319,6 +1322,7 @@ async fn take_turn(
         let events = told(
             &mut running.lock().unwrap_or_else(PoisonError::into_inner),
             progress,
+            lives_in.as_ref(),
         );
 
         for event in events {
@@ -1455,6 +1459,7 @@ fn assemble(
             model,
             translator,
             host,
+            lives_in: definition.world.as_ref().map(|hers| hers.id().clone()),
             settings,
             signed_in,
         },

@@ -70,6 +70,14 @@ pub(crate) fn settings_now(
         .map(|resolution| resolution.settings())
 }
 
+/// Whether `definition`'s settings, as resolved now, run the plugin of id
+/// `plugin`: settings that cannot be resolved take none from her, since her
+/// start says what is wrong with them.
+pub(crate) fn runs(world: &World, definition: &CharacterDefinition, plugin: &str) -> bool {
+    settings_now(world, definition)
+        .is_none_or(|settings| settings.plugins().any(|(id, _)| id.as_str() == plugin))
+}
+
 /// The passes, which never overlap.
 #[derive(Debug, Default)]
 pub(crate) struct Reconciler {
