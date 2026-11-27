@@ -1,11 +1,14 @@
-//! A plugin's own files in a character's data, `plugin-data/<plugin>/`:
-//! documents (`.json`) and text files (`.txt`) replaced whole or removed,
-//! and logs (`.jsonl`) only appended to, every value held to the JSON
-//! limits and every text to its bound, one lessee at a time. A file's name
-//! says its kind, so no file is of two kinds.
+//! A plugin store's files: a plugin's own in a character's data,
+//! `plugin-data/<plugin>/`, or, for the world's plugin, the files of a world
+//! in the home, `world-data/<world>/`: documents (`.json`) and text files
+//! (`.txt`) replaced whole or removed, and logs (`.jsonl`) only appended to,
+//! every value held to the JSON limits and every text to its bound, one
+//! lessee at a time. A file's name says its kind, so no file is of two
+//! kinds.
 
 use std::fmt;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Instant;
 
 use p02_contracts::{FileStoreBackend, LeasedFiles, StoreError, TEXT_FILE_KIB};
@@ -17,7 +20,7 @@ use serde_json::Value;
 
 use crate::character_data::CharacterData;
 use crate::error::StorageError;
-use crate::home::check_real;
+use crate::home::{Home, check_real, check_root};
 use crate::jsonl::committed_lines;
 use crate::layout::EntryKind;
 use crate::lock::{Lease, Resource, acquire_before};
@@ -63,14 +66,24 @@ pub enum ValueProblem {
     Limits(BoundJsonError),
 }
 
-/// One plugin's files in one character's data.
+/// A plugin store's files: where they are, where their lock is, and whose
+/// they are.
 #[derive(Clone, Debug)]
 pub(crate) struct PluginFiles {
-    data: CharacterData,
-    plugin: Identifier,
+    root: PathBuf,
+    locks: PathBuf,
+    whose: Whose,
 }
 
-/// A plugin's files while its lease is held. Dropping it releases the
+/// Whose a plugin store's files are, which says the lock they are leased
+/// by: one character's, among her locks, or a world's, among the home's.
+#[derive(Clone, Copy, Debug)]
+enum Whose {
+    Character,
+    World,
+}
+
+/// A plugin store's files while its lease is held. Dropping it releases the
 /// lease.
 #[derive(Debug)]
 struct LeasedPluginFiles {
@@ -79,25 +92,50 @@ struct LeasedPluginFiles {
 }
 
 impl PluginFiles {
-    pub(crate) fn new(data: CharacterData, plugin: Identifier) -> Self {
-        Self { data, plugin }
+    /// Plugin `plugin`'s own files in `data`.
+    pub(crate) fn of_character(data: &CharacterData, plugin: &Identifier) -> Self {
+        Self {
+            root: data.plugin_root(plugin),
+            locks: data.locks_root(),
+            whose: Whose::Character,
+        }
     }
 
-    /// The store under its lease, waited for until `deadline` at the latest.
+    /// The files of world `world` in `home`.
+    fn of_world(home: &Home, world: &Identifier) -> Self {
+        Self {
+            root: home.world_root(world),
+            locks: home.locks_root(),
+            whose: Whose::World,
+        }
+    }
+
+    /// The store under its lease, waited for until `deadline` at the latest,
+    /// once its root is known to be no link.
     fn lease_before(&self, deadline: Instant) -> Result<LeasedPluginFiles, StorageError> {
-        let root = self.data.plugin_root(&self.plugin);
-        let lease = acquire_before(
-            &self.data.locks_root(),
-            &Resource::PluginFiles(&root),
-            deadline,
-        )?;
+        let lock = match self.whose {
+            Whose::Character => Resource::PluginFiles(&self.root),
+            Whose::World => Resource::WorldFiles(&self.root),
+        };
+        let lease = acquire_before(&self.locks, &lock, deadline)?;
         let leased = LeasedPluginFiles {
-            root,
+            root: self.root.clone(),
             lease: Some(lease),
         };
 
-        self.data.checked_plugin_root(&self.plugin)?;
+        check_root(&self.root)?;
         Ok(leased)
+    }
+}
+
+impl Home {
+    /// The files of world `world`, the home's own and no character's: the
+    /// store the world's plugin is handed in the place of one in her data,
+    /// leased by a lock of their own among the home's, so that whoever
+    /// changes the world changes it alone.
+    #[must_use]
+    pub fn world_files(&self, world: &Identifier) -> Arc<dyn FileStoreBackend> {
+        Arc::new(PluginFiles::of_world(self, world))
     }
 }
 
@@ -357,7 +395,6 @@ mod tests {
     use p02_shared::{DanglingLinks, canonical_path};
 
     use super::*;
-    use crate::home::Home;
     use crate::test_process;
 
     const HOLDER: &str = "plugin_files::tests::a_plugin_lease_holder_for_another_process";
@@ -366,7 +403,7 @@ mod tests {
     fn store_in(home: &Home) -> PluginFiles {
         let data = CharacterData::ensure(home, &Identifier::new("mira").unwrap()).unwrap();
 
-        PluginFiles::new(data, Identifier::new("character-state").unwrap())
+        PluginFiles::of_character(&data, &Identifier::new("character-state").unwrap())
     }
 
     fn later() -> Instant {

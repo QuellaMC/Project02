@@ -524,7 +524,7 @@ it("storage.schema-marker: the home and each character's data directory carry a 
       schemaVersion: 15,
       scope: 'character-data',
       characterId: 'mira',
-      materializedCharacterPackageVersion: '2.0.0',
+      materializedCharacterPackageVersion: '2.1.0',
       createdAt: expect.any(String) as string,
     },
   });

@@ -99,6 +99,7 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
             runs("character-state"),
             runs("phone"),
             runs("session-history"),
+            runs("world"),
         ],
         "a setting in error blocks its own plugin alone"
     );
@@ -145,13 +146,14 @@ async fn the_list_names_the_plugins_she_runs_and_on_asking_every_other_as_her_se
             runs("character-state"),
             runs("phone"),
             runs("session-history"),
+            runs("world"),
             not("mem0", "blocked"),
             not("reply-style", "disabled"),
         ],
         "a plugin her settings block is listed blocked"
     );
     assert_eq!(
-        output(&everything)["plugins"][5]["grantedAccess"],
+        output(&everything)["plugins"][6]["grantedAccess"],
         json!({})
     );
     assert_eq!(output(&everything)["truncated"], false);
@@ -176,7 +178,7 @@ async fn what_needs_her_settings_fails_saying_why_while_they_do_not_load() {
 
     assert_eq!(
         listed(&running).len(),
-        5,
+        6,
         "what the host runs it lists without them"
     );
 

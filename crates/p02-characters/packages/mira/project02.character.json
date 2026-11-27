@@ -16,12 +16,33 @@
     ]
   },
   "meta": {
-    "version": "2.0.0"
+    "version": "2.1.0"
   },
   "plugins": {
     "required": ["character-state"],
     "config": {
       "phone": {"gift": false}
     }
+  },
+  "world": {
+    "id": "the-port",
+    "name": "The Port",
+    "places": [
+      {"id": "flat", "name": "The Flat", "icon": "bed", "tint": "indigo", "things": [
+        {"name": "Kitchen table", "icon": "table", "tint": "brown"},
+        {"name": "Tin of pencils", "icon": "pencil", "tint": "orange"},
+        {"name": "Teapot", "icon": "cup", "tint": "brown"},
+        {"name": "Bed", "icon": "bed", "tint": "indigo"},
+        {"name": "Bike", "icon": "bike", "tint": "teal"}
+      ]},
+      {"id": "studio", "name": "The Studio", "icon": "printer", "tint": "graphite", "things": [
+        {"name": "Printing machines", "icon": "printer", "tint": "graphite"},
+        {"name": "Proofs", "icon": "doc", "tint": "gray"}
+      ]},
+      {"id": "bakery", "name": "The Bakery", "icon": "bread", "tint": "orange", "things": [
+        {"name": "Counter", "icon": "bag", "tint": "brown"},
+        {"name": "Yesterday's bread", "icon": "bread", "tint": "orange"}
+      ]}
+    ]
   }
 }

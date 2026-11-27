@@ -9,6 +9,7 @@ use p02_contracts::{
 };
 use p02_phone::Chats;
 use p02_shared::Identifier;
+use p02_world::{WORLD_PLUGIN, WorldDefinition};
 use serde_json::{Map, Value};
 
 use crate::boundary::{RecordLabelsError, within_label_allowance};
@@ -19,6 +20,7 @@ use crate::management;
 use crate::phone::{self, AppCatalog, AppInternet, Connections, PHONE_PLUGIN};
 use crate::policy;
 use crate::turn::Turn;
+use crate::world;
 
 /// Builds an instance of a plugin from its manifest and resolved config: a
 /// plugin's `create`, or any function of its shape.
@@ -44,6 +46,7 @@ pub struct PluginHostBuilder {
     internet: Arc<AppInternet>,
     connections: Arc<dyn Connections>,
     chats: Arc<dyn Chats>,
+    world: Option<(WorldDefinition, Arc<dyn FileStoreBackend>)>,
 }
 
 /// A plugin as it is enabled: its manifest, the values its character's
@@ -145,6 +148,7 @@ impl PluginHost {
             internet,
             connections,
             chats,
+            world: None,
         }
     }
 
@@ -175,13 +179,22 @@ impl PluginHost {
 }
 
 impl PluginHostBuilder {
+    /// The world her package brings, `world`, whose files in the home are
+    /// `files`: what the world's plugin is built with, and the store it is
+    /// handed in the place of one in her data.
+    #[must_use]
+    pub fn world(mut self, world: WorldDefinition, files: Arc<dyn FileStoreBackend>) -> Self {
+        self.world = Some((world, files));
+        self
+    }
+
     /// Enables a plugin, to be built from `manifest` and `authored`, the
     /// values its character's settings give it by field name. Its hooks run
     /// after those of every plugin added before it. The host's own plugin,
-    /// `runtime.plugin`, the host builds itself, linked to it, and her
-    /// phone with the App Store's catalog, the internet her apps reach and
-    /// the person's connections they ask a model through, whatever factory
-    /// comes with them.
+    /// `runtime.plugin`, the host builds itself, linked to it; her phone,
+    /// with the App Store's catalog, the internet her apps reach and the
+    /// person's connections they ask a model through; and the world's, with
+    /// the world her package brings, whatever factory comes with them.
     #[must_use]
     pub fn plugin(
         mut self,
@@ -234,15 +247,24 @@ impl PluginHostBuilder {
                 },
             )?;
 
-            let factory = match plugin_id.as_str() {
-                HOST_PLUGIN => management::factory(&host, Arc::clone(&self.config_control)),
-                PHONE_PLUGIN => phone::factory(
-                    Arc::clone(&self.catalog),
-                    Arc::clone(&self.internet),
-                    Arc::clone(&self.connections),
-                    Arc::clone(&self.chats),
+            let (factory, store) = match (plugin_id.as_str(), &self.world) {
+                (HOST_PLUGIN, _) => (
+                    management::factory(&host, Arc::clone(&self.config_control)),
+                    None,
                 ),
-                _ => factory,
+                (PHONE_PLUGIN, _) => (
+                    phone::factory(
+                        Arc::clone(&self.catalog),
+                        Arc::clone(&self.internet),
+                        Arc::clone(&self.connections),
+                        Arc::clone(&self.chats),
+                    ),
+                    None,
+                ),
+                (WORLD_PLUGIN, Some((world, files))) => {
+                    (world::factory(world.clone()), Some(Arc::clone(files)))
+                }
+                _ => (factory, None),
             };
             let registration =
                 build(&manifest, &authored, &factory).map_err(|source| ActivationError::Build {
@@ -260,7 +282,7 @@ impl PluginHostBuilder {
                     }),
             );
             slots.push(Slot {
-                capabilities: Capabilities::reached(&manifest, self.storage.as_ref()),
+                capabilities: Capabilities::reached(&manifest, self.storage.as_ref(), store),
                 manifest,
                 plugin: Arc::clone(registration.plugin()),
             });
@@ -339,15 +361,25 @@ impl Slot {
 }
 
 impl Capabilities {
-    fn reached(manifest: &Manifest, storage: &dyn CharacterStorage) -> Self {
+    /// What `manifest` requests of the host, over her `storage`; its file
+    /// store is `store` when the host hands it one in the place of its own
+    /// in her data, as it hands the world's plugin the world's files.
+    fn reached(
+        manifest: &Manifest,
+        storage: &dyn CharacterStorage,
+        store: Option<Arc<dyn FileStoreBackend>>,
+    ) -> Self {
         let grants = policy::access::grants(manifest.requested_access());
         let plugin_id = manifest.id();
 
         Self {
             turn_text: grants.turn_text,
-            file_store: grants
-                .file_store
-                .map(|access| (storage.file_store(plugin_id), access)),
+            file_store: grants.file_store.map(|access| {
+                (
+                    store.unwrap_or_else(|| storage.file_store(plugin_id)),
+                    access,
+                )
+            }),
             session_history: grants.session_history.then(|| storage.session_history()),
             databases: grants.databases.then(|| storage.databases(plugin_id)),
         }
@@ -398,6 +430,7 @@ impl fmt::Debug for PluginHostBuilder {
             .field("internet", &self.internet)
             .field("connections", &self.connections)
             .field("chats", &self.chats)
+            .field("world", &self.world)
             .finish()
     }
 }

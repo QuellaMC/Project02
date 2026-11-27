@@ -333,8 +333,10 @@ impl<'s> Resolution<'s> {
             },
             skipped,
         );
+        let worldless = activation::worldless(character, &mut resolution.resolved);
         let unmet = activation::expected(character, &resolution.resolved)
             .into_iter()
+            .chain(worldless)
             .chain(activation::not_set_up(&resolution.resolved));
 
         resolution.diagnostics.extend(unmet);
@@ -419,8 +421,9 @@ impl<'s> Resolution<'s> {
     /// not used, sections named that this build lacks, host values held
     /// outside their scope or refused, what of her package's settings is
     /// skipped, what is wrong with each section, the plugins her package
-    /// expects that she does not run, and those she has switched on before
-    /// their setup is finished.
+    /// expects that she does not run, the world's she does not run since her
+    /// package brings no world, and those she has switched on before their
+    /// setup is finished.
     #[must_use]
     pub fn diagnostics(&self) -> &[Diagnostic] {
         &self.diagnostics

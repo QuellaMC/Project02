@@ -1369,8 +1369,9 @@ async fn take_turn(
 /// and her host built with `broker` to ask the person, her settings for
 /// its own plugin to read and change, through `daemon`, the App Store's
 /// catalog for her phone to read, the internet her apps reach, the
-/// person's connections they ask a model through, until `stop`, and her
-/// conversation with the person as her phone's own apps show it.
+/// person's connections they ask a model through, until `stop`, her
+/// conversation with the person as her phone's own apps show it, and the
+/// world her package brings, with its files in the home.
 fn assemble(
     world: &Arc<World>,
     id: &Identifier,
@@ -1414,23 +1415,25 @@ fn assemble(
     let cautions: Vec<&str> = resolution.cautions().map(Diagnostic::message).collect();
     let connections = PersonConnections::new(Arc::clone(world), daemon.clone(), stop);
     let chats = HerChats::new(world.home.clone(), daemon.clone(), id.clone());
+    let builder = PluginHost::builder(
+        Arc::new(data.clone()),
+        broker,
+        Arc::new(CharacterConfig::new(Arc::clone(world), daemon, id.clone())),
+        Arc::clone(&world.catalog),
+        Arc::clone(&world.internet),
+        Arc::new(connections),
+        Arc::new(chats),
+    );
+    let builder = match &definition.world {
+        Some(hers) => builder.world(hers.clone(), world.home.world_files(hers.id())),
+        None => builder,
+    };
     let host = settings
         .plugins()
         .filter_map(|(plugin_id, values)| Some((world.plugin(plugin_id)?, values)))
-        .fold(
-            PluginHost::builder(
-                Arc::new(data.clone()),
-                broker,
-                Arc::new(CharacterConfig::new(Arc::clone(world), daemon, id.clone())),
-                Arc::clone(&world.catalog),
-                Arc::clone(&world.internet),
-                Arc::new(connections),
-                Arc::new(chats),
-            ),
-            |builder, (plugin, values)| {
-                builder.plugin(plugin.manifest().clone(), values.clone(), plugin.factory())
-            },
-        )
+        .fold(builder, |builder, (plugin, values)| {
+            builder.plugin(plugin.manifest().clone(), values.clone(), plugin.factory())
+        })
         .activate()
         .map_err(|error| error_sentence(&error))?;
 

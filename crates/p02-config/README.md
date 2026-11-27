@@ -69,8 +69,11 @@ under the store's locks, and its views and changes are p02-wire's types.
   repeats a value.
 - **Her package's settings.** At her first start, and the first after her
   package's version changes, the plugins her package expects are switched
-  on in her overlay and its values and her translation notes filled in
-  where she has none, never a credential, a server or a path, and no other
-  host field. Until then her view shows them as her start will merge them.
+  on in her overlay, the world's among them when it brings a world, and
+  its values and her translation notes filled in where she has none, never
+  a credential, a server or a path, and no other host field. Until then her
+  view shows them as her start will merge them. The world's plugin runs for
+  no character whose package brings no world: switched on for one, it is
+  off in her view, and her start says she runs without it.
 - **Secrets.** Every reader but a connector sees a secret as
   `[redacted]`, and a fingerprint counts its presence, never its value.

@@ -147,6 +147,7 @@ pub(crate) fn plugins() -> Vec<Manifest> {
             true,
             &json!([]),
         ),
+        manifest("world", "first_party", "character_only", false, &json!([])),
     ]
 }
 

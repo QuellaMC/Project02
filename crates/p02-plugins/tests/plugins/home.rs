@@ -124,8 +124,9 @@ impl MiraHome {
 
     /// Mira's host as her daemon builds it once her start merged her
     /// package's settings into hers: every listed plugin her settings run,
-    /// with the values they give it, `asking` asking the person, and her
-    /// settings handed to the host's own plugin.
+    /// with the values they give it, `asking` asking the person, her
+    /// settings handed to the host's own plugin, and the world her package
+    /// brings to the world's.
     pub(crate) fn mira(&self, asking: Arc<dyn Confirmer>) -> PluginHost {
         let discovery = discover(self.home.root());
         let mira = discovery.find("mira").unwrap();
@@ -133,6 +134,8 @@ impl MiraHome {
         let settings = Resolution::character(&self.home, &self.sections, mira)
             .unwrap()
             .settings();
+        let world = mira.world.clone().unwrap();
+        let files = self.home.world_files(world.id());
 
         settings
             .plugins()
@@ -148,7 +151,8 @@ impl MiraHome {
                     offline(),
                     Arc::new(Unconnected),
                     Arc::new(Quiet),
-                ),
+                )
+                .world(world, files),
                 |builder, (plugin, values)| {
                     let (manifest, _, factory) = bundled(plugin.as_str());
 

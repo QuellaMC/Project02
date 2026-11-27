@@ -44,6 +44,9 @@ pub(crate) enum Resource<'a> {
     /// A plugin's files in a character's data, at their root, which one
     /// lessee reads and writes at a time.
     PluginFiles(&'a Path),
+    /// A world's files in the home, at their root, which one lessee reads
+    /// and writes at a time, whoever it serves.
+    WorldFiles(&'a Path),
     /// A settings document, at its path, which its writer holds while it
     /// reads and replaces it; how long a waiter waits is its caller's to
     /// say, since a person saving a setting is waiting on the answer.
@@ -61,6 +64,7 @@ impl Resource<'_> {
             Self::Inbox => "inbox".to_owned(),
             Self::SessionWriter(id) => format!("session-writer:{id}"),
             Self::PluginFiles(root) => format!("plugin:{}", root.display()),
+            Self::WorldFiles(root) => format!("world:{}", root.display()),
             Self::SettingsDocument { path, .. } => {
                 format!("runtime-control-file:{}", path.display())
             }
@@ -69,9 +73,9 @@ impl Resource<'_> {
 
     /// How long a waiter waits while the holder makes no progress: a lease
     /// held for as long as a daemon or a conversation lasts is refused at
-    /// once, a short guarded write is waited out, and a plugin's files,
-    /// which a hook holds for its own short work, are waited for briefly,
-    /// since the hook that waits has a deadline of its own.
+    /// once, a short guarded write is waited out, and a plugin's or a
+    /// world's files, which a hook holds for its own short work, are waited
+    /// for briefly, since the hook that waits has a deadline of its own.
     fn stall_budget(&self) -> Duration {
         match self {
             Self::Daemon | Self::ConversationWriter(_) | Self::SessionWriter(_) => Duration::ZERO,
@@ -79,7 +83,7 @@ impl Resource<'_> {
             | Self::StorageSchema
             | Self::SessionCatalog
             | Self::Inbox => Duration::from_secs(10),
-            Self::PluginFiles(_) => Duration::from_secs(2),
+            Self::PluginFiles(_) | Self::WorldFiles(_) => Duration::from_secs(2),
             Self::SettingsDocument { wait, .. } => *wait,
         }
     }
@@ -367,6 +371,8 @@ mod tests {
         let session = session();
         let plugin = root.join("plugin-data").join("character-state");
         let plugin_key = format!("plugin:{}", plugin.display());
+        let world = root.join("world-data").join("the-port");
+        let world_key = format!("world:{}", world.display());
         let settings = root.join("config.json");
         let settings_key = format!("runtime-control-file:{}", settings.display());
         let instant = Duration::ZERO;
@@ -408,6 +414,12 @@ mod tests {
             (
                 Resource::PluginFiles(&plugin),
                 plugin_key.as_str(),
+                Duration::from_secs(2),
+                BusyCode::Storage,
+            ),
+            (
+                Resource::WorldFiles(&world),
+                world_key.as_str(),
                 Duration::from_secs(2),
                 BusyCode::Storage,
             ),

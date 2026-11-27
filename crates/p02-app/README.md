@@ -75,6 +75,9 @@ with an outcome of p02-wire, never an error.
   one rule her messages go by, and the newest messages that went through
   one, read back through the whole scrollback, by the rule the scrollback
   gives each message its app.
+- **Her world.** A character whose package brings a world lives in it:
+  every host the daemon builds her is handed that world and its files in
+  the home, which her world's plugin reads and writes under their lease.
 - **The person's connections** her apps ask a model through are the
   person's AI services of OpenAI's, in the AI Model page's order: the
   ChatGPT plan while the home is signed in, and the OpenAI API while the

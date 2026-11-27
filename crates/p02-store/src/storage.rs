@@ -19,7 +19,7 @@ impl CharacterStorage for CharacterData {
     }
 
     fn file_store(&self, plugin_id: &Identifier) -> Arc<dyn FileStoreBackend> {
-        Arc::new(PluginFiles::new(self.clone(), plugin_id.clone()))
+        Arc::new(PluginFiles::of_character(self, plugin_id))
     }
 
     fn databases(&self, plugin_id: &Identifier) -> Arc<dyn DatabaseOpener> {
