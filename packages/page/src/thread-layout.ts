@@ -155,21 +155,23 @@ export function labelOf(app: string): string | undefined {
  * line as she read it.
  */
 export function drawnOf(message: Message, language?: string): Drawn {
-  const inHers = (text: string): Form =>
-    language === undefined ? {text} : {text, lang: language};
-
   if (message.role === 'user') {
     return message.written === undefined
       ? {text: message.text}
-      : {text: message.written, translation: inHers(message.text)};
+      : {text: message.written, translation: formIn(message.text, language)};
   }
 
   return {
-    ...inHers(message.text),
+    ...formIn(message.text, language),
     ...(message.translation === undefined
       ? {}
       : {translation: {text: message.translation}}),
   };
+}
+
+/** `text` in `language`, the language she speaks when she has one of her own, marked with it. */
+export function formIn(text: string, language?: string): Form {
+  return language === undefined ? {text} : {text, lang: language};
 }
 
 /**

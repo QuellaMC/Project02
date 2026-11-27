@@ -4,8 +4,11 @@
  * view the person is on, its title and Leave Something on one line, the
  * three tabs floating at its foot, and a sheet over it all, a thing's card
  * or the sheet for leaving something; or, when her world cannot be shown,
- * the daemon's sentence in its place. It holds no rule: what it shows comes
- * from the window's store, and what the person does goes to the session.
+ * the daemon's sentence in its place. Each name and note is the person's
+ * form of it where it has one, and her own words stand under it where the
+ * design has room: at the head of a place and of a thing's card, and under
+ * a note. It holds no rule: what it shows comes from the window's store,
+ * and what the person does goes to the session.
  */
 import {useEffect, useSyncExternalStore} from 'react';
 
@@ -19,9 +22,10 @@ import {
   RoundBack,
   SolidTile,
 } from './settings-controls.tsx';
-import type {Clock} from './thread-layout.ts';
+import type {Clock, Drawn} from './thread-layout.ts';
 import {WindowBar} from './window-bar.tsx';
 import {
+  drawnWords,
   hereNow,
   isUnseen,
   journalOf,
@@ -53,20 +57,22 @@ const tabs: readonly {
 
 export function WorldWindow({session}: {readonly session: WorldSession}) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
-  const {connection, world, frame} = state;
+  const {connection, world, frame, language} = state;
   const said =
     connection.status === 'refused' ? (
       <AddressRefused message={connection.message} />
     ) : (
       state.unread
     );
-  const name = world?.name;
+  const name =
+    world === undefined ? undefined : drawnWords(world.name, language);
+  const title = name?.text;
 
   useEffect(() => {
-    if (name !== undefined) {
-      document.title = name;
+    if (title !== undefined) {
+      document.title = title;
     }
-  }, [name]);
+  }, [title]);
 
   return (
     <div className="world-window">
@@ -76,7 +82,8 @@ export function WorldWindow({session}: {readonly session: WorldSession}) {
             <SolidTile icon="globe" tint="green" size={24} />
           )
         }
-        title={name}
+        title={title}
+        titleLang={name?.lang}
         end={world === undefined ? undefined : <LivesHere world={world} />}
         frame={frame}
         verbs={session}
@@ -124,7 +131,7 @@ function Views({
   readonly world: HerWorld;
   readonly session: WorldSession;
 }) {
-  const {shows, sheet} = state;
+  const {shows, sheet, language} = state;
   const {locale, timeZone} = Intl.DateTimeFormat().resolvedOptions();
   const clock: Clock = {now: Date.now(), locale, timeZone};
   const covered = sheet !== undefined;
@@ -160,7 +167,13 @@ function Views({
             </button>
           )}
         </div>
-        <View shows={shows} world={world} clock={clock} session={session} />
+        <View
+          shows={shows}
+          world={world}
+          clock={clock}
+          language={language}
+          session={session}
+        />
       </div>
       <nav
         className="ui-tabs world-tabs"
@@ -214,15 +227,27 @@ function SheetOver({
   readonly clock: Clock;
   readonly session: WorldSession;
 }) {
+  const {characterId, language} = state;
   const card =
     sheet.kind === 'thing'
-      ? thingCard(world, state.characterId, sheet.thingId, clock)
+      ? thingCard(world, characterId, sheet.thingId, clock, language)
       : undefined;
   const shown =
     sheet.kind === 'leave' ? (
-      <LeaveSheet world={world} sheet={sheet} session={session} />
+      <LeaveSheet
+        world={world}
+        sheet={sheet}
+        language={language}
+        session={session}
+      />
     ) : card === undefined ? undefined : (
-      <ThingSheet world={world} card={card} sheet={sheet} session={session} />
+      <ThingSheet
+        world={world}
+        card={card}
+        sheet={sheet}
+        language={language}
+        session={session}
+      />
     );
 
   return shown === undefined ? null : (
@@ -239,33 +264,24 @@ function SheetOver({
   );
 }
 
-function View({
-  shows,
-  world,
-  clock,
-  session,
-}: {
-  readonly shows: Shows;
+/** What every view is drawn from: her world, the viewer's clock, the language she speaks, which her words are marked with, and the session. */
+type ViewProps = {
   readonly world: HerWorld;
   readonly clock: Clock;
+  readonly language: string | undefined;
   readonly session: WorldSession;
-}) {
+};
+
+function View({shows, ...props}: ViewProps & {readonly shows: Shows}) {
   switch (shows.kind) {
     case 'now':
-      return <NowView world={world} clock={clock} session={session} />;
+      return <NowView {...props} />;
     case 'places':
-      return <PlacesView world={world} clock={clock} session={session} />;
+      return <PlacesView {...props} />;
     case 'place':
-      return (
-        <PlaceView
-          world={world}
-          placeId={shows.placeId}
-          clock={clock}
-          session={session}
-        />
-      );
+      return <PlaceView {...props} placeId={shows.placeId} />;
     case 'journal':
-      return <JournalView world={world} clock={clock} />;
+      return <JournalView {...props} />;
   }
 }
 
@@ -276,16 +292,8 @@ function View({
  * lines of the journal, which See All opens whole. A section with nothing
  * in it is not drawn.
  */
-function NowView({
-  world,
-  clock,
-  session,
-}: {
-  readonly world: HerWorld;
-  readonly clock: Clock;
-  readonly session: WorldSession;
-}) {
-  const {here, waiting, lately} = nowOf(world, clock);
+function NowView({world, clock, language, session}: ViewProps) {
+  const {here, waiting, lately} = nowOf(world, clock, language);
 
   return (
     <>
@@ -300,7 +308,10 @@ function NowView({
               }}
             >
               <SolidTile icon={place.icon} tint={place.tint} size={44} />
-              <span className="world-here-name">{place.name}</span>
+              <Words
+                className="world-here-name"
+                drawn={drawnWords(place.name, language)}
+              />
               <Chevron />
             </button>
             <div className="world-lined">
@@ -309,7 +320,7 @@ function NowView({
             {around.length === 0 ? null : (
               <div className="world-lined world-tokens">
                 {around.map(thing => (
-                  <Token key={thing.id} thing={thing} />
+                  <Token key={thing.id} thing={thing} language={language} />
                 ))}
                 {more === 0 ? null : (
                   <span className="ui-detail">{`+${String(more)}`}</span>
@@ -327,6 +338,7 @@ function NowView({
               <ThingRow
                 key={thing.id}
                 thing={thing}
+                language={language}
                 unseen
                 onOpen={() => {
                   session.openThing(thing.id);
@@ -362,15 +374,7 @@ function NowView({
 }
 
 /** Places: a card for each place in the world's order, who is there, its first things and how many more, and New when something there is not seen yet. */
-function PlacesView({
-  world,
-  clock,
-  session,
-}: {
-  readonly world: HerWorld;
-  readonly clock: Clock;
-  readonly session: WorldSession;
-}) {
+function PlacesView({world, clock, language, session}: ViewProps) {
   return (
     <div className="world-cards">
       {placesOf(world, clock).map(({place, living, peek, more, fresh}) => (
@@ -384,7 +388,10 @@ function PlacesView({
         >
           <span className="world-place-head">
             <SolidTile icon={place.icon} tint={place.tint} size={44} />
-            <span className="world-place-name">{place.name}</span>
+            <Words
+              className="world-place-name"
+              drawn={drawnWords(place.name, language)}
+            />
             {living.length === 0 ? null : (
               <span
                 className="world-faces"
@@ -401,7 +408,7 @@ function PlacesView({
           {peek.length === 0 ? null : (
             <span className="world-place-things">
               {peek.map(thing => (
-                <Token key={thing.id} thing={thing} />
+                <Token key={thing.id} thing={thing} language={language} />
               ))}
               {more === 0 ? null : (
                 <span className="ui-detail">{`+${String(more)}`}</span>
@@ -415,18 +422,14 @@ function PlacesView({
   );
 }
 
-/** A place: its tile and its name, large; who is here now; and its things, each opening its card. */
+/** A place: its tile and its name, large, with her own words for it under it; who is here now; and its things, each opening its card. */
 function PlaceView({
   world,
   placeId,
   clock,
+  language,
   session,
-}: {
-  readonly world: HerWorld;
-  readonly placeId: string;
-  readonly clock: Clock;
-  readonly session: WorldSession;
-}) {
+}: ViewProps & {readonly placeId: string}) {
   const place = world.places.find(held => held.id === placeId);
 
   if (place === undefined) {
@@ -434,12 +437,18 @@ function PlaceView({
   }
 
   const living = hereNow(world, placeId, clock);
+  const name = drawnWords(place.name, language);
 
   return (
     <>
       <div className="world-place-top">
         <SolidTile icon={place.icon} tint={place.tint} size={56} />
-        <h2 className="world-place-title">{place.name}</h2>
+        <div className="world-head-words">
+          <h2 className="world-place-title" lang={name.lang}>
+            {name.text}
+          </h2>
+          <Hers drawn={name} />
+        </div>
       </div>
       {living.length === 0 ? null : (
         <section className="ui-section">
@@ -449,7 +458,12 @@ function PlaceView({
           </div>
         </section>
       )}
-      <PlaceThings place={place} world={world} session={session} />
+      <PlaceThings
+        place={place}
+        world={world}
+        language={language}
+        session={session}
+      />
     </>
   );
 }
@@ -457,10 +471,12 @@ function PlaceView({
 function PlaceThings({
   place,
   world,
+  language,
   session,
 }: {
   readonly place: WorldPlace;
   readonly world: HerWorld;
+  readonly language: string | undefined;
   readonly session: WorldSession;
 }) {
   return place.things.length === 0 ? null : (
@@ -471,6 +487,7 @@ function PlaceThings({
           <ThingRow
             key={thing.id}
             thing={thing}
+            language={language}
             unseen={isUnseen(world, thing)}
             chevron
             onOpen={() => {
@@ -484,14 +501,8 @@ function PlaceThings({
 }
 
 /** The journal, by day, newest first. */
-function JournalView({
-  world,
-  clock,
-}: {
-  readonly world: HerWorld;
-  readonly clock: Clock;
-}) {
-  return journalOf(world, clock).map(({day, lines}) => (
+function JournalView({world, clock, language}: ViewProps) {
+  return journalOf(world, clock, language).map(({day, lines}) => (
     <section key={day} className="ui-section">
       <h3 className="ui-head">{day}</h3>
       <div className="ui-card world-lead-28">
@@ -515,11 +526,17 @@ function LivingRows({living}: {readonly living: readonly Living[]}) {
 }
 
 /** A thing among others: its round tile and its name. */
-function Token({thing}: {readonly thing: WorldThing}) {
+function Token({
+  thing,
+  language,
+}: {
+  readonly thing: WorldThing;
+  readonly language: string | undefined;
+}) {
   return (
     <span className="ui-token">
       <SolidTile icon={thing.icon} tint={thing.tint} size={22} />
-      <span className="ui-label">{thing.name}</span>
+      <Words className="ui-label" drawn={drawnWords(thing.name, language)} />
     </span>
   );
 }
@@ -527,11 +544,13 @@ function Token({thing}: {readonly thing: WorldThing}) {
 /** A thing as a row, opening its card: its tile, its name, and whether it is not seen yet. */
 function ThingRow({
   thing,
+  language,
   unseen,
   chevron = false,
   onOpen,
 }: {
   readonly thing: WorldThing;
+  readonly language: string | undefined;
   readonly unseen: boolean;
   readonly chevron?: boolean;
   readonly onOpen: () => void;
@@ -539,7 +558,7 @@ function ThingRow({
   return (
     <button type="button" className="ui-row" onClick={onOpen}>
       <SolidTile icon={thing.icon} tint={thing.tint} size={28} />
-      <span className="world-name">{thing.name}</span>
+      <Words className="world-name" drawn={drawnWords(thing.name, language)} />
       {unseen ? <span className="ui-badge">Not seen yet</span> : null}
       {chevron ? <Chevron /> : null}
     </button>
@@ -564,7 +583,7 @@ function LineRow({line}: {readonly line: Line}) {
       <span className="world-name">
         <span className="visually-hidden">{`${who.name}: `}</span>
         {`${line.what} `}
-        <b>{line.name}</b>
+        <b lang={line.name.lang}>{line.name.text}</b>
       </span>
       <span className="ui-value">{line.when}</span>
     </div>
@@ -572,29 +591,32 @@ function LineRow({line}: {readonly line: Line}) {
 }
 
 /**
- * A thing's card: its tile and its name; its note, when it has one; its
- * facts; and the one button, Remove from her world, which asks again in
- * place before it removes, and says above it why it could not.
+ * A thing's card: its tile and its name, her own words for it under it; its
+ * note, when it has one, hers under it past a hairline; its facts; and the
+ * one button, Remove from her world, which asks again in place before it
+ * removes, and says above it why it could not.
  */
 function ThingSheet({
   world,
   card,
   sheet,
+  language,
   session,
 }: {
   readonly world: HerWorld;
   readonly card: ThingCard;
   readonly sheet: Extract<Sheet, {readonly kind: 'thing'}>;
+  readonly language: string | undefined;
   readonly session: WorldSession;
 }) {
-  const {thing, facts} = card;
+  const {thing, name, note, facts} = card;
 
   return (
     <div
       className="ui-sheet"
       role="dialog"
       aria-modal="true"
-      aria-label={thing.name}
+      aria-label={name.text}
     >
       <div className="ui-sheet-head">
         <span className="ui-grabber" aria-hidden="true" />
@@ -612,18 +634,28 @@ function ThingSheet({
       </div>
       <div className="world-thing-top">
         <SolidTile icon={thing.icon} tint={thing.tint} size={56} />
-        <h2 className="world-thing-name">{thing.name}</h2>
+        <div className="world-head-words">
+          <h2 className="world-thing-name" lang={name.lang}>
+            {name.text}
+          </h2>
+          <Hers drawn={name} />
+        </div>
       </div>
-      {thing.note === undefined ? null : (
+      {note === undefined ? null : (
         <div className="ui-card world-note">
-          <p>{thing.note}</p>
+          <p lang={note.lang}>{note.text}</p>
+          {note.translation === undefined ? null : (
+            <p className="world-note-hers" lang={note.translation.lang}>
+              {note.translation.text}
+            </p>
+          )}
         </div>
       )}
       <div className="ui-card world-facts">
         {facts.map(fact => (
           <div key={fact.label} className="ui-row world-fact">
             <span>{fact.label}</span>
-            <span className="world-fact-value">{fact.value}</span>
+            <Words className="world-fact-value" drawn={fact.value} />
           </div>
         ))}
       </div>
@@ -653,7 +685,10 @@ function ThingSheet({
           className="ui-btn ui-btn-wide ui-btn-card ui-btn-danger world-sheet-end"
           onClick={session.remove}
         >
-          <span className="ui-label">{`Remove from ${world.name}`}</span>
+          <span className="ui-label">
+            {'Remove from '}
+            <Words drawn={drawnWords(world.name, language)} />
+          </span>
         </button>
       )}
     </div>
@@ -669,10 +704,12 @@ function ThingSheet({
 function LeaveSheet({
   world,
   sheet,
+  language,
   session,
 }: {
   readonly world: HerWorld;
   readonly sheet: Extract<Sheet, {readonly kind: 'leave'}>;
+  readonly language: string | undefined;
   readonly session: WorldSession;
 }) {
   const {draft} = sheet;
@@ -709,6 +746,7 @@ function LeaveSheet({
         placeholder="What is it?"
         autoComplete="off"
         autoFocus
+        maxLength={128}
         value={draft.name}
         onChange={event => {
           session.draft({name: event.currentTarget.value});
@@ -747,7 +785,10 @@ function LeaveSheet({
               }}
             >
               <SolidTile icon={held.icon} tint={held.tint} size={22} />
-              <span className="ui-label">{held.name}</span>
+              <Words
+                className="ui-label"
+                drawn={drawnWords(held.name, language)}
+              />
             </button>
           ))}
         </div>
@@ -756,6 +797,7 @@ function LeaveSheet({
         className="ui-area world-note-box"
         aria-label="A note with it"
         placeholder="Add a note"
+        maxLength={280}
         value={draft.note}
         onChange={event => {
           session.draft({note: event.currentTarget.value});
@@ -767,9 +809,38 @@ function LeaveSheet({
         className="ui-btn ui-btn-wide ui-btn-filled world-sheet-end"
         disabled={toLeave(sheet) === undefined}
       >
-        <span className="ui-label">{`Leave It in ${place?.name ?? ''}`}</span>
+        <span className="ui-label">
+          {'Leave It in '}
+          {place === undefined ? null : (
+            <Words drawn={drawnWords(place.name, language)} />
+          )}
+        </span>
       </button>
     </form>
+  );
+}
+
+/** A name or a note on one line, as the person reads it, marked with her language when it is in hers. */
+function Words({
+  drawn,
+  className,
+}: {
+  readonly drawn: Drawn;
+  readonly className?: string;
+}) {
+  return (
+    <span className={className} lang={drawn.lang}>
+      {drawn.text}
+    </span>
+  );
+}
+
+/** Her own words under the person's form of them, a size smaller in the secondary colour, where there are both. */
+function Hers({drawn}: {readonly drawn: Drawn}) {
+  return drawn.translation === undefined ? null : (
+    <p className="world-hers" lang={drawn.translation.lang}>
+      {drawn.translation.text}
+    </p>
   );
 }
 

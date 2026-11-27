@@ -18,6 +18,7 @@ import type {FrameVerbs} from './window-link.ts';
 export function WindowBar({
   lead,
   title,
+  titleLang,
   beside,
   end,
   frame,
@@ -27,6 +28,8 @@ export function WindowBar({
   /** What the window shows, at the bar's start: her face, or her world's tile. */
   readonly lead?: ReactNode;
   readonly title?: string | undefined;
+  /** The language its name is in, when the window knows it is hers. */
+  readonly titleLang?: string | undefined;
   /** What the window says beside its name. */
   readonly beside?: ReactNode;
   /** Who it is about, at the bar's end, before its buttons. */
@@ -58,7 +61,9 @@ export function WindowBar({
     >
       {lead}
       {title === undefined ? null : (
-        <h1 className="ui-bar-title ui-label">{title}</h1>
+        <h1 className="ui-bar-title ui-label" lang={titleLang}>
+          {title}
+        </h1>
       )}
       {beside}
       <span className="ui-bar-end">

@@ -4162,6 +4162,22 @@ body:has(> #root > :is(.phone-window, .world-window)) {
   overflow-wrap: anywhere;
 }
 
+/* The name at the head of a place or a thing's card, and her own words for it under it, a size smaller in the secondary colour. */
+.world-head-words {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.world-hers {
+  margin: 0;
+  font-size: 14px;
+  line-height: 18px;
+  color: var(--secondary);
+  overflow-wrap: anywhere;
+}
+
 .world-note {
   margin-top: 18px;
   padding: 13px var(--text-inset);
@@ -4173,6 +4189,16 @@ body:has(> #root > :is(.phone-window, .world-window)) {
   line-height: 21px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+/* Under the note as the person reads it, 10px apart, her own words for it, a size smaller, past a hairline 10px above them. */
+.world-note > .world-note-hers {
+  margin-top: 10px;
+  padding-top: 10px;
+  box-shadow: inset 0 1px 0 var(--divider);
+  font-size: 14px;
+  line-height: 19px;
+  color: var(--secondary);
 }
 
 .world-facts {

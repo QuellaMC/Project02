@@ -3,7 +3,9 @@
 //! came of the person's hand in it, a thing left in a place with a note and
 //! a thing removed. Each is the person's own act, which asks nobody, and
 //! nothing tells her of it: she finds what was left when she is next told
-//! what is around her there.
+//! what is around her there. Its names and notes are in her language, and
+//! each carries the person's form beside it when they read another, as a
+//! message does.
 
 use p02_core::{SpeakerName, Timestamp};
 use p02_shared::Identifier;
@@ -47,11 +49,27 @@ pub enum WorldRefusal {
 #[serde(rename_all = "camelCase")]
 pub struct WorldView {
     pub id: Identifier,
-    pub name: String,
+    pub name: WorldWords,
     pub places: Vec<WorldPlace>,
     pub characters: Vec<WorldCharacter>,
     pub journal: Vec<WorldEntry>,
     pub kinds: Vec<WorldKind>,
+}
+
+/// A name or a note of her world: `text`, as her world has it, which she
+/// reads; and, as a message carries it, the person's form beside it while
+/// they read another language than hers: what they wrote, `written`, of a
+/// thing they left that her world has in her words, or her world's words
+/// put into theirs, `translation`. Words that are the same in both have
+/// `text` alone.
+#[derive(Clone, Debug, Serialize, JsonSchema, TS)]
+#[ts(optional_fields)]
+pub struct WorldWords {
+    pub text: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub written: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub translation: Option<String>,
 }
 
 /// A place of a world: its id, its name, its icon and tint, names of the
@@ -60,7 +78,7 @@ pub struct WorldView {
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 pub struct WorldPlace {
     pub id: Identifier,
-    pub name: String,
+    pub name: WorldWords,
     pub icon: String,
     pub tint: String,
     pub things: Vec<WorldThing>,
@@ -76,13 +94,13 @@ pub struct WorldPlace {
 #[ts(optional_fields)]
 pub struct WorldThing {
     pub id: String,
-    pub name: String,
+    pub name: WorldWords,
     pub icon: String,
     pub tint: String,
     pub from: WorldHand,
     pub came: Timestamp,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
+    pub note: Option<WorldWords>,
     pub seen: Vec<Identifier>,
 }
 
@@ -135,11 +153,13 @@ pub enum WorldDeed {
 }
 
 /// A place or a thing as a line of the journal names it: by its id, and by
-/// the name it had then.
+/// the name it had then, with the person's form that name had then beside
+/// it; or, for a line that kept none, that of the place or the thing of
+/// that id while the world holds it by that name.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 pub struct WorldNamed {
     pub id: String,
-    pub name: String,
+    pub name: WorldWords,
 }
 
 /// A kind a thing can be left as: its id, the name a person reads, and the
@@ -167,8 +187,8 @@ pub struct LeaveThingBody {
     pub note: Option<String>,
 }
 
-/// What came of leaving her a thing: the thing as her world now holds it;
-/// or why it was not left.
+/// What came of leaving her a thing: the thing as her world now holds it,
+/// in her language; or why it was not left.
 #[derive(Clone, Debug, Serialize, JsonSchema, TS)]
 #[serde(
     tag = "status",
@@ -177,7 +197,8 @@ pub struct LeaveThingBody {
 )]
 pub enum LeaveThingOutcome {
     Ok {
-        thing: WorldThing,
+        // Boxed, since a thing is many times the size of a refusal.
+        thing: Box<WorldThing>,
     },
     /// Nothing was left.
     Refused {
@@ -185,9 +206,7 @@ pub enum LeaveThingOutcome {
         message: String,
     },
     /// Her world could not be read or written: it is as it was.
-    Failed {
-        message: String,
-    },
+    Failed { message: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema, TS)]
@@ -206,6 +225,8 @@ pub enum LeaveThingRefusal {
     InvalidNote,
     /// The place holds the most things it can.
     NoRoom,
+    /// Its name or its note could not be put into her language.
+    NotTranslated,
 }
 
 /// What came of removing a thing from her world: it is gone, whoever it

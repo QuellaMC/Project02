@@ -1,15 +1,17 @@
 //! A conversation as one scrollback: its character keeps it in segments,
 //! a page is filled backward across them, newest first, and its cursor
 //! names where the next page ends; the newest messages of one app, as her
-//! phone shows them; and one message of hers, by its id. Only committed
-//! messages are read, from the store, so a stopped character's thread
-//! reads as a running one's.
+//! phone shows them; the person's newest message as they wrote it, which
+//! her translator reads; and one message of hers, by its id. Only
+//! committed messages are read, from the store, so a stopped character's
+//! thread reads as a running one's.
 
 use std::num::NonZeroU64;
 use std::ops::Range;
 
 use p02_core::{
-    Conversation, ConversationId, MESSAGES, MessageId, SessionId, VisibleMessageRole, app_of,
+    Conversation, ConversationId, MESSAGES, MessageId, SessionId, VisibleMessageRole, VisibleText,
+    app_of,
 };
 use p02_shared::Identifier;
 use p02_store::{
@@ -187,6 +189,18 @@ pub(crate) fn newest(
 
     newest.reverse();
     Ok(newest)
+}
+
+/// The person's newest message to `character` on `home` as they wrote it,
+/// by the scrollback of their conversation, however far back it lies; none
+/// while they never wrote, or where it cannot be read.
+pub(crate) fn person_wrote(home: &Home, character: &Identifier) -> Option<VisibleText> {
+    let theirs = |message: &HistoryMessage| message.role == VisibleMessageRole::User;
+
+    newest(home, character, theirs, 1)
+        .ok()?
+        .pop()
+        .map(|message| message.written.unwrap_or(message.text))
 }
 
 /// A page's messages, and the cursor of the page before it.

@@ -10,7 +10,9 @@ A view's screen on her phone is one of these types: the phone reads what
 an app shows into it, so what her window draws is what she reads. Her
 world as the person sees it is one too, where whom a thing is from and
 whose deed a line of its journal says are one tagged value: the world
-itself, the person, or a character by her id.
+itself, the person, or a character by her id; and each of its names and
+notes carries both forms as a message does, `text` with `written` or
+`translation`.
 
 These types are the wire's contract. `cargo test -p p02-gateway contract`
 writes `packages/wire/src/contract/generated/` from them: the TypeScript

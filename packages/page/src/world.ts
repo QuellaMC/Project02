@@ -1,18 +1,21 @@
 /**
  * Everything her world's window shows, as one value, and every change to
  * it as a pure function of the previous value and one input: a read of her
- * world, the stream's coming and going, the person going from view to
- * view, opening a thing's card or the sheet for leaving something and
- * typing there, what the daemon answered when they left or removed a
- * thing, and what the window it is drawn in says of itself. And what each
- * view holds, worked out from her world as read and the viewer's clock.
- * Her world's session applies the changes and React reads the value; a
- * reducer that changes nothing returns the value it was given. Nothing
- * here touches the DOM or reads a clock, so the window's rules are tested
- * in Node.
+ * world, the stream's coming and going, what health says of the language
+ * she speaks, the person going from view to view, opening a thing's card
+ * or the sheet for leaving something and typing there, what the daemon
+ * answered when they left or removed a thing, and what the window it is
+ * drawn in says of itself. And what each view holds, worked out from her
+ * world as read, the language she speaks and the viewer's clock. Her
+ * world's session applies the changes and React reads the value; a reducer
+ * that changes nothing returns the value it was given. Nothing here
+ * touches the DOM or reads a clock, so the window's rules are tested in
+ * Node.
  */
 import type {
   GatewayEvent,
+  GatewayHealth,
+  GatewayReady,
   LeaveThingBody,
   LeaveThingOutcome,
   RemoveThingOutcome,
@@ -22,10 +25,17 @@ import type {
   WorldOutcome,
   WorldPlace,
   WorldThing,
+  WorldWords,
 } from '@project02/wire/contract';
 import type {Frame} from './her-windows.ts';
 import type {Connection} from './store.ts';
-import {whenOf, writer, type Clock} from './thread-layout.ts';
+import {
+  formIn,
+  whenOf,
+  writer,
+  type Clock,
+  type Drawn,
+} from './thread-layout.ts';
 
 /** Her world as a read gave it. */
 export type HerWorld = Extract<WorldOutcome, {status: 'ok'}>;
@@ -69,6 +79,8 @@ export type WorldState = {
   readonly world?: HerWorld;
   /** Why her world could not be read, in the daemon's sentence; gone once it is. */
   readonly unread?: string | undefined;
+  /** The language she speaks, as health names it, which her world's words are in; none while it names none. */
+  readonly language?: string | undefined;
   /** The window her world is drawn in, when it has no frame of its own and the page draws one. */
   readonly frame?: Frame;
   readonly shows: Shows;
@@ -80,11 +92,11 @@ export type Who =
   | {readonly kind: 'person' | 'world'; readonly name: string}
   | {readonly kind: 'character'; readonly id: string; readonly name: string};
 
-/** A line of the journal as the window says it: who, what happened, the name it was written with, and when. */
+/** A line of the journal as the window says it: who, what happened, the name it was written with as the window draws it, and when. */
 export type Line = {
   readonly who: Who;
   readonly what: string;
-  readonly name: string;
+  readonly name: Drawn;
   readonly when: string;
 };
 
@@ -119,11 +131,13 @@ export type PlaceCard = {
 /** A day of the journal: its word, and its lines, newest first, each with its time. */
 export type Day = {readonly day: string; readonly lines: readonly Line[]};
 
-/** A thing's card: the thing, where it is, and its facts, a label and a value each. */
+/** A thing's card: the thing, where it is, its name and its note as the window draws them, and its facts, a label and a value each. */
 export type ThingCard = {
   readonly thing: WorldThing;
   readonly place: WorldPlace;
-  readonly facts: readonly {readonly label: string; readonly value: string}[];
+  readonly name: Drawn;
+  readonly note?: Drawn;
+  readonly facts: readonly {readonly label: string; readonly value: Drawn}[];
 };
 
 /** How many lines of the journal Now shows. */
@@ -151,11 +165,29 @@ export function initialWorldState(characterId: string): WorldState {
   };
 }
 
-/** Every `ready`: the stream is live. */
-export function worldReady(state: WorldState): WorldState {
-  return state.connection.status === 'live'
-    ? state
-    : {...state, connection: {status: 'live'}};
+/** Every `ready`: the stream is live, and health says the language she speaks. */
+export function worldReady(
+  state: WorldState,
+  snapshot: GatewayReady,
+): WorldState {
+  const live: WorldState =
+    state.connection.status === 'live'
+      ? state
+      : {...state, connection: {status: 'live'}};
+
+  return languageSaid(live, snapshot.health);
+}
+
+/** What health says of the language she speaks, while it lists her. */
+export function languageSaid(
+  state: WorldState,
+  health: GatewayHealth,
+): WorldState {
+  const language = health.characters.find(
+    character => character.id === state.characterId,
+  )?.language;
+
+  return language === state.language ? state : {...state, language};
 }
 
 /** The address will never work again: the window says why, in place of her world. */
@@ -190,15 +222,19 @@ export function worldRead(
 
 /**
  * Whether what the stream says calls for her world to be read again: it
- * changed, or a turn of a character who lives there began or ended, since
+ * changed; a turn of a character who lives there began or ended, since
  * that is when she is told what is around her, which is what makes a thing
- * seen, and nothing says so. Before the window knows her world, any world's
- * change might be hers.
+ * seen, and nothing says so; or health changed, as it does when her
+ * language or the person's does, which the words her world is read in
+ * follow. Before the window knows her world, any world's change might be
+ * hers.
  */
 export function readsAgain(state: WorldState, event: GatewayEvent): boolean {
   switch (event.kind) {
     case 'world_changed':
       return state.world === undefined || state.world.id === event.world;
+    case 'health_changed':
+      return true;
     case 'turn_running':
     case 'turn_completed':
       return (
@@ -355,8 +391,22 @@ export function isUnseen(world: HerWorld, thing: WorldThing): boolean {
   );
 }
 
-/** What Now shows, at the viewer's `clock`. */
-export function nowOf(world: HerWorld, clock: Clock): Now {
+/**
+ * A name or a note of her world as the window draws it: the person's form,
+ * what they wrote or her words put into theirs, when it has one, over her
+ * own words, as the chat draws the person's line over what she read; else
+ * her words alone. Her words are marked with `language`, the language she
+ * speaks, when she has one of her own.
+ */
+export function drawnWords(words: WorldWords, language?: string): Drawn {
+  const theirs = words.written ?? words.translation;
+  const hers = formIn(words.text, language);
+
+  return theirs === undefined ? hers : {text: theirs, translation: hers};
+}
+
+/** What Now shows, at the viewer's `clock`, her words marked with `language`. */
+export function nowOf(world: HerWorld, clock: Clock, language?: string): Now {
   const said = momentsOf(clock);
 
   return {
@@ -379,7 +429,7 @@ export function nowOf(world: HerWorld, clock: Clock): Now {
     ),
     lately: world.journal
       .slice(0, lately)
-      .map(entry => lineOf(world, entry, said(entry.when))),
+      .map(entry => lineOf(world, entry, said(entry.when), language)),
   };
 }
 
@@ -405,14 +455,18 @@ export function hereNow(
   return livingIn(world, placeId, momentsOf(clock));
 }
 
-/** The journal by day, newest first, each line with its time. */
-export function journalOf(world: HerWorld, clock: Clock): readonly Day[] {
+/** The journal by day, newest first, each line with its time, her words marked with `language`. */
+export function journalOf(
+  world: HerWorld,
+  clock: Clock,
+  language?: string,
+): readonly Day[] {
   const write = writer(clock);
   const days: {day: number; words: string; lines: Line[]}[] = [];
 
   for (const entry of world.journal) {
     const written = write(Date.parse(entry.when));
-    const line = lineOf(world, entry, written.time);
+    const line = lineOf(world, entry, written.time, language);
     const last = days.at(-1);
 
     if (last?.day === written.day) {
@@ -427,15 +481,16 @@ export function journalOf(world: HerWorld, clock: Clock): readonly Day[] {
 
 /**
  * The card of the thing of id `thingId`, as `characterId`'s window shows
- * it: where it is; whom it is from, and when, or the world it came with;
- * and, for a thing the person left, whether she has seen it. None once it
- * is gone.
+ * it, her words marked with `language`: its name and its note; where it
+ * is; whom it is from, and when, or the world it came with; and, for a
+ * thing the person left, whether she has seen it. None once it is gone.
  */
 export function thingCard(
   world: HerWorld,
   characterId: string,
   thingId: string,
   clock: Clock,
+  language?: string,
 ): ThingCard | undefined {
   const found = thingOf(world, thingId);
 
@@ -446,25 +501,35 @@ export function thingCard(
   const {thing, place} = found;
   const came = momentsOf(clock)(thing.came);
   const from = whoOf(world, thing.from);
-  const facts = [{label: 'Where', value: place.name}];
+  const facts: {label: string; value: Drawn}[] = [
+    {label: 'Where', value: drawnWords(place.name, language)},
+  ];
 
   if (from.kind === 'person') {
     facts.push(
-      {label: 'Left by', value: `${from.name}, ${came}`},
+      {label: 'Left by', value: {text: `${from.name}, ${came}`}},
       {
         label: `Seen by ${nameOf(world, characterId)}`,
-        value: thing.seen.includes(characterId) ? 'Yes' : 'Not yet',
+        value: {text: thing.seen.includes(characterId) ? 'Yes' : 'Not yet'},
       },
     );
   } else {
     facts.push(
       from.kind === 'character'
-        ? {label: 'Made by', value: `${from.name}, ${came}`}
-        : {label: 'Came with', value: from.name},
+        ? {label: 'Made by', value: {text: `${from.name}, ${came}`}}
+        : {label: 'Came with', value: drawnWords(world.name, language)},
     );
   }
 
-  return {thing, place, facts};
+  return {
+    thing,
+    place,
+    name: drawnWords(thing.name, language),
+    ...(thing.note === undefined
+      ? {}
+      : {note: drawnWords(thing.note, language)}),
+    facts,
+  };
 }
 
 /** The thing of id `thingId`, and the place it is in. */
@@ -498,15 +563,22 @@ function livingIn(
     }));
 }
 
-/** A line of the journal, its moment said as `when`. */
-function lineOf(world: HerWorld, entry: WorldEntry, when: string): Line {
+/** A line of the journal, its moment said as `when`, her words marked with `language`. */
+function lineOf(
+  world: HerWorld,
+  entry: WorldEntry,
+  when: string,
+  language: string | undefined,
+): Line {
   return {
     who: whoOf(world, entry.who),
     what: deeds[entry.what],
-    name:
+    name: drawnWords(
       entry.what === 'went'
         ? entry.place.name
         : (entry.thing?.name ?? entry.place.name),
+      language,
+    ),
     when,
   };
 }
@@ -516,7 +588,7 @@ function whoOf(world: HerWorld, hand: WorldHand): Who {
     case 'person':
       return {kind: 'person', name: 'You'};
     case 'world':
-      return {kind: 'world', name: world.name};
+      return {kind: 'world', name: drawnWords(world.name).text};
     case 'character':
       return {kind: 'character', id: hand.id, name: nameOf(world, hand.id)};
   }

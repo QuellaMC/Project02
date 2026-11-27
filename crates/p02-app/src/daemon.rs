@@ -28,9 +28,9 @@ use p02_store::{CharacterData, Home, QueuedLine, Queueing, StorageError};
 use p02_wire::{
     Answer, BotState, ChangeOutcome, CharacterSummary, ConfigChange, ConfigHealth, ConfigTarget,
     ConfigView, ConfirmationAnswer, ConnectorBot, ConnectorBotsOutcome, ConnectorBotsRefusal,
-    ConnectorConfigView, ConnectorPresence, Event, Health, HistoryOutcome, OpenOutcome,
-    OpenRefusal, PackagesHealth, PendingConfirmation, ProtocolVersion, StartOutcome, StartRefusal,
-    SubmitOutcome, TurnRefusal,
+    ConnectorConfigView, ConnectorPresence, Event, Health, HistoryOutcome, MaintenanceFailure,
+    OpenOutcome, OpenRefusal, PackagesHealth, PendingConfirmation, ProtocolVersion, StartOutcome,
+    StartRefusal, SubmitOutcome, TurnRefusal,
 };
 use tokio::sync::mpsc;
 
@@ -990,6 +990,22 @@ impl Daemon {
     /// whose package left, and she is then no character to reach.
     pub(crate) fn live(&self, id: &Identifier) -> Option<Arc<CharacterHandle>> {
         self.handle(id).filter(|handle| !handle.ended())
+    }
+
+    /// Something of character `id`'s that failed in the background, which
+    /// no outcome says, in `message`: her actor notes it as maintenance, as
+    /// one of her own, while she runs; otherwise the stream alone says it.
+    pub(crate) fn note_maintenance(&self, id: &Identifier, message: String) {
+        match self.live(id) {
+            Some(handle) => handle.note_maintenance(message),
+            None => self.inner.world.events.emit(Event::MaintenanceFailed {
+                character_id: id.clone(),
+                failure: MaintenanceFailure {
+                    at: Timestamp::now(),
+                    message,
+                },
+            }),
+        }
     }
 
     /// The sentence `character` answers with while she takes nothing.

@@ -14,6 +14,7 @@ import {frameOf, tellTheChat, type FrameVerbs} from './window-link.ts';
 import {
   drafted,
   initialWorldState,
+  languageSaid,
   leaveAnswered,
   leaveOpened,
   looked,
@@ -114,12 +115,16 @@ export function createWorldSession(
 
   follow(client, {
     event: event => {
+      if (event.kind === 'health_changed') {
+        apply(current => languageSaid(current, event.health));
+      }
+
       if (readsAgain(getState(), event)) {
         void read();
       }
     },
-    ready: () => {
-      apply(worldReady);
+    ready: snapshot => {
+      apply(current => worldReady(current, snapshot));
       void read();
     },
     lost: () => {

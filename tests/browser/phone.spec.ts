@@ -851,9 +851,12 @@ test("page.phone-read: in her phone's window, under her message in Messages, Del
   });
   await chat.setViewportSize({width: 900, height: 420});
 
-  for (const word of ['one', 'two', 'three', 'four']) {
+  // Each reply is read before the next line is sent: replies that land
+  // together are read as one, the newest.
+  for (const [at, word] of ['one', 'two', 'three', 'four'].entries()) {
     model.answer(reply(`Reply ${word}.`));
     await say(`Line ${word}.`, word);
+    await expect.poll(() => told.length).toBe(at + 1);
   }
 
   await expect(hers).toHaveCount(5);

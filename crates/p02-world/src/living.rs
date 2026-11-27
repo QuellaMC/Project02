@@ -6,11 +6,17 @@
 //! and from then on stands by itself. Documents are replaced whole, the
 //! journal is only appended to, and every read is forgiving: what cannot be
 //! used is passed over and said, and the rest of the world works.
+//!
+//! Its words are hers. Beside a name the person did not write, the world
+//! keeps their words for it once they are made, and which language the
+//! person's setting said they were made in; beside a thing the person left
+//! in other words than hers, what they wrote.
 
 use std::collections::BTreeMap;
+use std::iter;
 
 use p02_contracts::{LeasedFiles, StoreError};
-use p02_core::{SpeakerName, Timestamp, VisibleText};
+use p02_core::{LanguageTag, SpeakerName, Timestamp, VisibleText};
 use p02_shared::Identifier;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
@@ -36,20 +42,24 @@ const NEWEST_LINES: usize = 200;
 const UNREAD_WORLD: &str =
     "the world's own file does not read, and the world was made again from her package's";
 
-/// A place in a world: its id, its name, and the icon and the tint it is
-/// drawn with.
+/// A place in a world: its id, its name, the icon and the tint it is drawn
+/// with, and the person's words for its name, once they are made.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Place {
     id: Identifier,
     name: String,
     icon: String,
     tint: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    translation: Option<String>,
 }
 
 /// A thing in a place: its own id, which the world gave it, its name, the
 /// icon and the tint it is drawn with, whom it is from and when it came; a
-/// thing the person left also has their note, when they wrote one, and the
-/// characters who have seen it.
+/// thing the person left also has their note, when they wrote one, what
+/// they wrote of each that was put into her language, and the characters
+/// who have seen it; any other has the person's words for its name, once
+/// they are made.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Thing {
     id: String,
@@ -62,6 +72,31 @@ pub struct Thing {
     note: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     seen: Vec<Identifier>,
+    #[serde(default, skip_serializing_if = "Written::is_empty")]
+    written: Written,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    translation: Option<String>,
+}
+
+/// What the person wrote of a thing they left, where her world has it in
+/// other words, hers: its name, and their note.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Written {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// A thing the person leaves her, as her world will keep it: its name, its
+/// kind and their note, when they wrote one, in her language once they are
+/// put into it, with what the person wrote beside each that was.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Leaving {
+    name: SpeakerName,
+    kind: Kind,
+    note: Option<String>,
+    written: Written,
 }
 
 /// A hand that changes a world: the world itself, the person, or a
@@ -94,7 +129,9 @@ pub enum Deed {
 }
 
 /// A line of a world's journal: when, whose deed it was, what happened,
-/// and the place and the thing it was about.
+/// the place and the thing it was about, and, when it keeps the person's
+/// words for a name, the language they are in, as their setting said it
+/// when they were made, none for Automatic.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Entry {
     pub when: Timestamp,
@@ -103,24 +140,54 @@ pub struct Entry {
     pub place: Named,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thing: Option<Named>,
+    #[serde(
+        default,
+        rename = "translatedInto",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub translated_into: Option<LanguageTag>,
 }
 
 /// A place or a thing as a line of the journal names it: by its id, and by
-/// the name it had then.
+/// the name it had then, with the person's form of that name beside it
+/// when it had one: what the person wrote of a thing they left, or the
+/// person's words kept for a name they did not write.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Named {
     pub id: String,
     pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translation: Option<String>,
 }
 
 /// A world as its files keep it, and what of them did not read, a sentence
-/// each.
+/// each: its name, and the person's words for it, once they are made; its
+/// places; where each character living there is; and the language the
+/// person's words kept with it are in, as their setting said it when they
+/// were made, none for Automatic.
 #[derive(Debug)]
 pub struct LivingWorld {
     name: String,
+    translation: Option<String>,
     places: Vec<Place>,
     characters: BTreeMap<Identifier, Whereabouts>,
+    translated_into: Option<LanguageTag>,
     passed_over: Vec<String>,
+}
+
+/// `world.json` as it is written.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Document<'a> {
+    name: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    translation: Option<&'a str>,
+    places: &'a [Place],
+    characters: &'a BTreeMap<Identifier, Whereabouts>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    translated_into: Option<&'a LanguageTag>,
 }
 
 /// Where a character is, as she is told of it: her place, what is in it in
@@ -137,10 +204,13 @@ pub struct Here {
 /// Everything a person sees of a world: its name, its places in their
 /// order, each with what is in it in the order it came, where each
 /// character living there is and since when, and the newest lines of its
-/// journal, newest first.
+/// journal, newest first; with the person's words kept for the names they
+/// did not write while those are in the language they read.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct View {
     pub name: String,
+    /// The person's words for its name.
+    pub translation: Option<String>,
     pub places: Vec<(Place, Vec<Thing>)>,
     pub characters: BTreeMap<Identifier, Whereabouts>,
     pub journal: Vec<Entry>,
@@ -227,6 +297,12 @@ impl Place {
         &self.tint
     }
 
+    /// The person's words for its name, once they are made.
+    #[must_use]
+    pub fn translation(&self) -> Option<&str> {
+        self.translation.as_deref()
+    }
+
     fn of(definition: &PlaceDefinition) -> Self {
         Self {
             id: definition.id.clone(),
@@ -239,6 +315,7 @@ impl Place {
                 .tint
                 .clone()
                 .unwrap_or_else(|| PLAIN_TINT.to_owned()),
+            translation: None,
         }
     }
 
@@ -294,6 +371,19 @@ impl Thing {
         &self.seen
     }
 
+    /// What the person wrote of it, where her world has it in her words.
+    #[must_use]
+    pub fn written(&self) -> &Written {
+        &self.written
+    }
+
+    /// The person's words for its name, once they are made: for a thing
+    /// the person did not leave.
+    #[must_use]
+    pub fn translation(&self) -> Option<&str> {
+        self.translation.as_deref()
+    }
+
     /// Whether it is new to `character`: the person left it, and she has
     /// not been told of it where it is. What the world itself brought and
     /// what she made never are.
@@ -312,7 +402,109 @@ impl Thing {
             came: came.clone(),
             note: None,
             seen: Vec::new(),
+            written: Written::default(),
+            translation: None,
         }
+    }
+}
+
+impl Written {
+    fn is_empty(&self) -> bool {
+        self.name.is_none() && self.note.is_none()
+    }
+}
+
+impl Leaving {
+    /// What the person leaves as they wrote it: a name, one line of 1 to
+    /// 128 characters; one of the kinds, by its name; and their note when
+    /// they wrote one, kept with its line endings `\n` and its ends trimmed,
+    /// not blank and 280 characters at most.
+    ///
+    /// # Errors
+    ///
+    /// [`LeaveError::Name`], [`LeaveError::NoKind`] or [`LeaveError::Note`],
+    /// for the first of these rules broken.
+    pub fn new(name: &str, kind: &str, note: Option<&str>) -> Result<Self, LeaveError> {
+        let name = trimmed_name(name).ok_or(LeaveError::Name)?;
+        let kind = Kind::named(kind).ok_or_else(|| LeaveError::NoKind {
+            kind: kind.to_owned(),
+        })?;
+        let note = note.map(written).transpose()?;
+
+        Ok(Self {
+            name,
+            kind,
+            note,
+            written: Written::default(),
+        })
+    }
+
+    /// Its words, which are put into her language: its name, then its note
+    /// when it has one.
+    #[must_use]
+    pub fn words(&self) -> Vec<&str> {
+        iter::once(self.name.as_str())
+            .chain(self.note.as_deref())
+            .collect()
+    }
+
+    /// It in her language, `hers` her words for [`Leaving::words`] in their
+    /// order: each that is not what the person wrote takes its place, and
+    /// what they wrote is kept beside it.
+    ///
+    /// # Errors
+    ///
+    /// [`LeaveError::Name`] or [`LeaveError::Note`] when her words for its
+    /// name or its note break the rule of a name or a note.
+    pub fn in_her_language(self, hers: Vec<String>) -> Result<Self, LeaveError> {
+        let mut hers = hers.into_iter();
+        let name = match hers.next() {
+            Some(name) => trimmed_name(&name).ok_or(LeaveError::Name)?,
+            None => self.name.clone(),
+        };
+        let note = match (&self.note, hers.next()) {
+            (Some(_), Some(note)) => Some(written(&note)?),
+            (note, _) => note.clone(),
+        };
+
+        Ok(Self {
+            written: Written {
+                name: (name != self.name).then(|| self.name.as_str().to_owned()),
+                note: self
+                    .note
+                    .clone()
+                    .filter(|wrote| note.as_ref() != Some(wrote)),
+            },
+            name,
+            kind: self.kind,
+            note,
+        })
+    }
+}
+
+impl View {
+    /// The names the person did not write that no words of theirs are kept
+    /// for: the world's, its places' and its things' from the world itself
+    /// or a character's hand, each once, in the view's order.
+    #[must_use]
+    pub fn untranslated(&self) -> Vec<&str> {
+        let named = self.places.iter().flat_map(|(place, things)| {
+            iter::once((&place.name, &place.translation)).chain(
+                things
+                    .iter()
+                    .filter(|thing| thing.from != Hand::Person)
+                    .map(|thing| (&thing.name, &thing.translation)),
+            )
+        });
+        let mut untranslated: Vec<&str> = Vec::new();
+
+        for (name, translation) in iter::once((&self.name, &self.translation)).chain(named) {
+            if translation.is_none() && !untranslated.contains(&name.as_str()) {
+                untranslated.push(name);
+            }
+        }
+
+        untranslated
     }
 }
 
@@ -411,7 +603,7 @@ impl LivingWorld {
                 },
             );
             self.write(files)?;
-            happened(
+            self.happened(
                 files,
                 now,
                 Hand::Character(character.clone()),
@@ -440,7 +632,7 @@ impl LivingWorld {
         kind: Kind,
         now: &Timestamp,
     ) -> Result<Made, WorldError> {
-        let name = SpeakerName::new(name.trim()).map_err(|_| WorldError::Name)?;
+        let name = trimmed_name(name).ok_or(WorldError::Name)?;
         let place = self.place_of(files, character, now)?;
         let mut things = self.things_in(files, &place)?;
 
@@ -458,7 +650,7 @@ impl LivingWorld {
 
         things.push(thing.clone());
         files.write_json(&place.file(), &json!({"things": things}))?;
-        happened(
+        self.happened(
             files,
             now,
             Hand::Character(character.clone()),
@@ -497,7 +689,7 @@ impl LivingWorld {
             });
         };
 
-        happened(
+        self.happened(
             files,
             now,
             Hand::Character(character.clone()),
@@ -508,24 +700,19 @@ impl LivingWorld {
         Ok(Used { place, thing })
     }
 
-    /// The person leaves a thing called `name`, of the kind `kind` names,
-    /// in the place of id `place`, with their `note` when they wrote one,
-    /// at `now`. It is new to each character until she is told of it
-    /// there.
+    /// The person leaves `leaving` in the place of id `place`, at `now`. It
+    /// is new to each character until she is told of it there.
     ///
     /// # Errors
     ///
-    /// [`LeaveError`] for a place the world does not hold, a name that is
-    /// not one line of 1 to 128 characters, a kind that is none of the
-    /// world's, a note that is blank or longer than 280 characters, a place
-    /// that holds the most it can, or the store's.
+    /// [`LeaveError::NoPlace`] for a place the world does not hold,
+    /// [`LeaveError::NoRoom`] for one that holds the most it can, or the
+    /// store's.
     pub fn leave(
         &mut self,
         files: &mut dyn LeasedFiles,
         place: &str,
-        name: &str,
-        kind: &str,
-        note: Option<&str>,
+        leaving: Leaving,
         now: &Timestamp,
     ) -> Result<Thing, LeaveError> {
         let Some(place) = self
@@ -539,25 +726,27 @@ impl LivingWorld {
                 world: self.name.clone(),
             });
         };
-        let name = SpeakerName::new(name.trim()).map_err(|_| LeaveError::Name)?;
-        let kind = Kind::named(kind).ok_or_else(|| LeaveError::NoKind {
-            kind: kind.to_owned(),
-        })?;
-        let note = note.map(written).transpose()?;
         let mut things = self.things_in(files, &place)?;
 
         if things.len() >= MOST_THINGS {
             return Err(LeaveError::NoRoom { place: place.name });
         }
 
+        let Leaving {
+            name,
+            kind,
+            note,
+            written,
+        } = leaving;
         let thing = Thing {
             note,
+            written,
             ..Thing::new(name.as_str(), kind.icon(), kind.tint(), Hand::Person, now)
         };
 
         things.push(thing.clone());
         files.write_json(&place.file(), &json!({"things": things}))?;
-        happened(files, now, Hand::Person, Deed::Left, &place, Some(&thing))?;
+        self.happened(files, now, Hand::Person, Deed::Left, &place, Some(&thing))?;
         Ok(thing)
     }
 
@@ -582,7 +771,7 @@ impl LivingWorld {
             let removed = things.remove(found);
 
             files.write_json(&place.file(), &json!({"things": things}))?;
-            happened(
+            self.happened(
                 files,
                 now,
                 Hand::Person,
@@ -600,7 +789,10 @@ impl LivingWorld {
     }
 
     /// Everything a person sees of the world, read for `character`, who is
-    /// at its first place from `now` on while she has none there yet.
+    /// at its first place from `now` on while she has none there yet, with
+    /// the person's words kept for its names, and for the names its journal
+    /// keeps, while they are in `theirs`, the language the person chose,
+    /// none for Automatic.
     ///
     /// # Errors
     ///
@@ -609,26 +801,100 @@ impl LivingWorld {
         &mut self,
         files: &mut dyn LeasedFiles,
         character: &Identifier,
+        theirs: Option<&LanguageTag>,
         now: &Timestamp,
     ) -> Result<View, StoreError> {
         self.place_of(files, character, now)?;
 
+        let theirs_kept = current(self.translated_into.as_ref(), theirs);
         let mut places = Vec::with_capacity(self.places.len());
 
-        for place in self.places.clone() {
-            let things = self.things_in(files, &place)?;
+        for mut place in self.places.clone() {
+            let mut things = self.things_in(files, &place)?;
+
+            if !theirs_kept {
+                place.translation = None;
+
+                for thing in &mut things {
+                    thing.translation = None;
+                }
+            }
 
             places.push((place, things));
         }
 
-        let journal = self.journal(files)?;
+        let mut journal = self.journal(files)?;
+
+        for entry in &mut journal {
+            if !current(entry.translated_into.as_ref(), theirs) {
+                entry.place.translation = None;
+
+                if let Some(thing) = &mut entry.thing {
+                    thing.translation = None;
+                }
+            }
+        }
 
         Ok(View {
             name: self.name.clone(),
+            translation: self.translation.clone().filter(|_| theirs_kept),
             places,
             characters: self.characters.clone(),
             journal,
         })
+    }
+
+    /// Keeps `translations`, the person's words for names of the world's
+    /// they did not write, by the name each is for: with the world, and with
+    /// each place and each thing from the world itself or a character's hand
+    /// that goes by that name; and that they are in `theirs`, the language
+    /// the person chose, none for Automatic. Words kept in another language
+    /// than `theirs` that `translations` do not give again are let go.
+    ///
+    /// # Errors
+    ///
+    /// The store's, when it fails.
+    pub fn keep_translations(
+        &mut self,
+        files: &mut dyn LeasedFiles,
+        translations: &BTreeMap<String, String>,
+        theirs: Option<&LanguageTag>,
+    ) -> Result<(), StoreError> {
+        let current = current(self.translated_into.as_ref(), theirs);
+        // The person's words for `name` from now on, where `held` were theirs
+        // until now.
+        let theirs_for = |name: &str, held: &Option<String>| {
+            translations
+                .get(name)
+                .cloned()
+                .or_else(|| held.clone().filter(|_| current))
+        };
+
+        for index in 0..self.places.len() {
+            let place = self.places[index].clone();
+            let things = self.things_in(files, &place)?;
+            let translated: Vec<Thing> = things
+                .iter()
+                .cloned()
+                .map(|mut thing| {
+                    if thing.from != Hand::Person {
+                        thing.translation = theirs_for(&thing.name, &thing.translation);
+                    }
+
+                    thing
+                })
+                .collect();
+
+            if translated != things {
+                files.write_json(&place.file(), &json!({"things": translated}))?;
+            }
+
+            self.places[index].translation = theirs_for(&place.name, &place.translation);
+        }
+
+        self.translation = theirs_for(&self.name, &self.translation);
+        self.translated_into = theirs.cloned();
+        self.write(files)
     }
 
     /// The world `document` keeps, read forgivingly: a place, or where a
@@ -636,11 +902,16 @@ impl LivingWorld {
     /// the document does not read, or no place of it does.
     fn kept(document: &Value) -> Option<Self> {
         #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase")]
         struct Kept {
             name: String,
+            #[serde(default)]
+            translation: Option<String>,
             places: Vec<Value>,
             #[serde(default)]
             characters: Map<String, Value>,
+            #[serde(default)]
+            translated_into: Option<LanguageTag>,
         }
 
         let kept = Kept::deserialize(document).ok()?;
@@ -686,8 +957,10 @@ impl LivingWorld {
 
         Some(Self {
             name: kept.name,
+            translation: kept.translation,
             places,
             characters,
+            translated_into: kept.translated_into,
             passed_over,
         })
     }
@@ -724,8 +997,10 @@ impl LivingWorld {
 
         let world = Self {
             name: definition.name.as_str().to_owned(),
+            translation: None,
             places: definition.places.iter().map(Place::of).collect(),
             characters: BTreeMap::new(),
+            translated_into: None,
             passed_over: Vec::new(),
         };
 
@@ -737,7 +1012,13 @@ impl LivingWorld {
     fn write(&self, files: &mut dyn LeasedFiles) -> Result<(), StoreError> {
         files.write_json(
             WORLD,
-            &json!({"name": self.name, "places": self.places, "characters": self.characters}),
+            &json!(Document {
+                name: &self.name,
+                translation: self.translation.as_deref(),
+                places: &self.places,
+                characters: &self.characters,
+                translated_into: self.translated_into.as_ref(),
+            }),
         )
     }
 
@@ -813,6 +1094,46 @@ impl LivingWorld {
         })
     }
 
+    /// Appends to the journal that `who` did `what` at `place`, at `now`, to
+    /// `thing` when it was done to one, each by its id and its name now,
+    /// with the person's form of that name beside it when it has one, and
+    /// the language the person's words it keeps are in.
+    fn happened(
+        &self,
+        files: &mut dyn LeasedFiles,
+        now: &Timestamp,
+        who: Hand,
+        what: Deed,
+        place: &Place,
+        thing: Option<&Thing>,
+    ) -> Result<(), StoreError> {
+        let place = Named {
+            id: place.id.to_string(),
+            name: place.name.clone(),
+            written: None,
+            translation: place.translation.clone(),
+        };
+        let thing = thing.map(|thing| Named {
+            id: thing.id.clone(),
+            name: thing.name.clone(),
+            written: thing.written.name.clone(),
+            translation: thing.translation.clone(),
+        });
+        let translated = iter::once(&place)
+            .chain(&thing)
+            .any(|named| named.translation.is_some());
+        let entry = Entry {
+            when: now.clone(),
+            who,
+            what,
+            place,
+            thing,
+            translated_into: self.translated_into.clone().filter(|_| translated),
+        };
+
+        files.append_jsonl(JOURNAL, &json!(entry))
+    }
+
     /// What is in `place`, read forgivingly: a thing that does not read is
     /// passed over and said.
     fn things_in(
@@ -870,7 +1191,7 @@ impl LivingWorld {
     /// A place of the world's new to it, called `name` as she wrote it, with
     /// an id the world makes and the plainest look.
     fn found(&mut self, name: &str) -> Result<Place, WorldError> {
-        let name = SpeakerName::new(name).map_err(|_| WorldError::Name)?;
+        let name = trimmed_name(name).ok_or(WorldError::Name)?;
 
         if self.places.len() >= MOST_PLACES {
             return Err(WorldError::NoRoomForPlace);
@@ -881,6 +1202,7 @@ impl LivingWorld {
             name: name.as_str().to_owned(),
             icon: PLAIN_ICON.to_owned(),
             tint: PLAIN_TINT.to_owned(),
+            translation: None,
         };
 
         self.places.push(place.clone());
@@ -933,42 +1255,29 @@ fn same(text: &str, other: &str) -> bool {
     text.to_lowercase() == other.to_lowercase()
 }
 
-/// The note the person wrote as it is kept, its line endings `\n` and its
-/// ends trimmed; refused when nothing is left or it is longer than a note
-/// may be.
+/// `text` as a name, its ends trimmed: none unless one line of 1 to 128
+/// characters is left.
+fn trimmed_name(text: &str) -> Option<SpeakerName> {
+    SpeakerName::new(text.trim()).ok()
+}
+
+/// Whether words kept for the person while their setting said `kept`, the
+/// language they chose, none for Automatic, are theirs while it says
+/// `theirs`: on Automatic, whatever was kept is.
+fn current(kept: Option<&LanguageTag>, theirs: Option<&LanguageTag>) -> bool {
+    theirs.is_none_or(|theirs| {
+        kept.is_some_and(|kept| kept.as_str().eq_ignore_ascii_case(theirs.as_str()))
+    })
+}
+
+/// A note as it is kept, its line endings `\n` and its ends trimmed;
+/// refused when nothing is left or it is longer than a note may be.
 fn written(note: &str) -> Result<String, LeaveError> {
     VisibleText::normalize(note)
         .ok()
         .map(|note| note.as_str().to_owned())
         .filter(|note| note.chars().count() <= MOST_NOTE)
         .ok_or(LeaveError::Note)
-}
-
-/// Appends to the journal that `who` did `what` at `place`, at `now`, to
-/// `thing` when it was done to one, each by its id and its name now.
-fn happened(
-    files: &mut dyn LeasedFiles,
-    now: &Timestamp,
-    who: Hand,
-    what: Deed,
-    place: &Place,
-    thing: Option<&Thing>,
-) -> Result<(), StoreError> {
-    let entry = Entry {
-        when: now.clone(),
-        who,
-        what,
-        place: Named {
-            id: place.id.to_string(),
-            name: place.name.clone(),
-        },
-        thing: thing.map(|thing| Named {
-            id: thing.id.clone(),
-            name: thing.name.clone(),
-        }),
-    };
-
-    files.append_jsonl(JOURNAL, &json!(entry))
 }
 
 #[cfg(test)]
@@ -1039,6 +1348,15 @@ mod tests {
 
     fn mira() -> Identifier {
         Identifier::new("mira").unwrap()
+    }
+
+    /// What the person leaves, as they wrote it.
+    fn leaving(name: &str, kind: &str, note: Option<&str>) -> Leaving {
+        Leaving::new(name, kind, note).unwrap()
+    }
+
+    fn tag(tag: &str) -> LanguageTag {
+        LanguageTag::parse(tag).unwrap()
     }
 
     fn at(moment: &str) -> Timestamp {
@@ -1281,7 +1599,7 @@ mod tests {
                 Err(WorldError::Name)
             ));
             assert!(matches!(
-                world.leave(&mut files, "flat", name, "gift", None, &morning()),
+                Leaving::new(name, "gift", None),
                 Err(LeaveError::Name)
             ));
         }
@@ -1307,8 +1625,12 @@ mod tests {
         let Err(full) = world.make(&mut files, &mira(), "One more", other, &morning()) else {
             panic!("the flat is full");
         };
-        let Err(left) = world.leave(&mut files, "flat", "One more", "gift", None, &morning())
-        else {
+        let Err(left) = world.leave(
+            &mut files,
+            "flat",
+            leaving("One more", "gift", None),
+            &morning(),
+        ) else {
             panic!("the flat is full for the person too");
         };
 
@@ -1381,15 +1703,18 @@ mod tests {
             .leave(
                 &mut files,
                 "flat",
-                "Honey",
-                "food",
-                Some("For your toast."),
+                leaving("Honey", "food", Some("For your toast.")),
                 &morning(),
             )
             .unwrap();
 
         world
-            .leave(&mut files, "studio", "Scarf", "clothing", None, &morning())
+            .leave(
+                &mut files,
+                "studio",
+                leaving("Scarf", "clothing", None),
+                &morning(),
+            )
             .unwrap();
 
         // What she is told of says what was new to her then.
@@ -1460,7 +1785,8 @@ mod tests {
         let mut world = LivingWorld::read(&mut files, &port(), &morning()).unwrap();
         let (longest, longer) = ("n".repeat(280), "n".repeat(281));
         let mut left = |kind: &str, note: Option<&str>| {
-            world.leave(&mut files, "flat", "A gift", kind, note, &morning())
+            Leaving::new("A gift", kind, note)
+                .and_then(|leaving| world.leave(&mut files, "flat", leaving, &morning()))
         };
 
         for (kind, note, refusal) in [
@@ -1498,6 +1824,249 @@ mod tests {
     }
 
     #[test]
+    fn what_the_person_leaves_is_kept_in_her_words_with_theirs_beside_each_that_is_not_theirs() {
+        let mut files = Files::default();
+        let mut world = LivingWorld::read(&mut files, &port(), &morning()).unwrap();
+        let honey = leaving("A jar of honey", "food", Some("For your toast."));
+        let mut left = |hers: [&str; 2]| {
+            honey
+                .clone()
+                .in_her_language(hers.map(str::to_owned).to_vec())
+                .and_then(|leaving| world.leave(&mut files, "flat", leaving, &morning()))
+        };
+        let translated = left([" ハチミツの瓶 ", "トーストに\r\nどうぞ。"]).unwrap();
+        let named = left(["ハチミツ", "For your toast."]).unwrap();
+
+        for (hers, refusal) in [
+            (["ハチミツの\n瓶", "どうぞ。"], "a name is one line"),
+            (
+                ["ハチミツ", &"ど".repeat(281)],
+                "a note is not blank, and is 280 characters at most",
+            ),
+        ] {
+            let refused = left(hers).unwrap_err().to_string();
+
+            assert!(refused.starts_with(refusal), "{refused}");
+        }
+
+        assert_eq!(
+            (translated.name(), translated.note(), translated.written()),
+            (
+                "ハチミツの瓶",
+                Some("トーストに\nどうぞ。"),
+                &Written {
+                    name: Some("A jar of honey".to_owned()),
+                    note: Some("For your toast.".to_owned()),
+                }
+            )
+        );
+        assert_eq!(
+            files.documents["places/flat.json"]["things"][2]["written"],
+            json!({"name": "A jar of honey", "note": "For your toast."})
+        );
+        assert_eq!(
+            files.logs[JOURNAL][0]["thing"],
+            json!({"id": translated.id(), "name": "ハチミツの瓶", "written": "A jar of honey"}),
+            "its line keeps what the person wrote beside her words"
+        );
+        assert_eq!(
+            (named.note(), named.written().note.as_deref()),
+            (Some("For your toast."), None)
+        );
+        assert_eq!(
+            files.documents["places/flat.json"]["things"]
+                .as_array()
+                .map(Vec::len),
+            Some(4),
+            "what her words broke the rules of was not left"
+        );
+    }
+
+    #[test]
+    fn the_persons_words_for_names_are_made_again_in_another_language_they_choose_and_stand_on_automatic()
+     {
+        // The names of the world's that no words of the person's are kept
+        // for, while they read `theirs`.
+        fn untranslated(
+            world: &mut LivingWorld,
+            files: &mut Files,
+            theirs: Option<&LanguageTag>,
+        ) -> Vec<String> {
+            let view = world.view(files, &mira(), theirs, &morning()).unwrap();
+
+            view.untranslated().into_iter().map(str::to_owned).collect()
+        }
+
+        fn keep(
+            world: &mut LivingWorld,
+            files: &mut Files,
+            words: &[(&str, &str)],
+            theirs: Option<&LanguageTag>,
+        ) {
+            let words = words
+                .iter()
+                .map(|(name, theirs)| ((*name).to_owned(), (*theirs).to_owned()))
+                .collect();
+
+            world.keep_translations(files, &words, theirs).unwrap();
+        }
+
+        let mut files = Files::default();
+        let mut world = LivingWorld::read(&mut files, &port(), &morning()).unwrap();
+        let (german, french) = (tag("de"), tag("fr"));
+        let every = [
+            "The Port",
+            "The Flat",
+            "Teapot",
+            "Bike",
+            "The Studio",
+            "Proofs",
+        ];
+
+        world
+            .leave(
+                &mut files,
+                "flat",
+                leaving("Honig", "food", None),
+                &morning(),
+            )
+            .unwrap();
+        assert_eq!(
+            untranslated(&mut world, &mut files, Some(&german)),
+            every,
+            "the person's own words are never made"
+        );
+
+        keep(
+            &mut world,
+            &mut files,
+            &[
+                ("The Port", "Der Hafen"),
+                ("The Flat", "Die Wohnung"),
+                ("Teapot", "Teekanne"),
+                ("Bike", "Fahrrad"),
+                ("The Studio", "Das Studio"),
+                ("Proofs", "Probedrucke"),
+            ],
+            Some(&german),
+        );
+
+        let kept = world
+            .view(&mut files, &mira(), Some(&tag("DE")), &morning())
+            .unwrap();
+        let (flat, things) = &kept.places[0];
+
+        assert_eq!(
+            (
+                kept.translation.as_deref(),
+                flat.translation(),
+                things[0].translation()
+            ),
+            (Some("Der Hafen"), Some("Die Wohnung"), Some("Teekanne"))
+        );
+        assert_eq!(files.documents[WORLD]["translatedInto"], json!("de"));
+        assert_eq!(
+            untranslated(&mut world, &mut files, None),
+            [] as [&str; 0],
+            "on Automatic, the words kept stand"
+        );
+
+        assert_eq!(untranslated(&mut world, &mut files, Some(&french)), every);
+
+        keep(
+            &mut world,
+            &mut files,
+            &[("The Port", "Le Port")],
+            Some(&french),
+        );
+        assert_eq!(
+            untranslated(&mut world, &mut files, Some(&french)),
+            every[1..],
+            "the German words not made again in French are let go"
+        );
+
+        keep(&mut world, &mut files, &[("Bike", "Vélo")], None);
+        assert_eq!(
+            untranslated(&mut world, &mut files, None),
+            ["The Flat", "Teapot", "The Studio", "Proofs"]
+        );
+        assert_eq!(
+            untranslated(&mut world, &mut files, Some(&french)),
+            every,
+            "words made on Automatic are made again once a language is chosen"
+        );
+    }
+
+    #[test]
+    fn a_journal_line_keeps_the_persons_words_its_names_had_while_they_read_that_language() {
+        // The place each line of the journal names, newest first, with the
+        // person's words for it, while they read `theirs`.
+        fn places(
+            world: &mut LivingWorld,
+            files: &mut Files,
+            theirs: Option<&LanguageTag>,
+        ) -> Vec<(String, Option<String>)> {
+            let view = world.view(files, &mira(), theirs, &morning()).unwrap();
+
+            view.journal
+                .into_iter()
+                .map(|line| (line.place.name, line.place.translation))
+                .collect()
+        }
+
+        let mut files = Files::default();
+        let mut world = LivingWorld::read(&mut files, &port(), &morning()).unwrap();
+        let german = tag("de");
+        let words = BTreeMap::from(
+            [("The Flat", "Die Wohnung"), ("Teapot", "Teekanne")]
+                .map(|(name, theirs)| (name.to_owned(), theirs.to_owned())),
+        );
+
+        world
+            .keep_translations(&mut files, &words, Some(&german))
+            .unwrap();
+
+        let teapot = world
+            .use_thing(&mut files, &mira(), "Teapot", &morning())
+            .unwrap()
+            .thing;
+
+        world.go(&mut files, &mira(), "studio", &morning()).unwrap();
+        assert_eq!(
+            files.logs[JOURNAL],
+            [
+                json!({
+                    "when": "2026-11-26T09:00:00.000Z",
+                    "who": {"character": "mira"},
+                    "what": "used",
+                    "place": {"id": "flat", "name": "The Flat", "translation": "Die Wohnung"},
+                    "thing": {"id": teapot.id(), "name": "Teapot", "translation": "Teekanne"},
+                    "translatedInto": "de",
+                }),
+                json!({
+                    "when": "2026-11-26T09:00:00.000Z",
+                    "who": {"character": "mira"},
+                    "what": "went",
+                    "place": {"id": "studio", "name": "The Studio"},
+                }),
+            ]
+        );
+
+        let flat = ("The Flat".to_owned(), Some("Die Wohnung".to_owned()));
+        let studio = ("The Studio".to_owned(), None);
+
+        assert_eq!(
+            places(&mut world, &mut files, Some(&german)),
+            [studio.clone(), flat.clone()]
+        );
+        assert_eq!(places(&mut world, &mut files, None), [studio.clone(), flat]);
+        assert_eq!(
+            places(&mut world, &mut files, Some(&tag("fr"))),
+            [studio, ("The Flat".to_owned(), None)]
+        );
+    }
+
+    #[test]
     fn the_view_holds_its_places_in_order_who_is_where_and_the_newest_journal_lines_first() {
         let mut files = Files::default();
         let mut world = LivingWorld::read(&mut files, &port(), &morning()).unwrap();
@@ -1513,7 +2082,7 @@ mod tests {
                 })
                 .collect()
         };
-        let fresh = world.view(&mut files, &mira(), &morning()).unwrap();
+        let fresh = world.view(&mut files, &mira(), None, &morning()).unwrap();
         let teapot = fresh.places[0].1[0].id().to_owned();
 
         assert_eq!(fresh.name, "The Port");
@@ -1524,11 +2093,11 @@ mod tests {
             .make(&mut files, &mira(), "Toast", Kind::OTHER, &noon)
             .unwrap();
         world
-            .leave(&mut files, "studio", "Honey", "food", None, &noon)
+            .leave(&mut files, "studio", leaving("Honey", "food", None), &noon)
             .unwrap();
         world.remove(&mut files, &teapot, &noon).unwrap();
 
-        let view = world.view(&mut files, &mira(), &noon).unwrap();
+        let view = world.view(&mut files, &mira(), None, &noon).unwrap();
 
         assert_eq!(
             places(&view),
@@ -1574,7 +2143,10 @@ mod tests {
         journal.push(Value::Null);
 
         let mut world = LivingWorld::read(&mut files, &port(), &noon).unwrap();
-        let journal = world.view(&mut files, &mira(), &noon).unwrap().journal;
+        let journal = world
+            .view(&mut files, &mira(), None, &noon)
+            .unwrap()
+            .journal;
 
         assert_eq!(
             (

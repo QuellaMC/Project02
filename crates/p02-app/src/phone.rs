@@ -27,7 +27,7 @@ use p02_wire::{
 use crate::connections::Linked;
 use crate::daemon::{Daemon, WeakDaemon, World, blocking};
 use crate::history;
-use crate::reconcile::runs;
+use crate::reconcile::{runs, settings_now};
 
 /// How long a store of hers is waited for, her phone's or her world's
 /// files, which a call of her tools holds a moment at most.
@@ -142,7 +142,7 @@ impl HerPhone {
             .iter()
             .map(|plugin| plugin.manifest().id())
             .find(|id| id.as_str() == PHONE_PLUGIN)
-            .filter(|_| runs(world, definition, PHONE_PLUGIN))
+            .filter(|_| runs(settings_now(world, definition).as_ref(), PHONE_PLUGIN))
             .ok_or_else(|| {
                 Unread::NoPhone(format!(
                     "{} has no phone: her settings switch it off.",

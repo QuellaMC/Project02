@@ -2476,7 +2476,7 @@
           "description": "Her world could not be read or written: it is as it was."
         }
       ],
-      "description": "What came of leaving her a thing: the thing as her world now holds it;\nor why it was not left."
+      "description": "What came of leaving her a thing: the thing as her world now holds it,\nin her language; or why it was not left."
     },
     "LeaveThingRefusal": {
       "oneOf": [
@@ -2515,6 +2515,11 @@
           "type": "string",
           "const": "no_room",
           "description": "The place holds the most things it can."
+        },
+        {
+          "type": "string",
+          "const": "not_translated",
+          "description": "Its name or its note could not be put into her language."
         }
       ]
     },
@@ -5132,14 +5137,14 @@
           "type": "string"
         },
         "name": {
-          "type": "string"
+          "$ref": "#/$defs/WorldWords"
         }
       },
       "required": [
         "id",
         "name"
       ],
-      "description": "A place or a thing as a line of the journal names it: by its id, and by\nthe name it had then."
+      "description": "A place or a thing as a line of the journal names it: by its id, and by\nthe name it had then, with the person's form that name had then beside\nit; or, for a line that kept none, that of the place or the thing of\nthat id while the world holds it by that name."
     },
     "WorldOutcome": {
       "oneOf": [
@@ -5203,7 +5208,7 @@
           "$ref": "#/$defs/Identifier"
         },
         "name": {
-          "type": "string"
+          "$ref": "#/$defs/WorldWords"
         },
         "icon": {
           "type": "string"
@@ -5249,7 +5254,7 @@
           "type": "string"
         },
         "name": {
-          "type": "string"
+          "$ref": "#/$defs/WorldWords"
         },
         "icon": {
           "type": "string"
@@ -5264,7 +5269,7 @@
           "$ref": "#/$defs/Timestamp"
         },
         "note": {
-          "type": "string"
+          "$ref": "#/$defs/WorldWords"
         },
         "seen": {
           "type": "array",
@@ -5291,7 +5296,7 @@
           "$ref": "#/$defs/Identifier"
         },
         "name": {
-          "type": "string"
+          "$ref": "#/$defs/WorldWords"
         },
         "places": {
           "type": "array",
@@ -5327,6 +5332,24 @@
         "kinds"
       ],
       "description": "Everything a person sees of a world: its id and name; its places in\ntheir order, each with its things in the order they came; who is where\nand since when, each character the home has by her display name; the\nnewest 200 lines of its journal, newest first; and the kinds a thing\ncan be left as."
+    },
+    "WorldWords": {
+      "type": "object",
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "written": {
+          "type": "string"
+        },
+        "translation": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "description": "A name or a note of her world: `text`, as her world has it, which she\nreads; and, as a message carries it, the person's form beside it while\nthey read another language than hers: what they wrote, `written`, of a\nthing they left that her world has in her words, or her world's words\nput into theirs, `translation`. Words that are the same in both have\n`text` alone."
     }
   }
 }

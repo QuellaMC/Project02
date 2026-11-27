@@ -554,12 +554,12 @@ export type LayoutWhen = { field: Identifier, is: ReadonlyArray<string>, };
 export type LeaveThingBody = { name: string, kind: string, place: string, note?: string, };
 
 /**
- * What came of leaving her a thing: the thing as her world now holds it;
- * or why it was not left.
+ * What came of leaving her a thing: the thing as her world now holds it,
+ * in her language; or why it was not left.
  */
 export type LeaveThingOutcome = { "status": "ok", thing: WorldThing, } | { "status": "refused", reason: LeaveThingRefusal, message: string, } | { "status": "failed", message: string, };
 
-export type LeaveThingRefusal = "unknown_character" | "no_world" | "unknown_place" | "unknown_kind" | "invalid_name" | "invalid_note" | "no_room";
+export type LeaveThingRefusal = "unknown_character" | "no_world" | "unknown_place" | "unknown_kind" | "invalid_name" | "invalid_note" | "no_room" | "not_translated";
 
 /**
  * How a readout's reading moves, in milliseconds since the epoch.
@@ -1278,9 +1278,11 @@ export type WorldKind = { id: Identifier, name: string, icon: string, tint: stri
 
 /**
  * A place or a thing as a line of the journal names it: by its id, and by
- * the name it had then.
+ * the name it had then, with the person's form that name had then beside
+ * it; or, for a line that kept none, that of the place or the thing of
+ * that id while the world holds it by that name.
  */
-export type WorldNamed = { id: string, name: string, };
+export type WorldNamed = { id: string, name: WorldWords, };
 
 /**
  * The world a character lives in as it stands; or why it was not read.
@@ -1292,7 +1294,7 @@ export type WorldOutcome = { "status": "ok" } & WorldView | { "status": "refused
  * page's own set, which falls back for one it does not know, and the
  * things in it in the order they came.
  */
-export type WorldPlace = { id: Identifier, name: string, icon: string, tint: string, things: ReadonlyArray<WorldThing>, };
+export type WorldPlace = { id: Identifier, name: WorldWords, icon: string, tint: string, things: ReadonlyArray<WorldThing>, };
 
 export type WorldRefusal = "unknown_character" | "no_world";
 
@@ -1303,7 +1305,7 @@ export type WorldRefusal = "unknown_character" | "no_world";
  * have been told of it where it is. Until a character has, it is new to
  * her; what the world itself brought and what she made never are.
  */
-export type WorldThing = { id: string, name: string, icon: string, tint: string, from: WorldHand, came: Timestamp, note?: string, seen: ReadonlyArray<Identifier>, };
+export type WorldThing = { id: string, name: WorldWords, icon: string, tint: string, from: WorldHand, came: Timestamp, note?: WorldWords, seen: ReadonlyArray<Identifier>, };
 
 /**
  * Everything a person sees of a world: its id and name; its places in
@@ -1312,4 +1314,14 @@ export type WorldThing = { id: string, name: string, icon: string, tint: string,
  * newest 200 lines of its journal, newest first; and the kinds a thing
  * can be left as.
  */
-export type WorldView = { id: Identifier, name: string, places: ReadonlyArray<WorldPlace>, characters: ReadonlyArray<WorldCharacter>, journal: ReadonlyArray<WorldEntry>, kinds: ReadonlyArray<WorldKind>, };
+export type WorldView = { id: Identifier, name: WorldWords, places: ReadonlyArray<WorldPlace>, characters: ReadonlyArray<WorldCharacter>, journal: ReadonlyArray<WorldEntry>, kinds: ReadonlyArray<WorldKind>, };
+
+/**
+ * A name or a note of her world: `text`, as her world has it, which she
+ * reads; and, as a message carries it, the person's form beside it while
+ * they read another language than hers: what they wrote, `written`, of a
+ * thing they left that her world has in her words, or her world's words
+ * put into theirs, `translation`. Words that are the same in both have
+ * `text` alone.
+ */
+export type WorldWords = { text: string, written?: string, translation?: string, };

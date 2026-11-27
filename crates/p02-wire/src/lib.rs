@@ -70,5 +70,5 @@ pub use text::{BotUsername, ParseBotUsernameError, ParseShortError, ParseTextErr
 pub use world::{
     LeaveThingBody, LeaveThingOutcome, LeaveThingRefusal, RemoveThingOutcome, RemoveThingRefusal,
     WorldCharacter, WorldDeed, WorldEntry, WorldHand, WorldKind, WorldNamed, WorldOutcome,
-    WorldPlace, WorldRefusal, WorldThing, WorldView,
+    WorldPlace, WorldRefusal, WorldThing, WorldView, WorldWords,
 };

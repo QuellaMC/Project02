@@ -314,21 +314,30 @@ At `/?world=<character id>` the same bundle draws her world's window, a
 third surface, with its own value and rules in `world.ts`, pure and tested
 in Node, its own session in `world-session.ts`, and `world-window.tsx`
 drawing it. It reads her world when it opens, when the stream says
-`world_changed` for it or comes back, and as a turn of a character who
-lives there begins and ends, since she is told then what is around her,
-which is what makes a thing seen, and nothing says so; only the newest read
-lands. Now shows each place somebody is in, who is there since when and
-what is there, the things the person left that nobody living there has
-seen, and the journal's newest four lines; Places, each place in its order,
-who is there, its first two things, how many more, and New; a place, who
-is here and its things; the Journal, its lines by day, as the chat words a
-day. A thing's card says where it is, whom it is from and when, or the
-world it came with, and whether she has seen it, and Remove asks again in
-place before it removes. Leave Something leaves her a thing of one of the
-world's kinds, Gift, its first, at first, in the place being looked at,
-else where she is, with a note; what the daemon refuses is said above its
-button, and what was typed stays. Each is the person's own act, over the reference
-client, and her world is read again after it. A character the daemon does
+`world_changed` for it or comes back, as a turn of a character who lives
+there begins and ends, since she is told then what is around her, which
+is what makes a thing seen, and nothing says so, and whenever health
+changes, which her language and the person's move with; only the newest
+read lands. Now shows each place somebody is in, who is there since when
+and what is there, the things the person left that nobody living there
+has seen, and the journal's newest four lines; Places, each place in its
+order, who is there, its first two things, how many more, and New; a
+place, who is here and its things; the Journal, its lines by day, as the
+chat words a day. A thing's card says where it is, whom it is from and
+when, or the world it came with, and whether she has seen it, and Remove
+asks again in place before it removes. Leave Something leaves her a thing
+of one of the world's kinds, Gift, its first, at first, in the place
+being looked at, else where she is, with a note, its boxes taking no more
+than a name and a note may hold; what the daemon refuses, such as words
+that could not be put into her language, is said above its button, and
+what was typed stays. Each is the person's own act, over the reference
+client, and her world is read again after it. With a character who speaks
+another language, as health says, each name and note is the person's form
+of it where it has one, everywhere, and her own words stand under it
+where the design has room: under the name at the head of a place and of a
+thing's card, a size smaller in the secondary colour, and under a note
+past a hairline, as a bubble shows a translation. What is in her language
+is marked with it, as the chat marks hers. A character the daemon does
 not know, or who has no world, is said in the daemon's sentence on the
 panel.
 

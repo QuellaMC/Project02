@@ -1,4 +1,4 @@
-import {expect, type Page} from '@playwright/test';
+import {expect, type Locator, type Page} from '@playwright/test';
 
 import {startDaemon, type Daemon} from '../conformance/harness/daemon.ts';
 import {
@@ -8,6 +8,7 @@ import {
 } from '../conformance/harness/home.ts';
 import {
   calling,
+  completion,
   reply,
   startModelServer,
   type ModelServer,
@@ -33,6 +34,57 @@ function portHome(model: ModelServer): string {
     },
     'character-data': {mira: quiet, nova: quiet},
   });
+}
+
+/** The world Kana's package brings, in her language: her room, with a bed in it, and a café. */
+const minato = {
+  id: 'minato',
+  name: '港町',
+  places: [
+    {
+      id: 'heya',
+      name: '部屋',
+      icon: 'bed',
+      tint: 'indigo',
+      things: [{name: 'ベッド', icon: 'bed', tint: 'indigo'}],
+    },
+    {id: 'kissa', name: '喫茶店', icon: 'cup', tint: 'brown'},
+  ],
+};
+
+/** Minato's names in English, in the order her translator is asked for them: the world's, then each place's and its things'. */
+const inEnglish = completion(
+  JSON.stringify(['The Harbour Town', 'Her Room', 'Bed', 'The Café']),
+);
+
+/** A home where Kana, whose package says she speaks Japanese and brings Minato, answers through `model`, her heartbeat off. */
+function minatoHome(model: ModelServer): string {
+  return createHome({
+    'config.json': configJson({project02: model.settings}),
+    characters: {
+      kana: {
+        'project02.character.json': characterJson('kana', 'Kana', {
+          identity: {id: 'kana', displayName: 'Kana', language: 'ja'},
+          world: minato,
+        }),
+      },
+    },
+    'character-data': {
+      kana: {'config.json': configJson({project02: {heartbeat: 'off'}})},
+    },
+  });
+}
+
+/** Whether what `upper` finds is drawn whole above what `lower` finds. */
+async function above(upper: Locator, lower: Locator): Promise<boolean> {
+  const [top, bottom] = await Promise.all([
+    upper.boundingBox(),
+    lower.boundingBox(),
+  ]);
+
+  return (
+    top !== null && bottom !== null && bottom.y + 0.5 >= top.y + top.height
+  );
 }
 
 /** Her chat, opened from the roster. */
@@ -243,28 +295,92 @@ test("page.world-thing: a thing's card says what it is, its note, where it is, w
   ).toHaveText(['WhereThe Flat', 'Came withThe Port']);
 });
 
-test('page.world-refused: what the daemon refuses is said in the sheet for leaving something, which keeps what was typed', async ({
+test("page.world-both-forms: for a character who speaks another language than the person, her world's window reads in theirs: the head of a place's page and of a thing's card each give its name with her own words under it, marked with her language, and a note the person left gives what they wrote with hers under it", async ({
   page,
 }) => {
   const model = await startModelServer();
-  const daemon = await startDaemon(portHome(model));
-  const sheet = page.getByRole('dialog', {name: 'Leave Something'});
-  const note = 'For the window. '.repeat(20).trim();
+  const daemon = await startDaemon(minatoHome(model));
+  const head = page.locator('.world-place-top');
 
-  await page.goto(worldOf(daemon, 'mira'));
-  await page.getByRole('button', {name: 'Leave Something'}).click();
-  await sheet.getByRole('textbox', {name: 'What it is'}).fill('Tulips');
-  await sheet.getByRole('textbox', {name: 'A note with it'}).fill(note);
-  await sheet.getByRole('button', {name: 'Leave It in The Flat'}).click();
-  await expect(sheet.getByRole('alert')).toHaveText(
-    'A note is not blank, and is 280 characters at most.',
+  model.answer(
+    completion(JSON.stringify(['ハチミツの瓶', 'トーストにどうぞ。'])),
+    inEnglish,
   );
-  await expect(sheet.getByRole('textbox', {name: 'What it is'})).toHaveValue(
-    'Tulips',
+  await wireOf(daemon).leaveThing('kana', {
+    name: 'A jar of honey',
+    kind: 'food',
+    place: 'heya',
+    note: 'For your toast.',
+  });
+  await page.goto(worldOf(daemon, 'kana'));
+  await expect(page).toHaveTitle('The Harbour Town');
+  await tab(page, 'Places').click();
+  await page.getByRole('button', {name: /^Her Room/u}).click();
+  await expect(head.getByRole('heading', {name: 'Her Room'})).toBeVisible();
+  await expect(head.locator('[lang="ja"]')).toHaveText(['部屋']);
+  expect(await above(head.getByRole('heading'), head.locator('[lang]'))).toBe(
+    true,
   );
+  // A row gives the person's form alone.
   await expect(
-    sheet.getByRole('textbox', {name: 'A note with it'}),
-  ).toHaveValue(note);
+    page.getByRole('button', {name: 'A jar of honey Not seen yet'}),
+  ).toBeVisible();
+  await expect(page.locator('.ui-row [lang]')).toHaveCount(0);
+
+  for (const [name, hers] of [
+    ['Bed', ['ベッド']],
+    ['A jar of honey Not seen yet', ['ハチミツの瓶', 'トーストにどうぞ。']],
+  ] as const) {
+    await page.getByRole('button', {name}).click();
+
+    const card = page.getByRole('dialog');
+
+    await expect(card.locator('[lang="ja"]')).toHaveText(hers);
+    expect(
+      await above(card.getByRole('heading'), card.locator('.world-hers')),
+    ).toBe(true);
+    await card.getByRole('button', {name: 'Close'}).click();
+  }
+
+  await page.getByRole('button', {name: 'A jar of honey Not seen yet'}).click();
+  await expect(page.locator('.world-note p')).toHaveText([
+    'For your toast.',
+    'トーストにどうぞ。',
+  ]);
+  expect(
+    await above(
+      page.locator('.world-note p').first(),
+      page.locator('.world-note-hers'),
+    ),
+  ).toBe(true);
+});
+
+test("page.world-not-translated: what could not be put into her language is not left, which the sheet for leaving something says in the daemon's sentence, keeping what was typed; its boxes take no more than a name and a note may hold", async ({
+  page,
+}) => {
+  const model = await startModelServer();
+  const daemon = await startDaemon(minatoHome(model));
+  const sheet = page.getByRole('dialog', {name: 'Leave Something'});
+  const name = sheet.getByRole('textbox', {name: 'What it is'});
+  const note = sheet.getByRole('textbox', {name: 'A note with it'});
+
+  model.answer(inEnglish, {
+    status: 400,
+    body: {error: {message: 'No translations today.'}},
+  });
+  await page.goto(worldOf(daemon, 'kana'));
+  await expect(page).toHaveTitle('The Harbour Town');
+  await page.getByRole('button', {name: 'Leave Something'}).click();
+  await expect(name).toHaveAttribute('maxlength', '128');
+  await expect(note).toHaveAttribute('maxlength', '280');
+  await name.fill('Tulips');
+  await note.fill('For the window.');
+  await sheet.getByRole('button', {name: 'Leave It in Her Room'}).click();
+  await expect(sheet.getByRole('alert')).toHaveText(
+    'It was not left, because it could not be put into her language: NVIDIA provider error: No translations today.',
+  );
+  await expect(name).toHaveValue('Tulips');
+  await expect(note).toHaveValue('For the window.');
 });
 
 test('page.world-journal: the journal says what happened by day, newest first: who did it, what, and the name it was about', async ({

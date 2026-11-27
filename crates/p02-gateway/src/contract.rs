@@ -40,6 +40,7 @@ use p02_wire::{
     StoreAppStatus, StoreOutcome, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal,
     TurnStamp, TurnStatus, ViewRefusal, WorldCharacter, WorldDeed, WorldEntry, WorldHand,
     WorldKind, WorldNamed, WorldOutcome, WorldPlace, WorldRefusal, WorldThing, WorldView,
+    WorldWords,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -1014,12 +1015,26 @@ fn written() -> Vec<(&'static str, Value)> {
                 message: "Her world could not be reached: the disk is gone.".to_owned(),
             },
         ),
-        value("LeaveThingOutcome", &LeaveThingOutcome::Ok { thing: honey }),
+        value(
+            "LeaveThingOutcome",
+            &LeaveThingOutcome::Ok {
+                thing: Box::new(honey),
+            },
+        ),
         value(
             "LeaveThingOutcome",
             &LeaveThingOutcome::Refused {
                 reason: LeaveThingRefusal::NoRoom,
                 message: "The Flat has room for no more things: it holds 64.".to_owned(),
+            },
+        ),
+        value(
+            "LeaveThingOutcome",
+            &LeaveThingOutcome::Refused {
+                reason: LeaveThingRefusal::NotTranslated,
+                message: "It was not left, because it could not be put into her language: \
+                          NVIDIA provider error: No translations today."
+                    .to_owned(),
             },
         ),
         value("RemoveThingOutcome", &RemoveThingOutcome::Ok),
@@ -1211,16 +1226,23 @@ fn phone() -> (PhoneApp, Screen) {
     )
 }
 
-/// Mira's world as a person sees it: a thing from each hand, the person's
-/// with their note and seen by her, where she is, a line of the journal
-/// about a thing and one about a place alone, and a kind; and the thing the
-/// person left.
+/// Mira's world as a person sees it, she speaking Japanese and the person
+/// reading English: a thing from each hand, the person's with their note,
+/// each in her words with what they wrote, and seen by her, the others with
+/// the person's words for their names, but one that is the same in both;
+/// where she is, a line of the journal about a thing and one about a place
+/// alone, and a kind; and the thing the person left.
 fn world() -> (WorldView, WorldThing) {
     let id = |text: &str| Identifier::new(text).unwrap();
     let at = Timestamp::new("2026-11-26T09:00:00.000Z").unwrap();
-    let thing = |id: &str, name: &str, from: WorldHand| WorldThing {
+    let words = |text: &str, written: Option<&str>, translation: Option<&str>| WorldWords {
+        text: text.to_owned(),
+        written: written.map(str::to_owned),
+        translation: translation.map(str::to_owned),
+    };
+    let thing = |id: &str, name: WorldWords, from: WorldHand| WorldThing {
         id: id.to_owned(),
-        name: name.to_owned(),
+        name,
         icon: "cup".to_owned(),
         tint: "brown".to_owned(),
         from,
@@ -1231,37 +1253,38 @@ fn world() -> (WorldView, WorldThing) {
     let honey = WorldThing {
         icon: "fork".to_owned(),
         tint: "orange".to_owned(),
-        note: Some("For your toast.".to_owned()),
+        note: Some(words("トーストにどうぞ。", Some("For your toast."), None)),
         seen: vec![id("mira")],
         ..thing(
             "5d1b6c1e-2f8a-4c4e-9a59-0f4f3c2b8e11",
-            "A jar of honey",
+            words("ハチミツの瓶", Some("A jar of honey"), None),
             WorldHand::Person,
         )
     };
-    let named = |id: &str, name: &str| WorldNamed {
+    let flat = words("部屋", None, Some("The Flat"));
+    let named = |id: &str, name: &WorldWords| WorldNamed {
         id: id.to_owned(),
-        name: name.to_owned(),
+        name: name.clone(),
     };
 
     (
         WorldView {
             id: id("the-port"),
-            name: "The Port".to_owned(),
+            name: words("港町", None, Some("The Port")),
             places: vec![WorldPlace {
                 id: id("flat"),
-                name: "The Flat".to_owned(),
+                name: flat.clone(),
                 icon: "bed".to_owned(),
                 tint: "indigo".to_owned(),
                 things: vec![
                     thing(
                         "0b6f3d0a-6c1a-4d8e-8f0e-1d2c3b4a5f60",
-                        "Teapot",
+                        words("ティーポット", None, Some("Teapot")),
                         WorldHand::World,
                     ),
                     thing(
                         "7e2a9c44-1b3d-4f5e-a6b7-c8d9e0f1a2b3",
-                        "Tea",
+                        words("Tofu", None, None),
                         WorldHand::Character { id: id("mira") },
                     ),
                     honey.clone(),
@@ -1278,14 +1301,14 @@ fn world() -> (WorldView, WorldThing) {
                     when: at.clone(),
                     who: WorldHand::Person,
                     what: WorldDeed::Left,
-                    place: named("flat", "The Flat"),
+                    place: named("flat", &flat),
                     thing: Some(named(&honey.id, &honey.name)),
                 },
                 WorldEntry {
                     when: at.clone(),
                     who: WorldHand::Character { id: id("mira") },
                     what: WorldDeed::Went,
-                    place: named("flat", "The Flat"),
+                    place: named("flat", &flat),
                     thing: None,
                 },
             ],
