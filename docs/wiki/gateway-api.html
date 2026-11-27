@@ -365,7 +365,8 @@
               <code>displayName</code>, <code>version</code>,
               <code>about</code> when the file has one line about her,
               <code>comesWith</code> — each plugin on by default or asked for
-              by her file, in the plugin list's order, as
+              by her file, her world's when it brings one, in the plugin
+              list's order, as
               <code>{kind: "plugin", id, displayName}</code> by the name a page
               shows, then each one her file asks for that this build lacks, as
               <code>{kind: "unknown", id}</code> —
@@ -538,6 +539,49 @@
               or one the app does not sign in with,
               <code>unknown_model</code>, for a model it does not offer); or
               <code>failed</code>. Described below.
+            </td>
+          </tr>
+          <tr>
+            <td>her world</td>
+            <td><code>GET /api/characters/:id/world</code></td>
+            <td>
+              → <code>WorldOutcome</code>: <code>ok</code> with the world's
+              <code>id</code> and <code>name</code>, its
+              <code>places</code> with their <code>things</code>, who is
+              where as <code>characters</code>, its <code>journal</code>,
+              newest first, and the <code>kinds</code> a thing can be left
+              as, each name and note in both forms when she speaks another
+              language than the person; <code>refused</code>
+              (<code>unknown_character</code>, <code>no_world</code>, when
+              her package brings none or her settings do not run it); or
+              <code>failed</code>. Read from the home whether she is ready,
+              stopped or failed. Described below.
+            </td>
+          </tr>
+          <tr>
+            <td>leave a thing</td>
+            <td><code>POST /api/characters/:id/world/things</code></td>
+            <td>
+              <code>{name, kind, place, note?}</code> →
+              <code>LeaveThingOutcome</code>: <code>ok</code> with the
+              <code>thing</code> as the view gives it; <code>refused</code>
+              (<code>unknown_character</code>, <code>no_world</code>,
+              <code>unknown_place</code>, <code>unknown_kind</code>,
+              <code>invalid_name</code>, <code>invalid_note</code>,
+              <code>no_room</code>, <code>not_translated</code>), nothing
+              left; or <code>failed</code>, her world as it was. Then
+              <code>world_changed</code>. Described below.
+            </td>
+          </tr>
+          <tr>
+            <td>remove a thing</td>
+            <td><code>DELETE /api/characters/:id/world/things/:thing</code></td>
+            <td>
+              → <code>RemoveThingOutcome</code>: <code>ok</code>, the thing
+              gone whoever it was from; <code>refused</code>
+              (<code>unknown_character</code>, <code>no_world</code>,
+              <code>unknown_thing</code>), nothing removed; or
+              <code>failed</code>. Then <code>world_changed</code>.
             </td>
           </tr>
           <tr>
@@ -1060,6 +1104,13 @@ data: {…}</code></pre>
               Described below.
             </td>
           </tr>
+          <tr>
+            <td><code>world_changed</code></td>
+            <td>
+              A <code>world</code>, by its id: that world is to be read
+              again. Described below.
+            </td>
+          </tr>
         </tbody>
       </table>
 
@@ -1450,6 +1501,115 @@ data: {…}</code></pre>
         the turn ends.
       </p>
 
+      <h2>Her world</h2>
+
+      <p class="rule">
+        Her world is hers to live in and the person's to see: they leave her
+        things and take things away, and nothing tells her. She finds what
+        was left when she is next told what is around her there.
+      </p>
+
+      <p>
+        <code>GET /api/characters/:id/world</code> reads the world her
+        package brings, as the home keeps it, whether she runs or not; she is
+        at its first place from then on while she has none there yet. Every
+        name and note in it, the world's <code>name</code>, a place's and a
+        thing's, a thing's <code>note</code> and the names a line of the
+        journal gives, is <code>{text, written?, translation?}</code>, as a
+        message carries its two forms: <code>text</code> as her world has
+        it, which she reads, and, while the person reads another language
+        than hers, what they wrote, <code>written</code>, of a thing they
+        left, or her world's words put into theirs,
+        <code>translation</code>; words the same in both have
+        <code>text</code> alone. Its
+        <code>places</code> come in their order, each with its
+        <code>id</code>, <code>name</code>, <code>icon</code> and
+        <code>tint</code>, names of the page's own set, which falls back for
+        one it does not know, and its <code>things</code> in the order they
+        came. A thing has the <code>id</code> the world gave it, its
+        <code>name</code>, <code>icon</code> and <code>tint</code>, whom it
+        is <code>from</code>, the moment it <code>came</code>, the person's
+        <code>note</code> when they wrote one, and <code>seen</code>: for a
+        thing the person left, the characters who have been told of it where
+        it is, by id. Until a character has, it is new to her; what the world
+        itself brought and what she made never are. Whom a thing is from, and
+        who did what in the journal, is <code>{kind: "world"}</code>,
+        <code>{kind: "person"}</code> or
+        <code>{kind: "character", id}</code>. <code>characters</code> says
+        who lives there: each by her <code>id</code> and
+        <code>displayName</code>, the <code>place</code> she is in by its id,
+        and <code>since</code> when; one the home no longer has is left out.
+        <code>journal</code> is the newest 200 lines of what happened, newest
+        first, each its moment <code>when</code>, <code>who</code>, what
+        happened as <code>what</code> — <code>went</code>,
+        <code>made</code>, <code>used</code>, <code>left</code> or
+        <code>removed</code> — and the <code>place</code> and the
+        <code>thing</code> it was about, each by its <code>id</code> and the
+        <code>name</code> it had then, with the person's form that name had
+        then, so a thing removed keeps it; a line that kept none, written
+        before the person's words for that name were made, has those of the
+        place or the thing of that id while the world holds it by that
+        name.
+        <code>kinds</code> are the kinds a
+        thing is left as, each its <code>id</code>, the <code>name</code> a
+        person reads, its <code>icon</code> and its <code>tint</code>:
+        Gift, Food, Drink, Flower, Book, Clothing, Letter and Other.
+      </p>
+
+      <p>
+        The person leaves her a thing with
+        <code>POST /api/characters/:id/world/things</code>: its
+        <code>name</code>, one line of 128 characters at most; its
+        <code>kind</code>, by a kind's id; the <code>place</code> it is left
+        in, by its id; and, when they write one, a <code>note</code>, not
+        blank and 280 characters at most, which may have several lines. A
+        place holds 64 things. The person removes a thing by its id, whoever
+        it is from. Each is their own act, which asks nobody, and is a line
+        of the journal. Nothing tells her of either: no moment of hers
+        begins and nothing is put before her. The first time she is told
+        what is where a thing the person left is, before she thinks or as she
+        arrives there, it is said to her as not there before, with the
+        note, and from then she has seen it; she is never told who left it.
+      </p>
+
+      <p>
+        A character who speaks another language than the person, by the
+        rule that says so for their messages, lives in her world in hers.
+        What the person leaves is put into her language before it is left,
+        its name and its note in one request to her translator, which reads
+        them as a JSON array of strings and answers one: her world keeps her
+        words, with what the person wrote as <code>written</code> beside
+        each that is not; words that cannot be put into her language leave
+        nothing, refused <code>not_translated</code>, "It was not left,
+        because it could not be put into her language:" and why. A read
+        gives each name the person did not write, the world's, a place's
+        and a thing's from the world itself or her hand, with its
+        <code>translation</code>: those missing are made in one request,
+        into the language the person chose, else that of their newest
+        message, or English while they never wrote, and kept with her world
+        with the language the person's setting said, so the next read asks
+        nothing; the person choosing another language makes them all again,
+        and on Automatic those kept stand. A read whose words cannot be
+        made answers her world as written, and
+        <code>maintenance_failed</code> says why; the next read tries again.
+        She reads none of it: what she is told of her world, and what her
+        tools answer, are her words alone. No model is asked while her
+        world's files are held, and for a character no translator stands
+        between, a read asks none.
+      </p>
+
+      <p>
+        <code>world_changed</code> names a world, by its id, which every
+        character who lives there shares: it is to be read again after a
+        call of hers to one of its tools came back accepted, and once the
+        person left a thing in it or removed one. It is no part of
+        <code>ready</code>: a surface showing her world reads it again then,
+        and on every <code>ready</code>. What she has seen changes as she is
+        told what is around her, before she thinks, and nothing says so: the
+        web page's window onto her world reads it again too as a turn of a
+        character who lives there begins and ends.
+      </p>
+
       <h2>Signing in to a ChatGPT plan</h2>
 
       <p class="rule">
@@ -1636,7 +1796,9 @@ data: {…}</code></pre>
         settings say no language, or the one the person chose to read, is
         never translated: her model answers in the language the person
         writes. Her summary in health carries the tag as her settings hold
-        it, as <code>language</code>, absent when they hold none.
+        it, as <code>language</code>, absent when they hold none. Her world
+        is in her language too, and the person reads it in theirs, as Her
+        world above says.
       </p>
 
       <h2>What a client never has to notice</h2>

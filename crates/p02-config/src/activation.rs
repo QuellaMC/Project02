@@ -1,12 +1,11 @@
 //! What a character's settings make of her plugins beyond each section's
 //! own judgment: the plugins her package expects that she does not run,
-//! and those she has switched on before their setup is finished.
-
-use std::collections::BTreeSet;
+//! the world's when her package brings no world, and those she has
+//! switched on before their setup is finished.
 
 use p02_characters::CharacterDefinition;
-use p02_shared::Identifier;
 use p02_wire::{Code, Diagnostic, Namespace};
+use p02_world::WORLD_PLUGIN;
 
 use crate::resolve::{Section, Status};
 
@@ -18,21 +17,15 @@ pub(crate) fn expected(
     character: &CharacterDefinition,
     resolved: &[Section<'_>],
 ) -> Vec<Diagnostic> {
-    let expected: BTreeSet<&Identifier> = character
-        .plugins
-        .required()
-        .iter()
-        .chain(character.plugins.recommended())
-        .collect();
-
-    expected
+    character
+        .expected_plugins()
         .into_iter()
         .filter_map(|plugin| {
             let status = resolved
                 .iter()
                 .find(|section| {
                     section.declared.namespace() == Namespace::Plugins
-                        && section.declared.id() == plugin
+                        && section.declared.id() == &plugin
                 })
                 .map(|section| section.status);
             let why = match status {
@@ -55,6 +48,39 @@ pub(crate) fn expected(
             )
         })
         .collect()
+}
+
+/// The world's plugin, when `character`'s package brings no world and
+/// `resolved`, her sections, switch it on all the same: she lives through
+/// it in the world her package brings, so it does not run, and a warning
+/// says why.
+pub(crate) fn worldless(
+    character: &CharacterDefinition,
+    resolved: &mut [Section<'_>],
+) -> Option<Diagnostic> {
+    let section = resolved.iter_mut().find(|section| {
+        section.declared.namespace() == Namespace::Plugins
+            && section.declared.id().as_str() == WORLD_PLUGIN
+    })?;
+
+    if character.world.is_some() || !matches!(section.status, Status::Active(_)) {
+        return None;
+    }
+
+    let declared = section.declared;
+
+    section.status = Status::Disabled("no_world");
+    Some(
+        Diagnostic::warning(
+            Code::PluginNotRunning,
+            format!(
+                "Her package brings no world, so she is running without {}.",
+                declared.display_name()
+            ),
+        )
+        .at(declared.path())
+        .in_section(declared.namespace(), declared.id().as_str()),
+    )
 }
 
 /// The plugins she has switched on before their setup is finished,

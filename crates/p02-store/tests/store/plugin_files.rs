@@ -139,6 +139,52 @@ fn each_plugin_keeps_its_own_files_and_its_own_lease() {
     );
 }
 
+/// A world's files are the home's, not a character's: each handle on them,
+/// as every character living there and the person's window hold one,
+/// leases the one lock of the home's they have, and what one writes under
+/// it the next reads.
+#[test]
+fn a_worlds_files_are_the_homes_under_one_lease_whoever_holds_them() {
+    let world = World::new();
+    let (hers, theirs) = (
+        world.home.world_files(&id("the-port")),
+        world.home.world_files(&id("the-port")),
+    );
+    let mut held = leased(hers.as_ref());
+
+    held.write_json("places/flat.json", &json!({"things": []}))
+        .unwrap();
+    assert_eq!(
+        code(
+            &theirs
+                .lease(Instant::now() + Duration::from_millis(100))
+                .unwrap_err()
+        ),
+        "storage_busy"
+    );
+    assert_eq!(
+        leased(store(&world, "world").as_ref())
+            .read_json("places/flat.json")
+            .unwrap(),
+        None
+    );
+    drop(held);
+
+    assert_eq!(
+        leased(theirs.as_ref())
+            .read_json("places/flat.json")
+            .unwrap(),
+        Some(json!({"things": []}))
+    );
+    assert!(
+        world
+            .home
+            .root()
+            .join("world-data/the-port/places/flat.json")
+            .is_file()
+    );
+}
+
 #[test]
 fn a_path_that_could_leave_the_store_or_name_what_it_keeps_is_refused() {
     let world = World::new();

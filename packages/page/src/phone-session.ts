@@ -9,7 +9,7 @@
  * follows on the stream. Browser-only like the chat's session: the
  * browser suite is its cover.
  */
-import {tellTheChat} from './phone-link.ts';
+import {framed} from './her-windows.ts';
 import {
   askRaised,
   askSettled,
@@ -18,7 +18,6 @@ import {
   conversationRead,
   conversationUnopened,
   conversationUnread,
-  framed,
   healthSaid,
   initialPhoneState,
   isMessaging,
@@ -32,28 +31,16 @@ import {
   type ViewLook,
 } from './phone.ts';
 import {streamLost, streamResumed} from './store.ts';
-import {
-  clientFor,
-  createValue,
-  follow,
-  problem,
-  type Value,
-} from './surface.ts';
-import {findWindowCalls, type WindowCalls} from './window-calls.ts';
+import {clientFor, createValue, follow, problem} from './surface.ts';
+import {frameOf, tellTheChat, type FrameVerbs} from './window-link.ts';
 
-export type PhoneSession = {
+export type PhoneSession = FrameVerbs & {
   readonly getState: () => PhoneState;
   readonly subscribe: (listener: () => void) => () => void;
   /** Opens a view of one of her apps for the person. */
   readonly look: (appId: string, viewId: string) => void;
   /** Her home screen, for the person. */
   readonly goHome: () => void;
-  /** Starts moving the window with the pointer, where the page draws its frame. */
-  readonly startDragging: () => void;
-  /** Keeps the window on top of other windows, or no longer. */
-  readonly pin: (pinned: boolean) => void;
-  /** Closes the window. */
-  readonly close: () => void;
 };
 
 /** A minute's length; the window reads what it shows again at each minute's turn. */
@@ -66,10 +53,12 @@ export function createPhoneSession(
   const {getState, subscribe, apply} = createValue(
     initialPhoneState(characterId),
   );
-  const frame = frameOf(apply);
+  const frame = frameOf(pinned => {
+    apply(current => framed(current, pinned));
+  });
   const client = clientFor(address);
 
-  tellTheChat(characterId, frame.close);
+  tellTheChat('phone', characterId, frame.close);
 
   // An address that can never work: the window says so and does nothing else.
   if (typeof client === 'string') {
@@ -269,55 +258,5 @@ export function createPhoneSession(
       apply(current => looked(current, {kind: 'home'}));
     },
     ...frame,
-  };
-}
-
-/**
- * What the person does with the window her phone is in. Where the window
- * answers the desktop app's calls it has no frame of its own, and the page
- * draws one: its bar moves the window, its pin keeps it on top of others,
- * and closing it is the app's. Elsewhere a page closes the window a script
- * opened.
- */
-function frameOf(
-  apply: Value<PhoneState>['apply'],
-): Pick<PhoneSession, 'startDragging' | 'pin' | 'close'> {
-  const found = findWindowCalls(window);
-  let calls: WindowCalls | undefined;
-
-  void found.then(answered => {
-    calls = answered;
-
-    if (answered !== undefined) {
-      apply(current => framed(current, answered.pinned));
-    }
-  });
-
-  return {
-    // A call the window refuses changes nothing of it.
-    startDragging() {
-      void calls?.startDragging().catch(() => undefined);
-    },
-    pin(pinned) {
-      void calls?.pin(pinned).then(
-        () => {
-          apply(current => framed(current, pinned));
-        },
-        () => undefined,
-      );
-    },
-    // Once the window has said what it answers: a page closing a window
-    // of the app itself would leave the window there without it.
-    close() {
-      void found
-        .then(async answered => {
-          if (answered === undefined) {
-            window.close();
-          } else {
-            await answered.close();
-          }
-        })
-        .catch(() => undefined);
-    },
   };
 }

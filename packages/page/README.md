@@ -109,17 +109,18 @@ message of hers the chat shows, by the rule of `reads.ts`, pure and
 tested in Node: one read at a time, told once the daemon answered it and
 again later when it could not keep it or did not answer, and nothing it
 answers is said. Her phone's window never tells: it is her phone.
-Her chat's head has a Her Phone button unless the daemon says she has no
-phone. It opens her phone in the one window every character's phone
-shares, and closes it, and is pressed while that window shows hers: the
-window says whose phone it shows when it opens, when a chat asks and when
-it goes, over a channel of the page's origin (`phone-link.ts`). A browser
-that blocks that window is told so in a notice; in the desktop app, which
-opens the window itself and gives the page none, nothing is said. From a
-call of one of her phone's tools in a turn of hers, known by the plugin
-the stream names, until her next message or the turn's end, she is
-using her phone: the button carries a dot, and her thread says so in
-place of her typing.
+Her chat's head has Her World and Her Phone, each once the daemon says
+she has a world or a phone, by the rules of `her-windows.ts`, pure and
+tested in Node. Each opens hers in the one window every character's world,
+or phone, shares, and closes it, and is pressed while that window shows
+hers: a window of hers says whose it shows when it opens, when a chat asks
+and when it goes, over a channel of the page's origin (`window-link.ts`). A
+browser that blocks that window is told so in a notice; in the desktop app,
+which opens the window itself and gives the page none, nothing is said.
+From a call of one of her phone's tools in a turn of hers, known by the
+plugin the stream names, until her next message or the turn's end, she is
+using her phone: Her Phone carries a dot, and her thread says so in place
+of her typing. Nothing of her world shows in the chat.
 A restart of the daemon is a reconnect on the same address, and the next
 line goes through without a click. The browser suite under `tests/browser`
 drives the built page in Chromium against a real daemon.
@@ -307,15 +308,50 @@ A character the daemon does not know, or whose settings give her no phone,
 is said in the daemon's sentence where her phone would be.
 `phone-window.tsx` and `phone-device.tsx` draw it as the design draws an
 iPhone, with nothing painted around it, so a window that can show what is
-behind it does. They draw it with the page's shared parts, the `ui-`
-classes of `styles.css`: a panel and what scrolls on it, cards of rows,
-badges, round buttons, a floating tab bar and a window's own bar, laid out
-as Apple lays out words in round shapes by the rules at their head, so
-another window can be drawn with the same parts.
+behind it does.
+
+At `/?world=<character id>` the same bundle draws her world's window, a
+third surface, with its own value and rules in `world.ts`, pure and tested
+in Node, its own session in `world-session.ts`, and `world-window.tsx`
+drawing it. It reads her world when it opens, when the stream says
+`world_changed` for it or comes back, as a turn of a character who lives
+there begins and ends, since she is told then what is around her, which
+is what makes a thing seen, and nothing says so, and whenever health
+changes, which her language and the person's move with; only the newest
+read lands. Now shows each place somebody is in, who is there since when
+and what is there, the things the person left that nobody living there
+has seen, and the journal's newest four lines; Places, each place in its
+order, who is there, its first two things, how many more, and New; a
+place, who is here and its things; the Journal, its lines by day, as the
+chat words a day. A thing's card says where it is, whom it is from and
+when, or the world it came with, and whether she has seen it, and Remove
+asks again in place before it removes. Leave Something leaves her a thing
+of one of the world's kinds, Gift, its first, at first, in the place
+being looked at, else where she is, with a note, its boxes taking no more
+than a name and a note may hold; what the daemon refuses, such as words
+that could not be put into her language, is said above its button, and
+what was typed stays. Each is the person's own act, over the reference
+client, and her world is read again after it. With a character who speaks
+another language, as health says, each name and note is the person's form
+of it where it has one, everywhere, and her own words stand under it
+where the design has room: under the name at the head of a place and of a
+thing's card, a size smaller in the secondary colour, and under a note
+past a hairline, as a bubble shows a translation. What is in her language
+is marked with it, as the chat marks hers. A character the daemon does
+not know, or who has no world, is said in the daemon's sentence on the
+panel.
+
+Both windows are drawn with the page's shared parts, the `ui-` classes of
+`styles.css`: a panel and what scrolls on it, a view's top line, cards of
+rows, badges, tiles, tokens, chips, capsule and round buttons, a floating
+tab bar, a sheet over its veil, boxes to type in and a window's own bar,
+laid out as Apple lays out words in round shapes by the rules at their
+head. They share the bar itself, `window-bar.tsx`, with what each shows at
+its start and who it is about, the pin and the cross at its end.
 `window-calls.ts` tells, from the page's `window` and
 importing nothing of the app, whether a page is in the desktop app and what
-its window answers, and has the app show a notification. The app's window
-for her phone has no frame of its own and answers four window calls: there
+its window answers, and has the app show a notification. A window of hers
+in the app has no frame of its own and answers four window calls: there
 the bar moves the window, a pin keeps it on top of other windows as the
 window says it does, and closing it, from the bar or when the chat asks, is
 the app's. A browser's popup, which has a title bar of its own, answers

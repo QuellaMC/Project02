@@ -8,13 +8,13 @@ use p02_contracts::{Manifest, ManifestError, PluginFactory, ResolvedConfig, Setu
 use serde_json::Value;
 
 use crate::{
-    character_memory, character_state, management, mem0, phone, reply_style, session_history,
+    character_memory, character_state, management, mem0, phone, reply_style, session_history, world,
 };
 
 /// Each plugin by its id, with its descriptor, its check and its factory:
 /// the host's own first, then the packages in id order. Whatever lists or
 /// runs them keeps this order, the model's tools among them.
-const PLUGINS: [(&str, &str, SetupCheck, PluginFactory); 7] = [
+const PLUGINS: [(&str, &str, SetupCheck, PluginFactory); 8] = [
     (
         p02_contracts::HOST_PLUGIN,
         include_str!("management/project02.plugin.json"),
@@ -56,6 +56,12 @@ const PLUGINS: [(&str, &str, SetupCheck, PluginFactory); 7] = [
         include_str!("session_history/project02.plugin.json"),
         needs_nothing,
         session_history::create,
+    ),
+    (
+        p02_world::WORLD_PLUGIN,
+        include_str!("world/project02.plugin.json"),
+        needs_nothing,
+        world::create,
     ),
 ];
 
@@ -147,6 +153,7 @@ mod tests {
                 ("phone", true),
                 ("reply-style", false),
                 ("session-history", true),
+                ("world", false),
             ]
         );
         assert_eq!(

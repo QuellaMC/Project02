@@ -551,6 +551,9 @@ vocabulary! {
     /// What a plugin's manifest may request: a service the host hands it,
     /// or a declaration of what it does.
     AccessName {
+        /// The plugin's own files in the character's data; the world's
+        /// plugin is handed the files of the world she lives in, in the
+        /// home, in their place.
         CharacterFileStore = "character_file_store",
         SessionHistory = "session_history",
         PluginDatabase = "plugin_database",

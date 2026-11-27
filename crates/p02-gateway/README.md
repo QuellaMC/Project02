@@ -17,8 +17,9 @@ Nothing here prints, reads the environment or parses a flag.
 - **The stream** numbers each event once under the run's id and keeps the
   newest megabyte of frames: a client back with its last id gets `resumed`
   and what it missed, any other `ready`, the snapshot of health, what waits
-  and the turns running, exactly as of the frame it goes on from. A client
-  that does not take a frame within the grace is dropped.
+  and the turns running, exactly as of the frame it goes on from. Her phone
+  and a world are no part of it: a client reads them again on their own
+  events. A client that does not take a frame within the grace is dropped.
 - **The contract.** `cargo test -p p02-gateway contract` writes
   `packages/wire/src/contract/generated/` from p02-wire's types: the
   TypeScript the clients compile against, and the JSON Schema the

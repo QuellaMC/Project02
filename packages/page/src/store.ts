@@ -1,8 +1,8 @@
 /**
  * Everything a tab shows, as one value, and every change to it as a pure
  * function of the previous value and one input: the daemon's snapshot, an
- * event, a history page, a send, a line's end, what her phone's window
- * says of itself. The session applies them and React reads the value; a
+ * event, a history page, a send, a line's end, what a window of hers says
+ * of itself. The session applies them and React reads the value; a
  * reducer that changes nothing returns the value it was given. Nothing
  * here touches the DOM, so the rules a page follows are tested in Node
  * with the rest of the suite.
@@ -44,6 +44,7 @@ import {
   type Answered,
   type Asking,
 } from './dock.ts';
+import {noWindows, type HerWindows} from './her-windows.ts';
 
 export type Connection =
   | {readonly status: 'connecting'}
@@ -51,7 +52,7 @@ export type Connection =
   /** The address will never work: a dead token, a wrong protocol, no token. */
   | {readonly status: 'refused'; readonly message: string};
 
-/** A surface's value, the chat's or her phone's window's: how its connection stands moves the same way for each. */
+/** A surface's value, the chat's or a window of hers: how its connection stands moves the same way for each. */
 type Connected = {readonly connection: Connection};
 
 /**
@@ -276,63 +277,61 @@ export type Settings = {
 
 /**
  * The tab's value: what waits for the person's answer, whose rules are
- * dock.ts's, and everything else it shows.
+ * dock.ts's, the windows of hers beside the chat, whose rules are
+ * her-windows.ts's, and everything else it shows.
  */
-export type WebState = Asking & {
-  readonly connection: Connection;
-  readonly health?: GatewayHealth;
-  /** The one open DM. */
-  readonly thread?: Thread;
-  /** The settings window or the welcome, when one is open in front of the chat. */
-  readonly settings?: Settings;
-  /**
-   * The window's Advanced switch: what most people never need is shown
-   * while it is on. The window remembers it, not the home.
-   */
-  readonly advanced: boolean;
-  /** Client message id → a pending line; kept across a switch of threads. */
-  readonly pending: ReadonlyMap<string, PendingLine>;
-  /**
-   * Conversation id → what a person has typed there and not sent. Kept
-   * per conversation, so looking at another character loses nothing and a
-   * line that did not reach her goes back where it was written.
-   */
-  readonly composers: ReadonlyMap<string, string>;
-  /**
-   * Conversation id → the turn in progress there, for every conversation
-   * and not only the one on screen, as the daemon last said it: whose turn
-   * it is, and whether she is writing.
-   */
-  readonly turns: ReadonlyMap<string, RunningTurn>;
-  /**
-   * The conversations whose turn has her using her phone: a round of it
-   * called a tool of her phone, and her next message has not come. The
-   * page works it out from the stream alone, so a snapshot starts without.
-   */
-  readonly phoning: ReadonlySet<string>;
-  /** Whose phone her phone's window shows, as it last said; none once it said it went. */
-  readonly phoneWindow?: string | undefined;
-  /** The characters the daemon last said have no phone: their chat has no Her Phone button. */
-  readonly phoneless: ReadonlySet<string>;
-  /**
-   * The characters with a reply this tab has not shown: one committed to
-   * a conversation that was not the thread on screen, whatever began her
-   * turn. Her name carries a dot, one however many wait, until her chat
-   * opens. The tab's own, so a reload starts without.
-   */
-  readonly unseen: ReadonlySet<string>;
-  /**
-   * What the page has to say that belongs to no thread: how a turn did
-   * not complete, a confirmation that expired, a verb the daemon refused.
-   * A person who sees the whole roster is told about the whole roster, so
-   * a notice about a character names it, and a failure after a failure
-   * is a second notice — nothing the daemon said is overwritten by the
-   * next thing it says. The same sentence twice is one notice, since the
-   * answer and the stream both report a turn's end. The person's next act
-   * spends them all.
-   */
-  readonly notices: readonly string[];
-};
+export type WebState = Asking &
+  HerWindows & {
+    readonly connection: Connection;
+    readonly health?: GatewayHealth;
+    /** The one open DM. */
+    readonly thread?: Thread;
+    /** The settings window or the welcome, when one is open in front of the chat. */
+    readonly settings?: Settings;
+    /**
+     * The window's Advanced switch: what most people never need is shown
+     * while it is on. The window remembers it, not the home.
+     */
+    readonly advanced: boolean;
+    /** Client message id → a pending line; kept across a switch of threads. */
+    readonly pending: ReadonlyMap<string, PendingLine>;
+    /**
+     * Conversation id → what a person has typed there and not sent. Kept
+     * per conversation, so looking at another character loses nothing and a
+     * line that did not reach her goes back where it was written.
+     */
+    readonly composers: ReadonlyMap<string, string>;
+    /**
+     * Conversation id → the turn in progress there, for every conversation
+     * and not only the one on screen, as the daemon last said it: whose turn
+     * it is, and whether she is writing.
+     */
+    readonly turns: ReadonlyMap<string, RunningTurn>;
+    /**
+     * The conversations whose turn has her using her phone: a round of it
+     * called a tool of her phone, and her next message has not come. The
+     * page works it out from the stream alone, so a snapshot starts without.
+     */
+    readonly phoning: ReadonlySet<string>;
+    /**
+     * The characters with a reply this tab has not shown: one committed to
+     * a conversation that was not the thread on screen, whatever began her
+     * turn. Her name carries a dot, one however many wait, until her chat
+     * opens. The tab's own, so a reload starts without.
+     */
+    readonly unseen: ReadonlySet<string>;
+    /**
+     * What the page has to say that belongs to no thread: how a turn did
+     * not complete, a confirmation that expired, a verb the daemon refused.
+     * A person who sees the whole roster is told about the whole roster, so
+     * a notice about a character names it, and a failure after a failure
+     * is a second notice — nothing the daemon said is overwritten by the
+     * next thing it says. The same sentence twice is one notice, since the
+     * answer and the stream both report a turn's end. The person's next act
+     * spends them all.
+     */
+    readonly notices: readonly string[];
+  };
 
 /** How a line ended, from the daemon's answer to it or from the stream. */
 export type LineEnding = {
@@ -360,7 +359,7 @@ export const initialState: WebState = {
   composers: new Map(),
   turns: new Map(),
   phoning: new Set(),
-  phoneless: new Set(),
+  ...noWindows,
   unseen: new Set(),
   notices: [],
 };
@@ -993,57 +992,6 @@ function withoutPairing(state: WebState, code: string): WebState {
   };
 }
 
-/** Her phone's window says it shows her phone: her chat's Her Phone button is pressed. */
-export function phoneWindowShows(
-  state: WebState,
-  characterId: string,
-): WebState {
-  return state.phoneWindow === characterId
-    ? state
-    : {...state, phoneWindow: characterId};
-}
-
-/**
- * Her phone's window says her phone went from it. A window taken over for
- * another character's phone may say so before it says the phone it had
- * went: only the phone it last said it shows can go.
- */
-export function phoneWindowGone(
-  state: WebState,
-  characterId: string,
-): WebState {
-  return state.phoneWindow === characterId
-    ? {...state, phoneWindow: undefined}
-    : state;
-}
-
-/**
- * What the daemon answered when her phone was read: a refusal says she
- * has none, since her settings give her none or it does not know her, and
- * any other answer that she has one.
- */
-export function phoneAnswered(
-  state: WebState,
-  characterId: string,
-  outcome: PhoneOutcome,
-): WebState {
-  const none = outcome.status === 'refused';
-
-  if (state.phoneless.has(characterId) === none) {
-    return state;
-  }
-
-  const phoneless = new Set(state.phoneless);
-
-  if (none) {
-    phoneless.add(characterId);
-  } else {
-    phoneless.delete(characterId);
-  }
-
-  return {...state, phoneless};
-}
-
 export function applyEvent(state: WebState, event: GatewayEvent): WebState {
   switch (event.kind) {
     case 'state_changed':
@@ -1060,6 +1008,9 @@ export function applyEvent(state: WebState, event: GatewayEvent): WebState {
       return rosterSaid(state, event.health);
     case 'phone_changed':
       // What her phone holds is her phone's window's to read.
+      return state;
+    case 'world_changed':
+      // Nothing of her world shows in the chat.
       return state;
     case 'confirmation_requested':
       return state.confirmations.some(pending => pending.id === event.id)

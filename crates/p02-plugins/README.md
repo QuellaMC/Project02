@@ -1,7 +1,8 @@
 # p02-plugins
 
 The plugin host and the plugins compiled into the daemon. It depends on
-p02-contracts, p02-core, p02-memory, p02-phone, p02-shared and p02-wire.
+p02-contracts, p02-core, p02-memory, p02-phone, p02-shared, p02-wire and
+p02-world.
 
 Each plugin keeps its descriptor, `project02.plugin.json`, beside its
 code: the manifest of its hooks, its tools, its settings, the access it
@@ -11,16 +12,20 @@ id order, each with its factory and the check of whether its settings are
 enough to build it, made by the code the factory builds it with. A
 character's host is built from the plugins her settings switch on and that
 check finds set up, each by its factory from the values her settings give
-it and checked against its manifest, but for two the host builds itself:
-its own, linked to it, and her phone, handed the App Store's catalog, the
+it and checked against its manifest, but for three the host builds itself:
+its own, linked to it; her phone, handed the App Store's catalog, the
 internet her apps reach, the person's connections they ask a model
-through and her conversation with the person. When her settings change,
-she gets a host built anew.
+through and her conversation with the person; and her world's, handed the
+world her package brings and that world's files in the home. When her
+settings change, she gets a host built anew.
 
 The host's rules:
 
 - A plugin reaches what its manifest requests and nothing else, and a
-  tool name belongs to one plugin.
+  tool name belongs to one plugin. The store `character_file_store`
+  grants is the plugin's own in her data, but for the world's plugin,
+  which is handed the world's files in its place, under the same budget,
+  cancellation and read-only cases.
 - Each hook runs under its plugin's budget and failure policy: one
   before the model's call degrades or refuses the turn, a tool call is
   refused with a reason the model reads, and the hooks after a commit and
@@ -51,8 +56,20 @@ from the App Store through a fourth, which is prepared reading the catalog
 and fetching and judging the app, its preview saying whether the app wakes
 her, whether it reaches the internet, and the name of the person's account
 it uses there by a key or of the connection it asks a model through, and
-installs the text judged on their yes; and reply-style, the tone she
-writes in and a signoff, each character's own.
+installs the text judged on their yes; reply-style, the tone she
+writes in and a signoff, each character's own; and her world, which runs
+only for a character whose package brings one: before each call she is
+told where she is, what is there and where else she can go, each place by
+its name and its id, which puts her at its first place while she has none
+there yet, and she goes somewhere, makes something where she is and uses
+something there through three tools, `world.go`, `world.make` and
+`world.use`, each refused in a sentence she reads, with what is there when
+what she named is not. A thing the person left is said to her as not there
+before, with their note, the first time she is told what is where it is,
+before a call or in her going's answer, which is what makes it seen; from
+then it is said by its name alone, and using it gives the note again. She
+is never told who left a thing, and nothing tells her when one is left or
+removed.
 
 What a plugin says to her, in its tools, its notes and its answers, it
 says about her own situation, in the second person, and keeps beside its

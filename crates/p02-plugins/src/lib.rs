@@ -21,6 +21,7 @@ pub mod session_history;
 mod text;
 mod tool_call;
 mod turn;
+mod world;
 
 pub use before_call::{BeforeCallOutcome, PreparedContext, TurnRejection};
 pub use boundary::RecordLabelsError;

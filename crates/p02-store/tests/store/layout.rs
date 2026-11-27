@@ -99,6 +99,7 @@ fn an_unmarked_home_holding_history_or_more_than_a_home_holds_is_refused_and_lef
         )
         .unwrap();
         std::fs::create_dir(home.root().join("character-data")).unwrap();
+        std::fs::create_dir(home.root().join("world-data")).unwrap();
         std::fs::create_dir(home.root().join("conversations")).unwrap();
         link(elsewhere.path(), &home.root().join("characters"));
         home.check().unwrap();

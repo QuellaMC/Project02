@@ -28,16 +28,19 @@ use p02_wire::{
     ConfirmationAnswer, ConfirmationId, ConfirmationQuestion, ConnectorBot, ConnectorBotsBody,
     ConnectorBotsOutcome, ConnectorBotsRefusal, ConnectorConfigView, ConnectorPresence,
     ConnectorRefusal, ErrorBody, Event, GatewayMessage, Health, HistoryMessage, HistoryOutcome,
-    HistoryRefusal, LiveReading, MaintenanceFailure, OpenConversationBody, OpenOutcome,
-    OpenRefusal, PackageReport, PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome,
-    PairingRefusal, PairingRequest, PairingRequestBody, PairingSubject, PendingConfirmation,
-    PersonAccount, PhoneApp, PhoneDid, PhoneFront, PhoneOutcome, PhoneRead, PhoneRefusal,
-    PhoneRing, PlanAccount, ProtocolVersion, ReadBody, ReadOutcome, ReadRefusal, Ready, Refusal,
-    RemoveCharacterOutcome, RemoveCharacterRefusal, RoleModelProvider, RosterState, RunningTurn,
-    Screen, ScreenCell, ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal, ScreenRow,
-    ScreenTile, Settlement, StartOutcome, StartRefusal, StorageFailure, StoreApp, StoreAppStatus,
-    StoreOutcome, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal, TurnStamp, TurnStatus,
-    ViewRefusal,
+    HistoryRefusal, LeaveThingBody, LeaveThingOutcome, LeaveThingRefusal, LiveReading,
+    MaintenanceFailure, OpenConversationBody, OpenOutcome, OpenRefusal, PackageReport,
+    PackagesHealth, PairingAnswer, PairingDecision, PairingOutcome, PairingRefusal, PairingRequest,
+    PairingRequestBody, PairingSubject, PendingConfirmation, PersonAccount, PhoneApp, PhoneDid,
+    PhoneFront, PhoneOutcome, PhoneRead, PhoneRefusal, PhoneRing, PlanAccount, ProtocolVersion,
+    ReadBody, ReadOutcome, ReadRefusal, Ready, Refusal, RemoveCharacterOutcome,
+    RemoveCharacterRefusal, RemoveThingOutcome, RemoveThingRefusal, RoleModelProvider, RosterState,
+    RunningTurn, Screen, ScreenCell, ScreenItem, ScreenOutcome, ScreenRange, ScreenRefusal,
+    ScreenRow, ScreenTile, Settlement, StartOutcome, StartRefusal, StorageFailure, StoreApp,
+    StoreAppStatus, StoreOutcome, SubmitOutcome, ToolCallStatus, TurnProgress, TurnRefusal,
+    TurnStamp, TurnStatus, ViewRefusal, WorldCharacter, WorldDeed, WorldEntry, WorldHand,
+    WorldKind, WorldNamed, WorldOutcome, WorldPlace, WorldRefusal, WorldThing, WorldView,
+    WorldWords,
 };
 use schemars::generate::{SchemaGenerator, SchemaSettings};
 use schemars::transform::RecursiveTransform;
@@ -82,6 +85,9 @@ fn walk(wire: &mut impl Wire) {
     wire.written::<AppRemoveOutcome>();
     wire.written::<AppWakeOutcome>();
     wire.written::<AppSignInOutcome>();
+    wire.written::<WorldOutcome>();
+    wire.written::<LeaveThingOutcome>();
+    wire.written::<RemoveThingOutcome>();
     wire.written::<ChatgptOutcome>();
     wire.written::<ErrorBody>();
     wire.written::<Ready>();
@@ -99,6 +105,7 @@ fn walk(wire: &mut impl Wire) {
     wire.read::<ConfigTarget>();
     wire.read::<AppWakeBody>();
     wire.read::<AppSignInBody>();
+    wire.read::<LeaveThingBody>();
 }
 
 /// Every declaration the roots reach, by name.
@@ -369,6 +376,19 @@ fn read() -> Vec<(&'static str, Value)> {
             json!({"connection": "openai", "model": "gpt-6.1-terra"}),
         ),
         reads::<AppSignInBody>("AppSignInBody", json!({})),
+        reads::<LeaveThingBody>(
+            "LeaveThingBody",
+            json!({
+                "name": "A jar of honey",
+                "kind": "food",
+                "place": "flat",
+                "note": "For your toast.",
+            }),
+        ),
+        reads::<LeaveThingBody>(
+            "LeaveThingBody",
+            json!({"name": "Tulips", "kind": "flower", "place": "studio"}),
+        ),
     ]
 }
 
@@ -621,7 +641,11 @@ fn written() -> Vec<(&'static str, Value)> {
         Event::PhoneChanged {
             character_id: id("mira"),
         },
+        Event::WorldChanged {
+            world: id("the-port"),
+        },
     ];
+    let (port, honey) = world();
 
     let mut written = vec![
         read_back("GatewayHealth", &health),
@@ -977,6 +1001,50 @@ fn written() -> Vec<(&'static str, Value)> {
                     .to_owned(),
             },
         ),
+        value("WorldOutcome", &WorldOutcome::Ok(port)),
+        value(
+            "WorldOutcome",
+            &WorldOutcome::Refused {
+                reason: WorldRefusal::NoWorld,
+                message: "Zeta has no world.".to_owned(),
+            },
+        ),
+        value(
+            "WorldOutcome",
+            &WorldOutcome::Failed {
+                message: "Her world could not be reached: the disk is gone.".to_owned(),
+            },
+        ),
+        value(
+            "LeaveThingOutcome",
+            &LeaveThingOutcome::Ok {
+                thing: Box::new(honey),
+            },
+        ),
+        value(
+            "LeaveThingOutcome",
+            &LeaveThingOutcome::Refused {
+                reason: LeaveThingRefusal::NoRoom,
+                message: "The Flat has room for no more things: it holds 64.".to_owned(),
+            },
+        ),
+        value(
+            "LeaveThingOutcome",
+            &LeaveThingOutcome::Refused {
+                reason: LeaveThingRefusal::NotTranslated,
+                message: "It was not left, because it could not be put into her language: \
+                          NVIDIA provider error: No translations today."
+                    .to_owned(),
+            },
+        ),
+        value("RemoveThingOutcome", &RemoveThingOutcome::Ok),
+        value(
+            "RemoveThingOutcome",
+            &RemoveThingOutcome::Refused {
+                reason: RemoveThingRefusal::UnknownThing,
+                message: "There is no thing \"teapot\" in The Port.".to_owned(),
+            },
+        ),
         read_back(
             "ChatgptOutcome",
             &ChatgptOutcome::Ok {
@@ -1155,6 +1223,103 @@ fn phone() -> (PhoneApp, Screen) {
             ],
             page: words("reminders"),
         },
+    )
+}
+
+/// Mira's world as a person sees it, she speaking Japanese and the person
+/// reading English: a thing from each hand, the person's with their note,
+/// each in her words with what they wrote, and seen by her, the others with
+/// the person's words for their names, but one that is the same in both;
+/// where she is, a line of the journal about a thing and one about a place
+/// alone, and a kind; and the thing the person left.
+fn world() -> (WorldView, WorldThing) {
+    let id = |text: &str| Identifier::new(text).unwrap();
+    let at = Timestamp::new("2026-11-26T09:00:00.000Z").unwrap();
+    let words = |text: &str, written: Option<&str>, translation: Option<&str>| WorldWords {
+        text: text.to_owned(),
+        written: written.map(str::to_owned),
+        translation: translation.map(str::to_owned),
+    };
+    let thing = |id: &str, name: WorldWords, from: WorldHand| WorldThing {
+        id: id.to_owned(),
+        name,
+        icon: "cup".to_owned(),
+        tint: "brown".to_owned(),
+        from,
+        came: at.clone(),
+        note: None,
+        seen: Vec::new(),
+    };
+    let honey = WorldThing {
+        icon: "fork".to_owned(),
+        tint: "orange".to_owned(),
+        note: Some(words("トーストにどうぞ。", Some("For your toast."), None)),
+        seen: vec![id("mira")],
+        ..thing(
+            "5d1b6c1e-2f8a-4c4e-9a59-0f4f3c2b8e11",
+            words("ハチミツの瓶", Some("A jar of honey"), None),
+            WorldHand::Person,
+        )
+    };
+    let flat = words("部屋", None, Some("The Flat"));
+    let named = |id: &str, name: &WorldWords| WorldNamed {
+        id: id.to_owned(),
+        name: name.clone(),
+    };
+
+    (
+        WorldView {
+            id: id("the-port"),
+            name: words("港町", None, Some("The Port")),
+            places: vec![WorldPlace {
+                id: id("flat"),
+                name: flat.clone(),
+                icon: "bed".to_owned(),
+                tint: "indigo".to_owned(),
+                things: vec![
+                    thing(
+                        "0b6f3d0a-6c1a-4d8e-8f0e-1d2c3b4a5f60",
+                        words("ティーポット", None, Some("Teapot")),
+                        WorldHand::World,
+                    ),
+                    thing(
+                        "7e2a9c44-1b3d-4f5e-a6b7-c8d9e0f1a2b3",
+                        words("Tofu", None, None),
+                        WorldHand::Character { id: id("mira") },
+                    ),
+                    honey.clone(),
+                ],
+            }],
+            characters: vec![WorldCharacter {
+                id: id("mira"),
+                display_name: SpeakerName::new("Mira").unwrap(),
+                place: id("flat"),
+                since: at.clone(),
+            }],
+            journal: vec![
+                WorldEntry {
+                    when: at.clone(),
+                    who: WorldHand::Person,
+                    what: WorldDeed::Left,
+                    place: named("flat", &flat),
+                    thing: Some(named(&honey.id, &honey.name)),
+                },
+                WorldEntry {
+                    when: at.clone(),
+                    who: WorldHand::Character { id: id("mira") },
+                    what: WorldDeed::Went,
+                    place: named("flat", &flat),
+                    thing: None,
+                },
+            ],
+            kinds: vec![WorldKind {
+                id: id("food"),
+                name: "Food".to_owned(),
+                icon: "fork".to_owned(),
+                tint: "orange".to_owned(),
+            }],
+        },
+        honey,
     )
 }
 

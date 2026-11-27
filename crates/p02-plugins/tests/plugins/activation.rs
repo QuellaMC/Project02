@@ -9,9 +9,10 @@ use p02_contracts::{CommittedTurn, FactoryInput, PluginError, RedactionLabel, St
 use p02_core::Timestamp;
 use p02_plugins::{BeforeCallOutcome, list};
 use p02_shared::Identifier;
+use p02_world::WorldDefinition;
 use serde_json::{Map, Value, json};
 
-use crate::storage::Storage;
+use crate::storage::{Files, Storage};
 use crate::support::{Enable, Probe, Scripted, Seen, Spec, Verbose, builder, turn};
 
 #[test]
@@ -83,13 +84,20 @@ async fn a_plugins_labels_are_held_at_activation_to_what_a_record_has_room_for()
 
 #[tokio::test]
 async fn the_listed_plugins_activate_together() {
-    // A plugin is built once it is set up: Long-Term Memory with its key.
+    // A plugin is built once it is set up: Long-Term Memory with its key,
+    // and the world's with the world her package brings.
     let set_up = Map::from_iter([("apiKey".to_owned(), Value::from("m0-key"))]);
+    let world = WorldDefinition::from_value(&json!({
+        "id": "the-yard",
+        "name": "The Yard",
+        "places": [{"id": "yard", "name": "The Yard"}],
+    }))
+    .unwrap();
     let host = list::plugins()
         .unwrap()
         .iter()
         .fold(
-            builder(Storage::new()),
+            builder(Storage::new()).world(world, Arc::new(Files::default())),
             |builder, (manifest, _, factory)| {
                 builder.plugin(manifest.clone(), set_up.clone(), *factory)
             },
@@ -108,7 +116,8 @@ async fn the_listed_plugins_activate_together() {
             "mem0",
             "phone",
             "reply-style",
-            "session-history"
+            "session-history",
+            "world"
         ]
     );
     assert_eq!(
@@ -130,7 +139,10 @@ async fn the_listed_plugins_activate_together() {
             "phone.sign_in",
             "phone.install",
             "sessions.search",
-            "sessions.read"
+            "sessions.read",
+            "world.go",
+            "world.make",
+            "world.use"
         ]
     );
 
@@ -148,7 +160,8 @@ async fn the_listed_plugins_activate_together() {
             Some("character-state"),
             Some("phone"),
             Some("reply-style"),
-            Some("session-history")
+            Some("session-history"),
+            Some("world")
         ]
     );
 }

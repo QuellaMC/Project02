@@ -2,7 +2,9 @@
 //! plain completion of a model puts the person's line into her language,
 //! or her message into the person's, as her settings say how, and its
 //! answer comes to the translation, the message as it was, or why none
-//! came.
+//! came. Words of her world, names and notes, go as one list in one
+//! completion, the person's into her language or hers into theirs, and its
+//! answer comes to a translation of each, or why none came.
 
 use std::borrow::Cow;
 use std::num::NonZeroUsize;
@@ -26,6 +28,10 @@ const BLANK: &str = "the AI service answered with nothing.";
 /// Why a translation came to nothing, when her model has no plain
 /// completion.
 const UNSUPPORTED: &str = "this AI model cannot translate.";
+
+/// Why words of her world came to nothing, when the service's answer held
+/// no list of a translation for each.
+const UNLISTED: &str = "the AI service did not answer with a translation for each.";
 
 /// What a request calls a person who has chosen no name: the one they go
 /// by until then would read as the translator itself.
@@ -105,6 +111,41 @@ impl Between {
         )
     }
 
+    /// `words` of her world, names and notes as the person wrote them, put
+    /// into her language by `model` in one request: her words for each, in
+    /// their order; or why none came, in a sentence.
+    pub(crate) async fn words_for_her(
+        &self,
+        model: &dyn RoleModelAdapter,
+        words: &[&str],
+    ) -> Result<Vec<String>, String> {
+        let Self { person, her, .. } = self;
+        let notes = self.words(&format!(
+            "Words {her} uses, and how each is put for {person}. Where what {person} wrote means \
+             one of them, write her word:"
+        ));
+        let request = self.words_request(&self.put_in_hers("each of them"), notes, None, words);
+
+        listed(model.complete_text(&request).await, words.len())
+    }
+
+    /// `words` of her world, as her words have them, put by `model` in one
+    /// request into the language the person chose, else into that of their
+    /// newest message as they wrote it, `newest`, or into English while
+    /// they never wrote: the person's words for each, in their order; or why
+    /// none came, in a sentence.
+    pub(crate) async fn words_for_person(
+        &self,
+        model: &dyn RoleModelAdapter,
+        words: &[&str],
+        newest: Option<&VisibleText>,
+    ) -> Result<Vec<String>, String> {
+        let (into, newest) = self.put_in_theirs("each of them", newest);
+        let request = self.words_request(&into, self.person_notes(), newest, words);
+
+        listed(model.complete_text(&request).await, words.len())
+    }
+
     /// What the person is told of a message of hers that could not be put
     /// into their language, for `reason`.
     pub(crate) fn untranslated(&self, reason: &str) -> String {
@@ -114,23 +155,24 @@ impl Between {
         ))
     }
 
+    /// What the person is told of names in her world that could not be put
+    /// into their language, for `reason`.
+    pub(crate) fn world_untranslated(&self, reason: &str) -> String {
+        sentence(&format!(
+            "Names in {}'s world were not translated: {reason}",
+            self.her
+        ))
+    }
+
     fn line_request(&self, line: &VisibleText, before: &[Said<'_>]) -> TextCompletionRequest {
-        let Self {
-            person,
-            her,
-            language,
-            ..
-        } = self;
+        let Self { person, her, .. } = self;
         let words = self.words(&format!(
             "Words {her} uses, and how each is put for {person}. Where {person}'s message means \
              one of them, write her word:"
         ));
 
         self.request(
-            &format!(
-                "Put {person}'s message into {her}'s language, the one with the language tag \
-                 \"{language}\"."
-            ),
+            &self.put_in_hers(&format!("{person}'s message")),
             words,
             self.input(before, None, VisibleMessageRole::User, line),
         )
@@ -142,44 +184,111 @@ impl Between {
         before: &[Said<'_>],
         newest: Option<&VisibleText>,
     ) -> TextCompletionRequest {
-        let Self {
-            person,
-            her,
-            theirs,
-            tone,
-            ..
-        } = self;
-        let (into, newest) = match (theirs, newest) {
+        let (into, newest) = self.put_in_theirs(&format!("{}'s message", self.her), newest);
+
+        self.request(
+            &into,
+            self.person_notes(),
+            self.input(before, newest, VisibleMessageRole::Character, message),
+        )
+    }
+
+    /// What says to put `what` into her language, by its tag.
+    fn put_in_hers(&self, what: &str) -> String {
+        let Self { her, language, .. } = self;
+
+        format!("Put {what} into {her}'s language, the one with the language tag \"{language}\".")
+    }
+
+    /// What says to put `what` into the language the person chose, by its
+    /// tag, else into that of their newest message, `newest`, which the
+    /// translator then reads too, as they wrote it, or into English while
+    /// they never wrote; and that message, when it is read.
+    fn put_in_theirs(&self, what: &str, newest: Option<&VisibleText>) -> (String, Option<String>) {
+        let Self { person, theirs, .. } = self;
+
+        match (theirs, newest) {
             (Some(theirs), _) => (
                 format!(
-                    "Put {her}'s message into {person}'s language, the one with the language tag \
+                    "Put {what} into {person}'s language, the one with the language tag \
                      \"{theirs}\"."
                 ),
                 None,
             ),
             (None, Some(newest)) => (
                 format!(
-                    "Put {her}'s message into the language {person} writes in, which {person}'s \
-                     newest message shows."
+                    "Put {what} into the language {person} writes in, which {person}'s newest \
+                     message shows."
                 ),
                 Some(format!(
                     "{person}'s newest message:\n\n{}",
                     cut(newest.as_str())
                 )),
             ),
-            (None, None) => (format!("Put {her}'s message into English."), None),
-        };
+            (None, None) => (format!("Put {what} into English."), None),
+        }
+    }
+
+    /// Her notes for putting her words into the person's language, each a
+    /// paragraph: how some of her words are put, and how she sounds.
+    fn person_notes(&self) -> impl Iterator<Item = String> {
         let words = self.words(&format!(
             "How some of her words are to be put. On the left what she writes, on the right how \
-             {person} is to read it, or what it means:"
+             {} is to read it, or what it means:",
+            self.person
         ));
-        let tone = tone.as_ref().map(|tone| format!("How she sounds: {tone}"));
+        let tone = self
+            .tone
+            .as_ref()
+            .map(|tone| format!("How she sounds: {tone}"));
 
-        self.request(
-            &into,
-            words.into_iter().chain(tone),
-            self.input(before, newest, VisibleMessageRole::Character, message),
-        )
+        words.into_iter().chain(tone)
+    }
+
+    /// A request to put `words` of her world into another language as
+    /// `into` says, after which `notes` say how to put her, each a
+    /// paragraph, the translator reading the person's `newest` message when
+    /// it is given, then the words, a JSON array of strings.
+    fn words_request(
+        &self,
+        into: &str,
+        notes: impl IntoIterator<Item = String>,
+        newest: Option<String>,
+        words: &[&str],
+    ) -> TextCompletionRequest {
+        let Self { person, her, .. } = self;
+        let paragraphs: Vec<String> = [
+            format!(
+                "You translate words of the world {her} lives in: names of places and of the \
+                 things in them, and notes left with things. {person} and {her} write in \
+                 different languages, and each reads the other's words through you. Neither of \
+                 them sees you."
+            ),
+            into.to_owned(),
+            "Translate each of them whole and nothing else: add nothing, leave nothing out, \
+             explain nothing. Keep a note's line breaks, its emoji and its tone."
+                .to_owned(),
+        ]
+        .into_iter()
+        .chain(notes)
+        .chain([
+            "They come as a JSON array of strings. Answer with a JSON array of strings alone, the \
+             translation of each in the same order. If one is already in that language, give it \
+             back unchanged."
+                .to_owned(),
+        ])
+        .collect();
+        let listed = serde_json::to_string_pretty(words).expect("strings are JSON");
+
+        TextCompletionRequest {
+            instructions: paragraphs.join("\n\n"),
+            input: newest
+                .into_iter()
+                .chain([format!("The words to translate:\n\n{listed}")])
+                .collect::<Vec<_>>()
+                .join("\n\n"),
+            max_output_chars: MAX_OUTPUT_CHARS,
+        }
     }
 
     /// A request to put a message into another language as `into` says,
@@ -308,6 +417,43 @@ fn translation(answer: TextCompletion, written: &VisibleText) -> Translation {
         TextCompletion::Failed { reason } => Translation::Failed(reason),
         TextCompletion::Unsupported => Translation::Failed(UNSUPPORTED.to_owned()),
     }
+}
+
+/// What `answer` comes to for `count` words of her world put into another
+/// language in one request: the translation of each, in their order, made
+/// into a text as a person sees one; or why none came. It is the JSON array
+/// of strings the answer holds, from its first `[` to its last `]`, so a
+/// fence or a word around it does not matter.
+fn listed(answer: TextCompletion, count: usize) -> Result<Vec<String>, String> {
+    let text = match answer {
+        TextCompletion::Completed { text, .. } => text,
+        TextCompletion::Failed { reason } => return Err(reason),
+        TextCompletion::Unsupported => return Err(UNSUPPORTED.to_owned()),
+    };
+
+    if text.trim().is_empty() {
+        return Err(BLANK.to_owned());
+    }
+
+    let listed: Option<Vec<String>> = text
+        .find('[')
+        .zip(text.rfind(']'))
+        .and_then(|(start, end)| text.get(start..=end))
+        .and_then(|array| serde_json::from_str(array).ok());
+
+    listed
+        .filter(|words| words.len() == count)
+        .and_then(|words| {
+            words
+                .iter()
+                .map(|word| {
+                    VisibleText::normalize(word)
+                        .ok()
+                        .map(|word| word.as_str().to_owned())
+                })
+                .collect()
+        })
+        .ok_or_else(|| UNLISTED.to_owned())
 }
 
 #[cfg(test)]
@@ -572,6 +718,64 @@ mod tests {
         assert_eq!(
             between().untranslated("NVIDIA provider HTTP 502"),
             "A message of Kana's was not translated: NVIDIA provider HTTP 502."
+        );
+    }
+
+    /// An answer for words of her world is the JSON array of strings it
+    /// holds, fenced or not, a translation of each made into a text as a
+    /// person sees one; a list of another length, one that holds what is
+    /// no text or is blank, an answer that holds none, a blank answer, a
+    /// failed request and a model with no plain completion come to nothing,
+    /// each saying why.
+    #[test]
+    fn an_answer_for_words_is_the_list_it_holds_of_a_translation_of_each() {
+        let completed = |text: &str| TextCompletion::Completed {
+            text: text.to_owned(),
+            provider: ProviderName::Nvidia,
+            model: None,
+        };
+        let answered = |text: &str| listed(completed(text), 2);
+        let words = |words: [&str; 2]| Ok(words.map(str::to_owned).to_vec());
+
+        assert_eq!(
+            answered("[\" Der Hafen \", \"Für\\r\\ndich.\"]"),
+            words(["Der Hafen", "Für\ndich."])
+        );
+        assert_eq!(
+            answered("```json\n[\"Der Hafen\", \"Die Wohnung\"]\n```"),
+            words(["Der Hafen", "Die Wohnung"])
+        );
+
+        for unlisted in [
+            "[\"Der Hafen\"]",
+            "[\"Der Hafen\", 3]",
+            "[\"Der Hafen\", \" \"]",
+            "Der Hafen, Die Wohnung",
+            "] [",
+        ] {
+            assert_eq!(
+                answered(unlisted),
+                Err("the AI service did not answer with a translation for each.".to_owned()),
+                "{unlisted}"
+            );
+        }
+
+        assert_eq!(
+            answered(" \n"),
+            Err("the AI service answered with nothing.".to_owned())
+        );
+        assert_eq!(
+            listed(
+                TextCompletion::Failed {
+                    reason: "NVIDIA provider HTTP 502".to_owned(),
+                },
+                2
+            ),
+            Err("NVIDIA provider HTTP 502".to_owned())
+        );
+        assert_eq!(
+            listed(TextCompletion::Unsupported, 2),
+            Err("this AI model cannot translate.".to_owned())
         );
     }
 }

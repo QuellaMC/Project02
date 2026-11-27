@@ -16,6 +16,7 @@ mod phone;
 mod protocol;
 mod refusal;
 mod text;
+mod world;
 
 pub use apps::{
     AppInstallOutcome, AppInstallRefusal, AppPreviewOutcome, AppRemoveOutcome, AppRemoveRefusal,
@@ -66,3 +67,8 @@ pub use phone::{
 pub use protocol::{PROTOCOL_VERSION, ProtocolVersion};
 pub use refusal::{ErrorBody, Refusal};
 pub use text::{BotUsername, ParseBotUsernameError, ParseShortError, ParseTextError, Short, Text};
+pub use world::{
+    LeaveThingBody, LeaveThingOutcome, LeaveThingRefusal, RemoveThingOutcome, RemoveThingRefusal,
+    WorldCharacter, WorldDeed, WorldEntry, WorldHand, WorldKind, WorldNamed, WorldOutcome,
+    WorldPlace, WorldRefusal, WorldThing, WorldView, WorldWords,
+};

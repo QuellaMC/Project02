@@ -147,6 +147,33 @@ export function wireOf(daemon: Address) {
         'AppSignInOutcome',
         signIn,
       ),
+    world: (characterId: string) =>
+      call(
+        'GET',
+        `/api/characters/${segment(characterId)}/world`,
+        'WorldOutcome',
+      ),
+    leaveThing: (
+      characterId: string,
+      thing: {
+        readonly name: string;
+        readonly kind: string;
+        readonly place: string;
+        readonly note?: string;
+      },
+    ) =>
+      call(
+        'POST',
+        `/api/characters/${segment(characterId)}/world/things`,
+        'LeaveThingOutcome',
+        thing,
+      ),
+    removeThing: (characterId: string, thingId: string) =>
+      call(
+        'DELETE',
+        `/api/characters/${segment(characterId)}/world/things/${segment(thingId)}`,
+        'RemoveThingOutcome',
+      ),
     open: async (characterId: string) =>
       (await call('POST', '/api/conversations/open', 'OpenOutcome', {
         characterId,

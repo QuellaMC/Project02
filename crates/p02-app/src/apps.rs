@@ -23,6 +23,7 @@ use p02_wire::{
 use crate::connections::Linked;
 use crate::daemon::{Daemon, blocking};
 use crate::history::{self, Hers, no_conversation};
+use crate::outcome::Changed;
 use crate::phone::{HerPhone, Unread, drawn, unread};
 
 /// What is said of a file the person picked that is not text.
@@ -328,7 +329,7 @@ impl Daemon {
 
     /// What `work` makes of the phone of `character` on the blocking pool,
     /// as [`Daemon::change_her`] makes it.
-    async fn change<T: Changed>(
+    async fn change<T: Changed + From<Unread> + Send + 'static>(
         &self,
         character: &str,
         work: impl FnOnce(&HerPhone) -> Result<T, Unread> + Send + 'static,
@@ -343,7 +344,7 @@ impl Daemon {
     /// her phone, the stream says so, and her actor, while she runs, reads
     /// its rings again, in the same piece of work, which a caller that stops
     /// waiting does not cut in two.
-    async fn change_her<T: Changed>(
+    async fn change_her<T: Changed + From<Unread> + Send + 'static>(
         &self,
         her: HerPhone,
         work: impl FnOnce(&HerPhone) -> Result<T, Unread> + Send + 'static,
@@ -373,13 +374,6 @@ impl Daemon {
             handle.phone_changed();
         }
     }
-}
-
-/// An outcome of the person's change of her phone, which says why her
-/// phone was not reached as every verb on it does, and whether it changed
-/// her phone.
-trait Changed: From<Unread> + Send + 'static {
-    fn changed(&self) -> bool;
 }
 
 impl Changed for AppInstallOutcome {

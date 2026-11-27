@@ -1,7 +1,7 @@
 //! The wire's answers and frames as the daemon makes them from what it
 //! holds: a storage error as the failure a person is told, a package
-//! discovery could not publish as health reports it, and a turn as the
-//! stream is told it.
+//! discovery could not publish as health reports it, a turn as the stream
+//! is told it, and whether the person's act changed what it acted on.
 
 use p02_characters::{PackageDiagnostic, PackageLocation};
 use p02_core::{ClientStamp, ConversationId, MessageId, app_of};
@@ -10,6 +10,13 @@ use p02_runtime::Progress;
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{QueuedLine, StorageError};
 use p02_wire::{Event, PackageReport, RunningTurn, StorageFailure, ToolCallStatus, TurnProgress};
+use p02_world::WORLD_PLUGIN;
+
+/// An outcome of the person's act on what is hers, her phone or her world,
+/// which says whether it changed it: then the stream says so.
+pub(crate) trait Changed {
+    fn changed(&self) -> bool;
+}
 
 /// What a line sent again once a turn took it is refused with: the
 /// message it was committed as.
@@ -60,17 +67,25 @@ pub(crate) fn running_turn(
 
 /// What the stream is told of `progress` on `turn`, in order: the message
 /// or the tool calls it says, then the turn as it now runs when that
-/// changed, or that her phone is to be read again when a call of hers to
-/// it came back accepted. The turn changes as the line that began it is
+/// changed, or what a call of hers that came back accepted changed, which a
+/// client reads again: her phone, or `lives_in`, the world she lives in,
+/// when she lives in one. The turn changes as the line that began it is
 /// committed, and as each round begins and ends: whether she is writing. A
 /// round's messages come before its end, so a surface that shows her
 /// writing ends it as the message rather than taking it back.
-pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
-    let phoned = matches!(
-        &progress,
-        Progress::ToolCallCompleted { plugin_id, accepted: true, .. }
-            if plugin_id.as_str() == PHONE_PLUGIN
-    );
+pub(crate) fn told(
+    turn: &mut RunningTurn,
+    progress: Progress,
+    lives_in: Option<&Identifier>,
+) -> Vec<Event> {
+    let reread = match &progress {
+        Progress::ToolCallCompleted {
+            plugin_id,
+            accepted: true,
+            ..
+        } => to_read_again(plugin_id, &turn.character_id, lives_in),
+        _ => None,
+    };
     let (said, changed) = match progress {
         Progress::UserMessage {
             message,
@@ -148,8 +163,26 @@ pub(crate) fn told(turn: &mut RunningTurn, progress: Progress) -> Vec<Event> {
     })
     .into_iter()
     .chain(changed.then(|| Event::TurnRunning(turn.clone())))
-    .chain(phoned.then(|| Event::PhoneChanged {
-        character_id: turn.character_id.clone(),
-    }))
+    .chain(reread)
     .collect()
+}
+
+/// What is to be read again once a call of `character`'s to the tools of
+/// the plugin `plugin` came back accepted, by what that plugin keeps: her
+/// phone, or the world she lives in, `lives_in`; nothing a client reads for
+/// any other.
+fn to_read_again(
+    plugin: &Identifier,
+    character: &Identifier,
+    lives_in: Option<&Identifier>,
+) -> Option<Event> {
+    match plugin.as_str() {
+        PHONE_PLUGIN => Some(Event::PhoneChanged {
+            character_id: character.clone(),
+        }),
+        WORLD_PLUGIN => lives_in.map(|world| Event::WorldChanged {
+            world: world.clone(),
+        }),
+        _ => None,
+    }
 }

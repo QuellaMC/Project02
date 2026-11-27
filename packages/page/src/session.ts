@@ -12,6 +12,8 @@ import type {
   Answer,
   GatewayEvent,
   PendingConfirmation,
+  PhoneOutcome,
+  WorldOutcome,
 } from '@project02/wire/contract';
 import {
   GatewayClientError,
@@ -20,8 +22,14 @@ import {
 } from '@project02/wire/client';
 import {settingAskOf} from './ask-words.ts';
 import {dockStepped, dockWaited, herSettingsRead} from './dock.ts';
+import {
+  herWindows,
+  windowAnswered,
+  windowGone,
+  windowShows,
+  type HerWindow,
+} from './her-windows.ts';
 import {notificationFor} from './notifications.ts';
-import {followHerPhone, openHerPhone} from './phone-link.ts';
 import {readOf} from './reads.ts';
 import {
   createSettingsVerbs,
@@ -50,9 +58,6 @@ import {
   noticed,
   pageUnread,
   pairingGone,
-  phoneAnswered,
-  phoneWindowGone,
-  phoneWindowShows,
   streamLost,
   streamResumed,
   threadOpened,
@@ -62,6 +67,7 @@ import {
 } from './store.ts';
 import {clientFor, createValue, follow, problem} from './surface.ts';
 import {notifierOf} from './window-calls.ts';
+import {followHerWindows, openHerWindow} from './window-link.ts';
 
 export type Session = SettingsVerbs & {
   readonly getState: () => WebState;
@@ -80,8 +86,8 @@ export type Session = SettingsVerbs & {
   /** Answers a pairing request: whether the daemon took the answer, which the stream then settles. */
   readonly settlePairing: (code: string, decision: Answer) => Promise<boolean>;
   readonly start: (characterId: string) => Promise<void>;
-  /** Opens her phone in its window, or closes that window while it shows her phone. */
-  readonly togglePhone: (characterId: string) => void;
+  /** Opens her phone or her world in its window, or closes that window while it shows hers. */
+  readonly toggleWindow: (herWindow: HerWindow, characterId: string) => void;
   /** Half a second after the ask with this key ended in front of the dock. */
   readonly dockStepped: (key: string) => void;
   /** The wait of the answered card with this key is over. */
@@ -97,7 +103,7 @@ export function createSession(address: string): Session {
 
   const {getState, subscribe, apply, writtenFor} = createTabValue();
   const settings = createSettingsVerbs({client, getState, apply});
-  const phone = linkHerPhone(address, {client, apply}, getState);
+  const windows = linkHerWindows(address, {client, apply}, getState);
   const askedOf = readsHerSettings({client, apply});
   /** Only the latest open applies; an earlier one that settles later is let go. */
   let opens = 0;
@@ -173,7 +179,7 @@ export function createSession(address: string): Session {
 
       reads.clear();
       apply(state => threadOpened(state, outcome));
-      void phone.read();
+      windows.read();
       await readPage(outcome.conversationId, {});
     } catch (error: unknown) {
       if (mine === opens) {
@@ -215,10 +221,10 @@ export function createSession(address: string): Session {
 
       // Config moved, here or on another surface, or a connector's
       // process came or went: the settings open show what is there now,
-      // and whether she has a phone is asked again.
+      // and whether she has a phone and a world is asked again.
       if (event.kind === 'health_changed') {
         void settings.changed();
-        void phone.read();
+        windows.read();
       }
 
       // Her apps on a settings page of hers are what her phone holds now.
@@ -236,7 +242,7 @@ export function createSession(address: string): Session {
       const {thread} = getState();
 
       if (thread !== undefined) {
-        void phone.read();
+        windows.read();
         await readPage(thread.conversationId, {});
       }
 
@@ -391,7 +397,7 @@ export function createSession(address: string): Session {
         apply(current => noticed(current, problem(error)));
       }
     },
-    togglePhone: phone.toggle,
+    toggleWindow: windows.toggle,
     dockStepped(key) {
       apply(current => dockStepped(current, key));
     },
@@ -524,60 +530,82 @@ function tellReads(
   };
 }
 
+/** What the chat says when the browser would not open a window of hers. */
+const blocked: Readonly<Record<HerWindow, string>> = {
+  phone:
+    "This browser blocked her phone's window. Allow pop-ups for this page, then click Her Phone again.",
+  world:
+    "This browser blocked her world's window. Allow pop-ups for this page, then click Her World again.",
+};
+
 /**
- * The chat's side of her phone's window: whose phone the window shows, as
- * it says of itself; whether the character whose chat is on screen has a
- * phone, as the daemon says; and the Her Phone button, which opens her
- * phone, or asks the window showing it to close. A click on it is the
- * person's act, and spends what the page had to say.
+ * The chat's side of the windows of hers: whose phone and whose world each
+ * shows, as it says of itself; whether the character whose chat is on
+ * screen has a phone and a world, as the daemon says; and the buttons that
+ * open her phone and her world, or ask the window showing hers to close. A
+ * click on one is the person's act, and spends what the page had to say.
  */
-function linkHerPhone(
+function linkHerWindows(
   address: string,
   {client, apply}: Sending,
   getState: () => WebState,
 ): {
-  readonly read: () => Promise<void>;
-  readonly toggle: (characterId: string) => void;
+  readonly read: () => void;
+  readonly toggle: (herWindow: HerWindow, characterId: string) => void;
 } {
-  const phoneWindow = followHerPhone({
-    shows: characterId => {
-      apply(current => phoneWindowShows(current, characterId));
+  const shown = followHerWindows({
+    shows: (herWindow, characterId) => {
+      apply(current => windowShows(current, herWindow, characterId));
     },
-    gone: characterId => {
-      apply(current => phoneWindowGone(current, characterId));
+    gone: (herWindow, characterId) => {
+      apply(current => windowGone(current, herWindow, characterId));
     },
   });
-  /** Only the latest read applies; an earlier one that settles later is let go. */
-  let reads = 0;
+  const readOfHers: Readonly<
+    Record<
+      HerWindow,
+      (characterId: string) => Promise<PhoneOutcome | WorldOutcome>
+    >
+  > = {
+    phone: characterId => client.phone(characterId),
+    world: characterId => client.world(characterId),
+  };
+  /** Only the latest read of each applies; an earlier one that settles later is let go. */
+  const reads = new Map<HerWindow, number>();
+  let tickets = 0;
 
   return {
-    async read() {
+    read() {
       const characterId = getState().thread?.characterId;
 
       if (characterId === undefined) {
         return;
       }
 
-      const mine = (reads += 1);
-      // A read that did not reach the daemon says nothing of her phone.
-      const outcome = await client.phone(characterId).catch(() => undefined);
+      for (const herWindow of herWindows) {
+        const mine = (tickets += 1);
 
-      if (outcome !== undefined && mine === reads) {
-        apply(current => phoneAnswered(current, characterId, outcome));
+        reads.set(herWindow, mine);
+        // A read that did not reach the daemon says nothing of what she has.
+        void readOfHers[herWindow](characterId).then(
+          outcome => {
+            if (reads.get(herWindow) === mine) {
+              apply(current =>
+                windowAnswered(current, herWindow, characterId, outcome),
+              );
+            }
+          },
+          () => undefined,
+        );
       }
     },
-    toggle(characterId) {
+    toggle(herWindow, characterId) {
       apply(noticeSpent);
 
-      if (getState().phoneWindow === characterId) {
-        phoneWindow.close(characterId);
-      } else if (!openHerPhone(address, characterId)) {
-        apply(current =>
-          noticed(
-            current,
-            "This browser blocked her phone's window. Allow pop-ups for this page, then click Her Phone again.",
-          ),
-        );
+      if (getState().windowShows.get(herWindow) === characterId) {
+        shown.close(herWindow, characterId);
+      } else if (!openHerWindow(herWindow, address, characterId)) {
+        apply(current => noticed(current, blocked[herWindow]));
       }
     },
   };
@@ -834,7 +862,7 @@ function refusedSession(message: string): Session {
     answer: () => Promise.resolve(false),
     settlePairing: () => Promise.resolve(false),
     start: nothing,
-    togglePhone: () => undefined,
+    toggleWindow: () => undefined,
     dockStepped: () => undefined,
     dockWaited: () => undefined,
   };

@@ -5,7 +5,7 @@
 
 use std::sync::Arc;
 
-use p02_characters::{CharacterDefinition, PluginExpectations, Standing, discover, is_bundled};
+use p02_characters::{CharacterDefinition, Standing, discover, is_bundled};
 use p02_shared::{Identifier, error_sentence};
 use p02_store::CharacterData;
 use p02_wire::{
@@ -172,7 +172,7 @@ fn preview(world: &World, descriptor: &[u8]) -> CharacterPreviewOutcome {
 
     CharacterPreviewOutcome::Ok {
         has_data: CharacterData::exists(&world.home, &character.profile.id),
-        comes_with: comes_with(world, &character.plugins),
+        comes_with: comes_with(world, &character),
         id: character.profile.id,
         display_name: character.profile.display_name,
         version: character.version.to_string(),
@@ -195,30 +195,24 @@ fn standing(world: &World, character: &CharacterDefinition) -> Result<Standing, 
         .map_err(|taken| error_sentence(&taken))
 }
 
-/// What a character expecting `expected` would start with: each plugin of
-/// this build that is on by default or that her package asks for, in the
-/// plugin list's order, by the name a page shows; then, by id, each one it
-/// asks for that this build does not have.
-fn comes_with(world: &World, expected: &PluginExpectations) -> Vec<CharacterFeature> {
-    let asked: Vec<&Identifier> = expected
-        .required()
-        .iter()
-        .chain(expected.recommended())
-        .collect();
+/// What `character` would start with: each plugin of this build that is on
+/// by default or that her package switches on, in the plugin list's order,
+/// by the name a page shows; then, by id, each one it switches on that this
+/// build does not have.
+fn comes_with(world: &World, character: &CharacterDefinition) -> Vec<CharacterFeature> {
+    let asked = character.expected_plugins();
     let mut features: Vec<CharacterFeature> = world
         .plugins
         .iter()
         .map(Plugin::manifest)
-        .filter(|manifest| {
-            manifest.activation().default_enabled() || asked.contains(&manifest.id())
-        })
+        .filter(|manifest| manifest.activation().default_enabled() || asked.contains(manifest.id()))
         .map(|manifest| CharacterFeature::Plugin {
             id: manifest.id().clone(),
             display_name: manifest.display_name().to_owned(),
         })
         .collect();
 
-    for id in asked {
+    for id in &asked {
         let unknown = CharacterFeature::Unknown { id: id.clone() };
 
         if world.plugin(id).is_none() && !features.contains(&unknown) {

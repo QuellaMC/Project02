@@ -26,7 +26,6 @@ import {
   conversationRead,
   conversationUnopened,
   conversationUnread,
-  framed,
   healthSaid,
   initialPhoneState,
   isMessaging,
@@ -639,16 +638,6 @@ describe("her phone's window", () => {
     });
     expect(clockParts('19:00')).toEqual({digits: '19:00'});
     expect(clockParts('00:12.34')).toEqual({digits: '00:12.34'});
-  });
-
-  it('draws the frame of a window that has none of its own, its pin pressed while the window stays on top, and none for a window with a frame of its own', () => {
-    const popup = initialPhoneState('mira');
-    const pinned = framed(popup, true);
-
-    expect(popup.frame).toBeUndefined();
-    expect(pinned.frame).toEqual({pinned: true});
-    expect(framed(pinned, true)).toBe(pinned);
-    expect(framed(pinned, false).frame).toEqual({pinned: false});
   });
 
   it('draws an app her phone says messages come in from her conversation: once it is opened, of its newest page and what the stream commits after, only what went through that app, with the person by the name their newest message goes by; why it could not be opened or read in its place; and a frame of another conversation changes nothing', () => {

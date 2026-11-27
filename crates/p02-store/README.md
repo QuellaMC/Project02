@@ -12,14 +12,18 @@ other crate opens a database.
   `sessions.jsonl`, `sessions/<conversation>.<n>/raw-events.jsonl`,
   `taken-lines/` and `plugin-data/<plugin>/`: a plugin's databases, and
   its documents, logs and text files, each named for its kind, a text file
-  holding 256 KiB at most and any but a log removable.
+  holding 256 KiB at most and any but a log removable. And
+  `world-data/<world>/`, the files of a world the home's characters live
+  in, the home's and no character's, kept as a plugin keeps its own: the
+  store the world's plugin is handed in the place of one in her data.
 - **Safety.** Logs are only appended to, and the next append cuts a line a
   crash tore; other files are replaced whole, owner-only, under their
   lock. Her inbox, the lines no turn of hers took yet, is appended to and
   rewritten under its own lock, and emptied in place once the last line
   leaves, which takes no new file, so it drains on a full disk. Kernel
-  locks keep one daemon per home and one writer per conversation, session
-  or plugin. A character's package is written whole or removed under the
+  locks keep one daemon per home and one writer per conversation, session,
+  plugin or world, a world's lock the home's, whoever writes it. A
+  character's package is written whole or removed under the
   locks of her settings, its folder kept when it holds anything of the
   person's. The home's sign-in to a ChatGPT plan, its tokens, is written
   only by the daemon serving the home, one write at a time, whole and

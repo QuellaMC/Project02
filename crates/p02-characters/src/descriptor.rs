@@ -3,6 +3,7 @@ use std::fmt;
 
 use p02_core::{CharacterProfile, LanguageTag, SpeakerName};
 use p02_shared::Identifier;
+use p02_world::{WORLD_PLUGIN, WorldDefinition, WorldDefinitionError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -14,7 +15,8 @@ pub(crate) const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 /// A character as her package defines her: who she is, one line about her
 /// when it gives one, the language she speaks when it names one, the
 /// persona the model is given, the version of that content, the plugins
-/// she expects, and her translation notes.
+/// she expects, her translation notes, and the world she comes from when
+/// it brings one.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CharacterDefinition {
     pub profile: CharacterProfile,
@@ -29,6 +31,9 @@ pub struct CharacterDefinition {
     pub version: CharacterVersion,
     pub plugins: PluginExpectations,
     pub translation: TranslationNotes,
+    /// The world she comes from: the home makes its living world from it
+    /// the first time it is read, and keeps it from then on.
+    pub world: Option<WorldDefinition>,
 }
 
 /// A character's persona: one section or more, in order, none blank.
@@ -88,10 +93,10 @@ impl fmt::Display for CharacterVersion {
     }
 }
 
-/// The plugins a character expects: required ones and recommended ones,
-/// and values for their settings, by plugin. Shape only: whether they are
-/// installed, and whether the values fit, is judged against the installed
-/// plugins when she starts.
+/// The plugins a character's package lists: required ones and recommended
+/// ones, and values for their settings, by plugin. Shape only: whether they
+/// are installed, and whether the values fit, is judged against the
+/// installed plugins when she starts.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct PluginExpectations {
     required: Vec<Identifier>,
@@ -100,18 +105,6 @@ pub struct PluginExpectations {
 }
 
 impl PluginExpectations {
-    /// In the order the package lists them, each once.
-    #[must_use]
-    pub fn required(&self) -> &[Identifier] {
-        &self.required
-    }
-
-    /// In the order the package lists them, each once.
-    #[must_use]
-    pub fn recommended(&self) -> &[Identifier] {
-        &self.recommended
-    }
-
     /// Each plugin's values, keyed as the package wrote them.
     #[must_use]
     pub fn config(&self) -> &BTreeMap<Identifier, Map<String, Value>> {
@@ -184,6 +177,8 @@ pub enum ParseDescriptorError {
     InvalidConfigKey(String),
     #[error("character package plugins.config[\"{0}\"] must be an object")]
     ConfigEntryNotAnObject(Identifier),
+    #[error("character package {0}")]
+    World(WorldDefinitionError),
 }
 
 impl ParseDescriptorError {
@@ -223,6 +218,7 @@ impl ParseDescriptorError {
             | Self::ConfigEntryNotAnObject(_) => {
                 "This file lists the character's features in a way the app cannot read."
             }
+            Self::World(refusal) => refusal.plainly(),
         }
     }
 }
@@ -254,7 +250,40 @@ impl CharacterDefinition {
             version: version(descriptor)?,
             plugins: plugins(descriptor)?,
             translation: translation(descriptor)?,
+            world: world(descriptor)?,
         })
+    }
+
+    /// The plugins her package switches on, each once: those it requires,
+    /// then those it recommends, which do alike, and the world's exactly
+    /// when it brings a world, since she lives in it through that plugin.
+    #[must_use]
+    #[expect(
+        clippy::missing_panics_doc,
+        reason = "the world's plugin is named by an identifier"
+    )]
+    pub fn expected_plugins(&self) -> Vec<Identifier> {
+        let mut expected: Vec<Identifier> = Vec::new();
+
+        for id in self
+            .plugins
+            .required
+            .iter()
+            .chain(&self.plugins.recommended)
+        {
+            if id.as_str() != WORLD_PLUGIN && !expected.contains(id) {
+                expected.push(id.clone());
+            }
+        }
+
+        if self.world.is_some() {
+            expected.push(
+                Identifier::new(WORLD_PLUGIN)
+                    .expect("the world's plugin is named by an identifier"),
+            );
+        }
+
+        expected
     }
 }
 
@@ -404,6 +433,15 @@ fn translation(descriptor: &Map<String, Value>) -> Result<TranslationNotes, Pars
     })
 }
 
+/// The world she comes from, when her package brings one, read by the
+/// world's own rules.
+fn world(descriptor: &Map<String, Value>) -> Result<Option<WorldDefinition>, ParseDescriptorError> {
+    descriptor
+        .get("world")
+        .map(|world| WorldDefinition::from_value(world).map_err(ParseDescriptorError::World))
+        .transpose()
+}
+
 /// The object `value` holds, or the refusal naming `part`.
 fn object<'a>(
     value: Option<&'a Value>,
@@ -477,7 +515,7 @@ mod tests {
             ("/meta/version", json!("999999999.0.01")),
             (
                 "/plugins/required",
-                json!(["character-state", "mem0", "character-state"]),
+                json!(["character-state", "mem0", "character-state", "world"]),
             ),
             (
                 "/plugins/config",
@@ -487,9 +525,19 @@ mod tests {
                 "/translation",
                 json!({"words": [{"hers": "ダーリン"}], "tone": 42, "voice": "low"}),
             ),
+            (
+                "/world",
+                json!({"id": "the-port", "name": "The Port", "places": [{"id": "flat", "name": "The Flat"}]}),
+            ),
         ]);
         let definition = CharacterDefinition::from_descriptor(&bytes).unwrap();
         let config = definition.plugins.config();
+        let ids = |plugins: Vec<Identifier>| {
+            plugins
+                .iter()
+                .map(|plugin| plugin.as_str().to_owned())
+                .collect::<Vec<_>>()
+        };
 
         assert_eq!(definition.profile.id.as_str(), "nova");
         assert_eq!(definition.profile.display_name.as_str(), emoji.repeat(128));
@@ -504,15 +552,13 @@ mod tests {
         assert_eq!(definition.persona.sections(), ["First.", "Second."]);
         assert_eq!(definition.version.as_str(), "999999999.0.01");
         assert_eq!(
-            definition
-                .plugins
-                .required()
-                .iter()
-                .map(Identifier::as_str)
-                .collect::<Vec<_>>(),
-            ["character-state", "mem0"]
+            ids(definition.expected_plugins()),
+            ["character-state", "mem0", "reply-style", "world"]
         );
-        assert_eq!(definition.plugins.recommended()[0].as_str(), "reply-style");
+        assert_eq!(
+            definition.world.as_ref().map(|world| world.id().as_str()),
+            Some("the-port")
+        );
         assert_eq!(
             config.keys().map(Identifier::as_str).collect::<Vec<_>>(),
             ["alpha-plugin", "zeta-plugin"]
@@ -537,11 +583,20 @@ mod tests {
                 .plugins,
             PluginExpectations::default()
         );
-        let plain = CharacterDefinition::from_descriptor(&with(&[])).unwrap();
+        let plain = CharacterDefinition::from_descriptor(&with(&[(
+            "/plugins/recommended",
+            json!(["world", "reply-style", "character-state"]),
+        )]))
+        .unwrap();
 
         assert_eq!(plain.about, None);
         assert_eq!(plain.language, None);
         assert_eq!(plain.translation, TranslationNotes::default());
+        assert_eq!(plain.world, None);
+        assert_eq!(
+            ids(plain.expected_plugins()),
+            ["character-state", "reply-style"]
+        );
     }
 
     #[test]
@@ -621,6 +676,10 @@ mod tests {
                 with(&[("/translation", json!(["ダーリン", "Darling"]))]),
                 "translation must be an object",
             ),
+            (
+                with(&[("/world", json!({"id": "the-port", "places": []}))]),
+                "character package world.name must be one line",
+            ),
         ];
 
         for (bytes, fragment) in cases {
@@ -631,6 +690,13 @@ mod tests {
                 "{refusal} lacks {fragment}"
             );
         }
+
+        assert_eq!(
+            CharacterDefinition::from_descriptor(&with(&[("/world", json!("The Port"))]))
+                .unwrap_err()
+                .plainly(),
+            "This file gives the character's world in a way the app cannot read."
+        );
     }
 
     #[test]

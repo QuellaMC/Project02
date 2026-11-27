@@ -16,7 +16,7 @@ use crate::daemon::DaemonLease;
 use crate::error::StorageError;
 use crate::layout::{
     CHARACTER_DATA_DIRECTORY, CONFIG_FILE, CONVERSATIONS_DIRECTORY, EntryKind, LOCKS_DIRECTORY,
-    SCHEMA_FILE,
+    SCHEMA_FILE, WORLD_DATA_DIRECTORY,
 };
 use crate::lock::{Lease, Resource, acquire};
 use crate::marker::{self, Marker, Scope};
@@ -62,6 +62,12 @@ impl Home {
 
     pub(crate) fn data_root(&self, character: &Identifier) -> PathBuf {
         self.character_data_root().join(character.as_str())
+    }
+
+    /// Where the files of world `world` live, `world-data/<world>/`: the
+    /// home's own, not any one character's.
+    pub(crate) fn world_root(&self, world: &Identifier) -> PathBuf {
+        self.root.join(WORLD_DATA_DIRECTORY).join(world.as_str())
     }
 
     /// Where `document` is, whether or not it exists yet.
@@ -211,7 +217,8 @@ impl Home {
     /// daemon's record, its locks, the character packages its person added,
     /// which may be linked in, its characters' data, each of whose
     /// directories is vouched for by a marker of its own and judged when she
-    /// is reached, so that damage there fails her alone, the directory its
+    /// is reached, so that damage there fails her alone, the files of the
+    /// worlds they live in, judged as each is leased, the directory its
     /// conversations go in while it is still empty, and what a writer of a
     /// control file left when it died.
     fn belongs_before_its_marker(
@@ -224,7 +231,9 @@ impl Home {
         };
 
         Ok(match name {
-            LOCKS_DIRECTORY | CHARACTER_DATA_DIRECTORY => matches!(entry, PathEntry::Directory),
+            LOCKS_DIRECTORY | CHARACTER_DATA_DIRECTORY | WORLD_DATA_DIRECTORY => {
+                matches!(entry, PathEntry::Directory)
+            }
             CONVERSATIONS_DIRECTORY => {
                 let path = self.root.join(name);
 
@@ -257,6 +266,17 @@ impl Home {
 
         Ok(())
     }
+}
+
+/// Refuses `root`, where files are kept, when it or the directory above it
+/// is there but is no real directory, as [`check_real`] does: a link would
+/// carry what is kept there outside the folder it belongs in.
+pub(crate) fn check_root(root: &Path) -> Result<(), StorageError> {
+    if let Some(above) = root.parent() {
+        check_real(above, EntryKind::Directory)?;
+    }
+
+    check_real(root, EntryKind::Directory)
 }
 
 /// Refuses an entry that is there but is not a real file or directory, as

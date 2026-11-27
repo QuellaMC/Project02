@@ -34,7 +34,11 @@ with an outcome of p02-wire, never an error.
   the message as it was written leaves it so; a blank answer, a failed
   request, a model with no plain completion or one that cannot be built
   is none, said in a sentence, and the person is told of a message of hers
-  left untranslated in her maintenance note as it happens.
+  left untranslated in her maintenance note as it happens. Words of her
+  world go to it as one list in one request, a JSON array of strings, the
+  person's into her language with her words noted, her world's into the
+  person's as her messages go, and its answer is the array it holds, a
+  translation of each, or none, said in a sentence.
 - **Her heartbeat.** While she is ready and her heartbeat is not off, a
   moment of her own is due one period after she has been quiet since:
   since her thread opened in this run, her last turn ended, or her boot
@@ -64,9 +68,10 @@ with an outcome of p02-wire, never an error.
   message of hers the person read, with what rings, which her actor
   publishes while a ring's moment runs. A view of
   an app is read on request too, and changes nothing of hers. One whose settings switch her phone off has none to
-  read. The stream says her phone changed after a call of her phone's
-  tools came back accepted, and as a ring's moment begins and once its
-  rings went to their apps. The daemon makes the one reader of the App
+  read: whether her settings run a plugin is one rule, which her world is
+  judged by too. The stream says her phone changed after a call of her
+  phone's tools came back accepted, and as a ring's moment begins and once
+  its rings went to their apps. The daemon makes the one reader of the App
   Store's catalog, from the base the binary gives it, and the one seam
   that makes her apps' requests, at a stand-in the binary names under its
   test switch, and hands both to every host it builds her. It hands her
@@ -75,6 +80,31 @@ with an outcome of p02-wire, never an error.
   one rule her messages go by, and the newest messages that went through
   one, read back through the whole scrollback, by the rule the scrollback
   gives each message its app.
+- **Her world.** A character whose package brings a world lives in it:
+  every host the daemon builds her is handed that world and its files in
+  the home, which her world's plugin reads and writes under their lease.
+  A client reads it whether she runs or not, under the same lease, waited
+  for as long as her phone's: its places with their things, who is where,
+  each character the home has by her display name, the journal's newest
+  lines and the kinds a thing can be left as. The person leaves a thing
+  there with a note and removes one, each their own act, which asks
+  nobody, and nothing tells her; one whose package brings no world, or
+  whose settings do not run it, has none. The stream says a world is to be
+  read again, by its id, after each change of the person's and after a
+  call of hers to its tools came back accepted: one rule says what such a
+  call changes, her phone or her world. While her translator stands
+  between her and the person, by the rule that says so for their
+  messages, on the model it asks for them, her world is in her language
+  and the person reads it in theirs: what they leave is put into hers
+  before it is left, and refused, nothing left, when it cannot be; and a
+  read gives each name they did not write with their words for it, those
+  missing made in one request and kept with her world, so the next read
+  asks nothing; a line of its journal gives its names with the person's
+  form they had when it was written, else with the words its place or
+  thing has now. A read that cannot have them answers her world as
+  written, and her maintenance note says why, while she runs as one of
+  her own, else the stream alone. No model is asked while the world's
+  files are leased.
 - **The person's connections** her apps ask a model through are the
   person's AI services of OpenAI's, in the AI Model page's order: the
   ChatGPT plan while the home is signed in, and the OpenAI API while the

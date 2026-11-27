@@ -16,7 +16,7 @@ use p02_config::{
     CharacterSettings, HostSettings, MaterializeError, ReadSettingsError, Resolution, materialize,
 };
 use p02_contracts::{CharacterStorage, FileStoreBackend, Rang, RoleModelAdapter};
-use p02_core::{AppNames, SpeakerName, Timestamp, VisibleMessageRole, VisibleText};
+use p02_core::{AppNames, SpeakerName, Timestamp, VisibleText};
 use p02_phone::SetRing;
 use p02_plugins::{PHONE_PLUGIN, PluginHost};
 use p02_role_model::{
@@ -30,9 +30,8 @@ use p02_runtime::{
 use p02_shared::{Identifier, error_sentence};
 use p02_store::{CharacterData, Inbox, QueuedLine, StorageError};
 use p02_wire::{
-    CharacterState, Diagnostic, Event, HistoryMessage, MaintenanceFailure, OpenOutcome,
-    OpenRefusal, PhoneRing, PlanAccount, RoleModelProvider, RunningTurn, TurnRefusal, TurnStamp,
-    TurnStatus,
+    CharacterState, Diagnostic, Event, MaintenanceFailure, OpenOutcome, OpenRefusal, PhoneRing,
+    PlanAccount, RoleModelProvider, RunningTurn, TurnRefusal, TurnStamp, TurnStatus,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::{Instant, sleep_until};
@@ -76,6 +75,9 @@ enum Command {
     Queued,
     /// The person changed her phone: she reads its rings again.
     PhoneChanged,
+    /// Something of hers failed in the background, said in a sentence: she
+    /// notes it as maintenance.
+    Maintenance(String),
 }
 
 /// The daemon's hold on one actor: what it asks her, her health as she
@@ -208,6 +210,13 @@ impl CharacterHandle {
         let _ = self.commands.send(Command::PhoneChanged);
     }
 
+    /// Tells her something of hers failed in the background, which she
+    /// notes as maintenance, as one of her own.
+    pub(crate) fn note_maintenance(&self, message: String) {
+        // An actor that ended notes nothing more.
+        let _ = self.commands.send(Command::Maintenance(message));
+    }
+
     /// The sentence she answers with while she takes nothing.
     pub(crate) fn unavailable(&self) -> String {
         not_ready(&self.id, &self.health())
@@ -260,11 +269,11 @@ fn not_ready(id: &Identifier, health: &CharacterHealth) -> String {
 /// What she is built of, from her package and her settings as they were
 /// when she was built: who she is, her data, the name the person goes by,
 /// the model she answers with, or what she needs for one, the model her
-/// translator asks when her settings choose it a service of its own, or
-/// what it needs for one, the plugins she answers with, her model's
-/// window, and those settings and the home's sign-in to the plan she or
-/// her translator thinks with, if either does, which her next request
-/// compares with what they are then.
+/// translator asks, or what it needs for one, the plugins she answers with,
+/// the world she lives in, by its id, when her package brings one, her
+/// model's window, and those settings and the home's sign-in to the plan
+/// she or her translator thinks with, if either does, which her next
+/// request compares with what they are then.
 #[derive(Debug)]
 struct Built {
     character: Character,
@@ -272,8 +281,9 @@ struct Built {
     person: SpeakerName,
     context_window: NonZeroU64,
     model: Result<Arc<dyn RoleModelAdapter>, String>,
-    translator: Option<Result<Arc<dyn RoleModelAdapter>, String>>,
+    translator: Result<Arc<dyn RoleModelAdapter>, String>,
     host: PluginHost,
+    lives_in: Option<Identifier>,
     settings: CharacterSettings,
     signed_in: Option<PlanAccount>,
 }
@@ -462,6 +472,7 @@ impl Actor {
             // She looks in her inbox whenever she is free.
             Command::Queued => {}
             Command::PhoneChanged => self.phone_changed().await,
+            Command::Maintenance(message) => self.her.note_maintenance(message),
         }
     }
 
@@ -659,6 +670,7 @@ impl Actor {
                     // She looks in her inbox, and reads her phone's rings,
                     // again once the turn ends.
                     Command::Queued | Command::PhoneChanged => {}
+                    Command::Maintenance(message) => self.her.note_maintenance(message),
                 },
             }
         }
@@ -902,6 +914,7 @@ impl Actor {
                 });
             }
             Command::Queued | Command::PhoneChanged => {}
+            Command::Maintenance(message) => self.her.note_maintenance(message),
         }
     }
 }
@@ -973,18 +986,12 @@ impl Her {
         self.health.borrow().state
     }
 
-    /// The person's newest message to her as they wrote it, by the
-    /// scrollback of their conversation, however far back it lies; none
-    /// while they never wrote, or where it cannot be read.
+    /// The person's newest message to her as they wrote it, as
+    /// [`history::person_wrote`] reads it.
     async fn person_wrote(&self) -> Option<VisibleText> {
         let (home, id) = (self.world.home.clone(), self.id.clone());
-        let theirs = |message: &HistoryMessage| message.role == VisibleMessageRole::User;
 
-        blocking(move || history::newest(&home, &id, theirs, 1))
-            .await
-            .ok()?
-            .pop()
-            .map(|message| message.written.unwrap_or(message.text))
+        blocking(move || history::person_wrote(&home, &id)).await
     }
 
     /// The sentence she answers with while she takes nothing.
@@ -1140,7 +1147,7 @@ struct Current<'a> {
 
 impl<'a> Current<'a> {
     fn new(her: &'a Her, built: &'a mut Built, adapter: Arc<dyn RoleModelAdapter>) -> Self {
-        let translator = HerTranslator::of(her, built, &adapter);
+        let translator = HerTranslator::of(her, built);
 
         Self {
             her,
@@ -1163,15 +1170,11 @@ struct HerTranslator<'a> {
 
 impl<'a> HerTranslator<'a> {
     /// Hers as `built` has her, while she speaks a language of her own
-    /// and the person reads another: on the model her settings choose it,
-    /// else on `model`, the one she speaks with.
-    fn of(her: &'a Her, built: &Built, model: &Arc<dyn RoleModelAdapter>) -> Option<Self> {
+    /// and the person reads another.
+    fn of(her: &'a Her, built: &Built) -> Option<Self> {
         Some(Self {
             her,
-            model: built
-                .translator
-                .clone()
-                .unwrap_or_else(|| Ok(Arc::clone(model))),
+            model: built.translator.clone(),
             between: Between::of(
                 built.settings.host(),
                 built.character.profile.display_name.clone(),
@@ -1258,7 +1261,7 @@ impl Mind for Current<'_> {
         let rebuilt = self.her.refresh(self.built).await?;
 
         self.adapter = self.built.model.clone()?;
-        self.translator = HerTranslator::of(self.her, self.built, &self.adapter);
+        self.translator = HerTranslator::of(self.her, self.built);
         Ok(rebuilt)
     }
 }
@@ -1311,6 +1314,7 @@ async fn take_turn(
     let line = cause.line();
     let committed = AtomicBool::new(line.is_none());
     let running = Mutex::new(turn);
+    let lives_in = built.lives_in.clone();
     let listener = |progress: Progress| {
         if matches!(progress, Progress::UserMessage { .. }) {
             committed.store(true, Ordering::Relaxed);
@@ -1319,6 +1323,7 @@ async fn take_turn(
         let events = told(
             &mut running.lock().unwrap_or_else(PoisonError::into_inner),
             progress,
+            lives_in.as_ref(),
         );
 
         for event in events {
@@ -1369,8 +1374,9 @@ async fn take_turn(
 /// and her host built with `broker` to ask the person, her settings for
 /// its own plugin to read and change, through `daemon`, the App Store's
 /// catalog for her phone to read, the internet her apps reach, the
-/// person's connections they ask a model through, until `stop`, and her
-/// conversation with the person as her phone's own apps show it.
+/// person's connections they ask a model through, until `stop`, her
+/// conversation with the person as her phone's own apps show it, and the
+/// world her package brings, with its files in the home.
 fn assemble(
     world: &Arc<World>,
     id: &Identifier,
@@ -1406,31 +1412,30 @@ fn assemble(
     )
     .map_err(|error| unmaterialized(id, error))?;
     let signed_in = plan_sign_in(world, settings.host());
-    let translator = settings
-        .host()
-        .translator()
-        .map(|own| model(world, &daemon, &own, signed_in.as_ref()));
+    let translator = translator(world, &daemon, settings.host(), signed_in.as_ref());
     let model = model(world, &daemon, settings.host(), signed_in.as_ref());
     let cautions: Vec<&str> = resolution.cautions().map(Diagnostic::message).collect();
     let connections = PersonConnections::new(Arc::clone(world), daemon.clone(), stop);
     let chats = HerChats::new(world.home.clone(), daemon.clone(), id.clone());
+    let builder = PluginHost::builder(
+        Arc::new(data.clone()),
+        broker,
+        Arc::new(CharacterConfig::new(Arc::clone(world), daemon, id.clone())),
+        Arc::clone(&world.catalog),
+        Arc::clone(&world.internet),
+        Arc::new(connections),
+        Arc::new(chats),
+    );
+    let builder = match &definition.world {
+        Some(hers) => builder.world(hers.clone(), world.home.world_files(hers.id())),
+        None => builder,
+    };
     let host = settings
         .plugins()
         .filter_map(|(plugin_id, values)| Some((world.plugin(plugin_id)?, values)))
-        .fold(
-            PluginHost::builder(
-                Arc::new(data.clone()),
-                broker,
-                Arc::new(CharacterConfig::new(Arc::clone(world), daemon, id.clone())),
-                Arc::clone(&world.catalog),
-                Arc::clone(&world.internet),
-                Arc::new(connections),
-                Arc::new(chats),
-            ),
-            |builder, (plugin, values)| {
-                builder.plugin(plugin.manifest().clone(), values.clone(), plugin.factory())
-            },
-        )
+        .fold(builder, |builder, (plugin, values)| {
+            builder.plugin(plugin.manifest().clone(), values.clone(), plugin.factory())
+        })
         .activate()
         .map_err(|error| error_sentence(&error))?;
 
@@ -1452,6 +1457,7 @@ fn assemble(
             model,
             translator,
             host,
+            lives_in: definition.world.as_ref().map(|hers| hers.id().clone()),
             settings,
             signed_in,
         },
@@ -1461,7 +1467,7 @@ fn assemble(
 /// Whom the home is signed in to a ChatGPT plan as, while `host` chooses
 /// the plan for her or for her translator: what their models depend on
 /// beyond her settings.
-fn plan_sign_in(world: &World, host: &HostSettings) -> Option<PlanAccount> {
+pub(crate) fn plan_sign_in(world: &World, host: &HostSettings) -> Option<PlanAccount> {
     [host.role_model_provider, host.translator_provider]
         .contains(&Some(RoleModelProvider::Chatgpt))
         .then(|| world.chatgpt.account())
@@ -1505,6 +1511,21 @@ pub(crate) fn model(
     });
 
     built(world, service.as_ref())
+}
+
+/// The model her translator asks, as [`model`] builds one: the service and
+/// model `host`, her settings, choose it, else the model she speaks with;
+/// or the sentence saying what it needs.
+pub(crate) fn translator(
+    world: &World,
+    daemon: &WeakDaemon,
+    host: &HostSettings,
+    account: Option<&PlanAccount>,
+) -> Result<Arc<dyn RoleModelAdapter>, String> {
+    match host.translator() {
+        Some(own) => model(world, daemon, &own, account),
+        None => model(world, daemon, host, account),
+    }
 }
 
 /// The ChatGPT plan asked for `model`: on the home's sign-in, through

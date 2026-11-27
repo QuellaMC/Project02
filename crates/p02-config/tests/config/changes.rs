@@ -527,7 +527,10 @@ fn a_change_that_fails_after_her_packages_settings_are_settled_leaves_them_as_sh
         assert_eq!(
             serde_json::from_slice::<Value>(&std::fs::read(world.overlay("mira")).unwrap())
                 .unwrap(),
-            document(json!({"plugins": {"character-state": {"enabled": true}}}))
+            document(json!({"plugins": {
+                "character-state": {"enabled": true},
+                "world": {"enabled": true},
+            }}))
         );
         assert_eq!(fingerprint(&world.view(&of("mira"))), read);
         assert!(matches!(

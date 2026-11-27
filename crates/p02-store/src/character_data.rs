@@ -10,7 +10,7 @@ use p02_core::Timestamp;
 use p02_shared::{Identifier, PathEntry, create_directories, describe_entry};
 
 use crate::error::StorageError;
-use crate::home::{Home, check_real};
+use crate::home::{Home, check_real, check_root};
 use crate::layout::{
     CONFIG_FILE, EntryKind, INBOX_FILE, LOCKS_DIRECTORY, PLUGIN_DATA_DIRECTORY,
     SESSION_CATALOG_FILE, SESSIONS_DIRECTORY, TAKEN_LINES_DIRECTORY,
@@ -174,8 +174,7 @@ impl CharacterData {
     pub(crate) fn checked_plugin_root(&self, plugin: &Identifier) -> Result<PathBuf, StorageError> {
         let root = self.plugin_root(plugin);
 
-        check_real(&self.root.join(PLUGIN_DATA_DIRECTORY), EntryKind::Directory)?;
-        check_real(&root, EntryKind::Directory)?;
+        check_root(&root)?;
         Ok(root)
     }
 

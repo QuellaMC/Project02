@@ -15,6 +15,7 @@ pub(crate) const RAW_EVENTS_FILE: &str = "raw-events.jsonl";
 pub(crate) const TAKEN_LINES_DIRECTORY: &str = "taken-lines";
 pub(crate) const INBOX_FILE: &str = "inbox.jsonl";
 pub(crate) const PLUGIN_DATA_DIRECTORY: &str = "plugin-data";
+pub(crate) const WORLD_DATA_DIRECTORY: &str = "world-data";
 pub(crate) const DATABASE_SUFFIX: &str = ".sqlite";
 /// What SQLite keeps beside a database in write-ahead-log mode, each named
 /// by the database's name and this.

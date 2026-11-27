@@ -1,8 +1,8 @@
 # p02-characters
 
 Character packages: the descriptor that defines a character, and the
-discovery that finds every package a home has. It depends on p02-core and
-p02-shared.
+discovery that finds every package a home has. It depends on p02-core,
+p02-shared and p02-world.
 
 - **The descriptor.** A package is a folder holding one
   `project02.character.json`, format `project02.character.v1`: her id and
@@ -10,10 +10,13 @@ p02-shared.
   speaks when it names one, as `identity.language`, a language tag such as
   `ja` or `pt-BR`, a persona of one section or more, the version of that
   content, the plugins she expects, required or recommended, each
-  listed once, with values for their settings, and her translation notes,
-  `translation.words` and `translation.tone`, kept as written. Her
-  language and her notes become her own settings at her first start, where
-  the person can change them.
+  listed once, with values for their settings, her translation notes,
+  `translation.words` and `translation.tone`, kept as written, and the
+  world she comes from when it brings one, `world`, read by p02-world's
+  rules. Her language and her notes become her own settings at her first
+  start, where the person can change them. The plugins her package
+  switches on are those it lists, and the world's exactly when it brings a
+  world.
   A descriptor is read once, as UTF-8 JSON of at most 64 KiB, and
   what it holds that a descriptor does not know is not read; a refusal
   names the first rule it breaks, and says it in plain words for a person
@@ -41,4 +44,6 @@ p02-shared.
   leave a package unpublished.
 - **The bundled packages** are the folders of `packages/`, each read when
   the crate builds: today Mira, a person who lives in our world, whose
-  package says her phone is simply hers, not a gift from the person.
+  package says her phone is simply hers, not a gift from the person, and
+  brings the world she lives in, The Port: her flat, the print studio and
+  the bakery downstairs.

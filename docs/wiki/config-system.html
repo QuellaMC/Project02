@@ -210,7 +210,8 @@
       used. A character switched off keeps its settings readable, and the same field switches
       it back on. An absent character field keeps
       inheriting future global changes; global values are never copied into the overlay. On
-      first selection, the character package contributes only its plugin declarations and the
+      first selection, the character package contributes only its plugin declarations, the
+      world's plugin switched on when it brings a world as <code>world</code>, and the
       values her own settings screen could set, the language she speaks, its
       <code>identity.language</code> as her <code>language</code>, and her translation notes,
       its <code>translation.words</code> and <code>translation.tone</code> as her
@@ -412,15 +413,25 @@
 
     <p>
       Every plugin is compiled into the daemon: the host's own <code>runtime.plugin</code>, and
-      the bundled character memory, character state, mem0, her phone, reply style and session
-      history, each with its descriptor, format <code>project02.plugin.v2</code>, beside its code
-      in <code>crates/p02-plugins</code>. The descriptor's manifest is what the settings are judged
-      against before any plugin is built. Nothing is loaded from a home: a
+      the bundled character memory, character state, mem0, her phone, reply style, session
+      history and her world, each with its descriptor, format <code>project02.plugin.v2</code>,
+      beside its code in <code>crates/p02-plugins</code>. The descriptor's manifest is what the
+      settings are judged against before any plugin is built. Nothing is loaded from a home: a
       <code>plugins.&lt;id&gt;</code> stanza naming no plugin of the build is reported as the
       warning <code>runtime_config_unknown_plugin</code> at its path, and blocks nothing.
       Bundled Character State is switched on where a character's package requires it: the
       Mira package enables it in Mira's overlay rather than through a global manifest default,
       and sets her phone's <code>gift</code> field off there the same way.
+    </p>
+
+    <p>
+      <code>world</code>, a character's own, is switched on by her package when it brings a
+      world, as Mira's does, and runs for no character whose package brings none: switched on
+      for one, it is off in her view, and her start warns that she runs without it. Its store
+      is not hers: the host hands it the files of her world in the home,
+      <code>world-data/&lt;world id&gt;/</code>, made from her package's world the first time
+      they are read and kept from then on, under a lock of the home's that whoever changes the
+      world holds.
     </p>
 
     <h2>Pre-release compatibility and future import</h2>

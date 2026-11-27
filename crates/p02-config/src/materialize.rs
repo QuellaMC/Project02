@@ -120,23 +120,21 @@ pub(crate) fn merged_overlay(
 }
 
 /// What her package contributes to her settings, as an overlay holding
-/// only that: each plugin of this build it expects switched on, the values
-/// it gives, the language she speaks and her translation notes, each made
-/// as a change on her own screen would make it. A plugin this build lacks
-/// configures nothing. A value her screen could not set is skipped, as is
-/// a credential, a server or a path: a package may come from a stranger,
-/// and those are the person's to choose.
+/// only that: each plugin of this build it switches on, the world's among
+/// them when it brings a world, the values it gives, the language she
+/// speaks and her translation notes, each made as a change on her own
+/// screen would make it. A plugin this build lacks configures nothing. A
+/// value her screen could not set is skipped, as is a credential, a server
+/// or a path: a package may come from a stranger, and those are the
+/// person's to choose.
 pub(crate) fn package_document(
     sections: &Sections,
     character: &CharacterDefinition,
 ) -> (Map<String, Value>, Vec<Diagnostic>) {
     let target = Target::Character(character.profile.id.clone());
     let expectations = &character.plugins;
-    let switched_on: BTreeSet<&Identifier> = expectations
-        .required()
-        .iter()
-        .chain(expectations.recommended())
-        .collect();
+    let expected = character.expected_plugins();
+    let switched_on: BTreeSet<&Identifier> = expected.iter().collect();
     let ids: BTreeSet<&Identifier> = switched_on
         .iter()
         .copied()

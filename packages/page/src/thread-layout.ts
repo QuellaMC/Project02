@@ -103,7 +103,7 @@ type App = {readonly name: string; readonly colour: string};
 type CalendarDay = {readonly year: number; readonly day: number};
 
 /** A moment as the viewer's clock writes it: the day it falls on, counted from 1970; that day in the page's words; and its time. */
-type Written = {
+export type Written = {
   readonly day: number;
   readonly words: string;
   readonly time: string;
@@ -155,21 +155,23 @@ export function labelOf(app: string): string | undefined {
  * line as she read it.
  */
 export function drawnOf(message: Message, language?: string): Drawn {
-  const inHers = (text: string): Form =>
-    language === undefined ? {text} : {text, lang: language};
-
   if (message.role === 'user') {
     return message.written === undefined
       ? {text: message.text}
-      : {text: message.written, translation: inHers(message.text)};
+      : {text: message.written, translation: formIn(message.text, language)};
   }
 
   return {
-    ...inHers(message.text),
+    ...formIn(message.text, language),
     ...(message.translation === undefined
       ? {}
       : {translation: {text: message.translation}}),
   };
+}
+
+/** `text` in `language`, the language she speaks when she has one of her own, marked with it. */
+export function formIn(text: string, language?: string): Form {
+  return language === undefined ? {text} : {text, lang: language};
 }
 
 /**
@@ -267,12 +269,24 @@ function reached(
     return {word: lineWords.delivered};
   }
 
-  const {day, words, time} = write(Date.parse(readAt));
-
   return {
     word: 'Read',
-    read: {when: day === write(now).day ? time : words, at: readAt},
+    read: {when: whenOf(write, now, Date.parse(readAt)), at: readAt},
   };
+}
+
+/**
+ * A moment where no day stands above it, as `write` writes it at `now`:
+ * the time alone on the day it falls on, and the day on another.
+ */
+export function whenOf(
+  write: (at: number) => Written,
+  now: number,
+  at: number,
+): string {
+  const {day, words, time} = write(at);
+
+  return day === write(now).day ? time : words;
 }
 
 /** An app by its id; one the page does not know goes by its id, in the page's blue. */
@@ -350,9 +364,13 @@ function layer(
  * `Yesterday`, the weekday within the five days before that, so that a
  * weekday never names today's a week ago, the date in this year, and the
  * date with its year in another — and the time, hour and minute, as their
- * system writes one.
+ * system writes one. Her world's window words its days and times by it too.
  */
-function writer({now, locale, timeZone}: Clock): (at: number) => Written {
+export function writer({
+  now,
+  locale,
+  timeZone,
+}: Clock): (at: number) => Written {
   const calendar = new Intl.DateTimeFormat('en-US', {
     timeZone,
     year: 'numeric',

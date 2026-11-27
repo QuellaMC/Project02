@@ -89,7 +89,48 @@ fn her_first_start_writes_only_her_packages_settings_for_the_plugins_this_build_
 
     assert_eq!(
         overlay_of(&world, "mira"),
-        document(json!({"plugins": {"character-state": {"enabled": true}}}))
+        document(json!({"plugins": {
+            "character-state": {"enabled": true},
+            "world": {"enabled": true},
+        }}))
+    );
+}
+
+/// The world's plugin runs for Mira, whose package brings a world, and for
+/// no character whose package brings none, whatever her package or her
+/// settings say: she starts without it, warned of it.
+#[test]
+fn the_worlds_plugin_runs_exactly_for_a_character_whose_package_brings_a_world() {
+    let world = World::new();
+    let runs = |character: &str| {
+        world
+            .resolve(&of(character))
+            .settings()
+            .plugins()
+            .any(|(plugin, _)| plugin.as_str() == "world")
+    };
+
+    world
+        .package(
+            "zeta",
+            &json!({"plugins": {"required": ["world"]}}),
+            "1.0.0",
+        )
+        .write_overlay(
+            "zeta",
+            &document(json!({"plugins": {"world": {"enabled": true}}})),
+        );
+    start(&world, "zeta").unwrap();
+
+    assert!(runs("mira"));
+    assert!(!runs("zeta"));
+    assert_eq!(
+        world
+            .resolve(&of("zeta"))
+            .cautions()
+            .map(|caution| caution.message().to_owned())
+            .collect::<Vec<_>>(),
+        ["Her package brings no world, so she is running without world."]
     );
 }
 

@@ -1,11 +1,10 @@
 /**
- * Her phone's window, as the approved design draws it: a bar saying whose
- * phone it is, that the person is watching, and a way to close the window,
- * which in a window without a frame of its own also moves the window and
- * keeps it on top of others; her phone, or a sentence in its place saying
- * why it cannot be shown; and a line under it saying what she last did. It
- * holds no rule: what it shows comes from the window's store, and what the
- * person does goes to the session.
+ * Her phone's window, as the approved design draws it: the bar of a window
+ * of hers, saying whose phone it is and that the person is watching; her
+ * phone, or a sentence in its place saying why it cannot be shown; and a
+ * line under it saying what she last did. It holds no rule: what it shows
+ * comes from the window's store, and what the person does goes to the
+ * session.
  */
 import {useEffect, useState, useSyncExternalStore} from 'react';
 
@@ -14,6 +13,7 @@ import {lineOf} from './phone.ts';
 import {PhoneDevice} from './phone-device.tsx';
 import type {PhoneSession} from './phone-session.ts';
 import {Face, Icon} from './settings-controls.tsx';
+import {WindowBar} from './window-bar.tsx';
 
 export function PhoneWindow({session}: {readonly session: PhoneSession}) {
   const state = useSyncExternalStore(session.subscribe, session.getState);
@@ -35,60 +35,25 @@ export function PhoneWindow({session}: {readonly session: PhoneSession}) {
 
   return (
     <div className="phone-window">
-      <header
-        className={`ui-bar${frame === undefined ? '' : ' ui-bar-moves'}`}
-        onMouseDown={
-          frame === undefined
-            ? undefined
-            : event => {
-                // The bar moves the window, but for its buttons.
-                if (
-                  event.button === 0 &&
-                  !(
-                    event.target instanceof Element &&
-                    event.target.closest('button') !== null
-                  )
-                ) {
-                  event.preventDefault();
-                  session.startDragging();
-                }
-              }
-        }
-      >
-        {name === undefined ? null : (
-          <>
+      <WindowBar
+        lead={
+          name === undefined ? undefined : (
             <Face id={state.characterId} name={name} size="bar" />
-            <h1 className="ui-bar-title">{`${name}'s Phone`}</h1>
-          </>
-        )}
-        {said === undefined ? (
-          <span className="ui-badge ui-badge-quiet phone-watching">
-            <Icon name="eye" size={13} />
-            <span>Watching</span>
-          </span>
-        ) : null}
-        {frame === undefined ? null : (
-          <button
-            type="button"
-            className="ui-round"
-            aria-label="Keep on top of other windows"
-            aria-pressed={frame.pinned}
-            onClick={() => {
-              session.pin(!frame.pinned);
-            }}
-          >
-            <Icon name="pin" size={15} />
-          </button>
-        )}
-        <button
-          type="button"
-          className="ui-round"
-          aria-label="Close her phone"
-          onClick={session.close}
-        >
-          <Icon name="cross" size={16} weight={2.1} />
-        </button>
-      </header>
+          )
+        }
+        title={name === undefined ? undefined : `${name}'s Phone`}
+        beside={
+          said === undefined ? (
+            <span className="ui-badge ui-badge-quiet phone-watching">
+              <Icon name="eye" size={13} />
+              <span>Watching</span>
+            </span>
+          ) : undefined
+        }
+        frame={frame}
+        verbs={session}
+        closeLabel="Close her phone"
+      />
       {said === undefined ? (
         <PhoneDevice state={state} now={now} session={session} />
       ) : (

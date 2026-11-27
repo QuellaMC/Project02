@@ -1,5 +1,6 @@
 import type {CharacterSummary} from '@project02/wire/contract';
-import {avatarColor, initialOf} from './look.ts';
+import {hasWindow, herWindows, type HerWindow} from './her-windows.ts';
+import {avatarColor, initialOf, type IconName} from './look.ts';
 import type {Session} from './session.ts';
 import {Icon} from './settings-controls.tsx';
 import {
@@ -118,15 +119,23 @@ export function ThreadPane({
         <Avatar id={thread.characterId} name={name} />
         <h2 className="thread-name">{name}</h2>
         {character === undefined ? null : <StatePill character={character} />}
-        {state.phoneless.has(thread.characterId) ? null : (
-          <HerPhoneButton
-            pressed={state.phoneWindow === thread.characterId}
-            phoning={doing === 'phoning'}
-            onToggle={() => {
-              session.togglePhone(thread.characterId);
-            }}
-          />
-        )}
+        <span className="thread-windows">
+          {herWindows.map(herWindow =>
+            hasWindow(state, herWindow, thread.characterId) ? (
+              <HerWindowButton
+                key={herWindow}
+                herWindow={herWindow}
+                pressed={
+                  state.windowShows.get(herWindow) === thread.characterId
+                }
+                inUse={herWindow === 'phone' && doing === 'phoning'}
+                onToggle={() => {
+                  session.toggleWindow(herWindow, thread.characterId);
+                }}
+              />
+            ) : null,
+          )}
+        </span>
       </header>
       {thread.unread === undefined ? null : (
         <p className="notice" role="status">
@@ -233,31 +242,43 @@ export function Composer({
   );
 }
 
+/** The button of each window of hers: its words and its icon. */
+const windowButtons: Readonly<
+  Record<HerWindow, {readonly words: string; readonly icon: IconName}>
+> = {
+  world: {words: 'Her World', icon: 'globe'},
+  phone: {words: 'Her Phone', icon: 'phone'},
+};
+
 /**
- * Opens her phone in its window, and closes it: filled and pressed while
- * that window shows her phone, and with a dot while she is using her
- * phone, whether the window is open or not.
+ * Opens her phone or her world in its window, and closes it: filled and
+ * pressed while that window shows hers, and her phone's with a dot while
+ * she is using her phone, whether the window is open or not.
  */
-function HerPhoneButton({
+function HerWindowButton({
+  herWindow,
   pressed,
-  phoning,
+  inUse,
   onToggle,
 }: {
+  readonly herWindow: HerWindow;
   readonly pressed: boolean;
-  readonly phoning: boolean;
+  readonly inUse: boolean;
   readonly onToggle: () => void;
 }) {
+  const {words, icon} = windowButtons[herWindow];
+
   return (
     <button
       type="button"
-      className="thread-phone"
+      className="thread-window"
       aria-pressed={pressed}
       onClick={onToggle}
     >
-      <Icon name="phone" size={16} weight={1.8} />
-      Her Phone
-      {phoning ? (
-        <span className="thread-phone-dot" role="img" aria-label="In use" />
+      <Icon name={icon} size={16} weight={1.8} />
+      {words}
+      {inUse ? (
+        <span className="thread-window-dot" role="img" aria-label="In use" />
       ) : null}
     </button>
   );
