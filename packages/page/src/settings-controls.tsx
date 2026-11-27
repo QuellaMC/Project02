@@ -2,16 +2,19 @@
  * The settings window's own controls, each drawn as the approved design
  * draws it: icons and tiles, avatars, the switch, the boxes a value is
  * typed or pasted into, the segmented control, pills, a select, and the
- * cards and rows they sit in. They hold no rule: what each shows comes
- * from the settings model, and each reports a change through the props it
- * is given.
+ * cards and rows they sit in; and the icons, solid tiles, faces and the way
+ * back that her windows draw too. They hold no rule: what each shows comes
+ * from the settings model, or a window's, and each reports a change through
+ * the props it is given.
  */
 import {useRef, useState, type ReactNode} from 'react';
 
 import {
   avatarColor,
+  iconOf,
   iconPath,
   initialOf,
+  tintOf,
   type IconName,
   type Tint,
 } from './look.ts';
@@ -76,6 +79,43 @@ export function Tile({
   );
 }
 
+/** A solid tile's icon at each size a window draws one: its size, and its stroke, finer on a larger tile. */
+const solidGlyphs = {
+  22: {size: 13, weight: 2},
+  24: {size: 15, weight: 1.9},
+  28: {size: 16, weight: 1.9},
+  40: {size: 22, weight: 1.7},
+  44: {size: 24, weight: 1.7},
+  56: {size: 30, weight: 1.7},
+  68: {size: 36, weight: 1.6},
+} as const;
+
+/**
+ * An icon white on its tint, at a size a window of hers draws a tile: an
+ * app's on her phone, a place's or a thing's in her world. An icon or a
+ * tint the page does not know falls back to its plainest.
+ */
+export function SolidTile({
+  icon,
+  tint,
+  size,
+}: {
+  readonly icon: string;
+  readonly tint: string;
+  readonly size: keyof typeof solidGlyphs;
+}) {
+  const glyph = solidGlyphs[size];
+
+  return (
+    <span
+      className={`tile tile-solid ui-tile-${String(size)} tint-${tintOf(tint)}`}
+      aria-hidden="true"
+    >
+      <Icon name={iconOf(icon)} size={glyph.size} weight={glyph.weight} />
+    </span>
+  );
+}
+
 /** A character's initial on her colour, the same wherever she appears. */
 export function Face({
   id,
@@ -84,7 +124,7 @@ export function Face({
 }: {
   readonly id: string;
   readonly name: string;
-  readonly size: 'bar' | 'side' | 'row' | 'page' | 'welcome';
+  readonly size: 'crowd' | 'bar' | 'side' | 'line' | 'row' | 'page' | 'welcome';
 }) {
   return (
     <span
@@ -200,6 +240,41 @@ export function FileButton({
         }}
       />
     </>
+  );
+}
+
+/** The way back in a window of hers: a round button, its chevron in the link's colour. */
+export function RoundBack({
+  label,
+  onClick,
+  className,
+}: {
+  readonly label: string;
+  readonly onClick: () => void;
+  /** Where the window places it. */
+  readonly className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      className={`ui-round ui-round-link ui-round-back${className === undefined ? '' : ` ${className}`}`}
+      aria-label={label}
+      onClick={onClick}
+    >
+      <svg
+        viewBox="0 0 10 18"
+        width="9"
+        height="16"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M8 2L2 9l6 7" />
+      </svg>
+    </button>
   );
 }
 

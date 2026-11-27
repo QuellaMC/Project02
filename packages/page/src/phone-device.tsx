@@ -26,9 +26,8 @@ import type {
   ScreenItem,
   ScreenRange,
   ScreenRow,
-  ScreenTile,
 } from '@project02/wire/contract';
-import {avatarColor, iconOf, initialOf, tintOf} from './look.ts';
+import {avatarColor, iconOf, initialOf} from './look.ts';
 import {
   clockParts,
   liveAt,
@@ -38,7 +37,7 @@ import {
   type PhoneState,
 } from './phone.ts';
 import type {PhoneSession} from './phone-session.ts';
-import {Icon} from './settings-controls.tsx';
+import {Icon, RoundBack, SolidTile} from './settings-controls.tsx';
 import {Bubble} from './thread.tsx';
 import {hourAndMinute, labelOf, laidOut, onHerPhone} from './thread-layout.ts';
 import {useFollowing} from './thread-scroll.ts';
@@ -49,13 +48,6 @@ type ReadoutItem = Extract<ScreenItem, {kind: 'readout'}>;
 type AppItem = Extract<ScreenItem, {kind: 'app'}>;
 type GlanceItem = Extract<ScreenItem, {kind: 'glance'}>;
 type FieldItem = Extract<ScreenItem, {kind: 'field'}>;
-
-/** An app's tile at each size her phone draws one: its icon's size and its stroke there. */
-const tileGlyphs = {
-  home: {size: 30, weight: 1.7},
-  row: {size: 22, weight: 1.7},
-  header: {size: 36, weight: 1.6},
-} as const;
 
 /** The length of the ring a timer's readout is drawn in, whose radius is 100. */
 const ringLength = 2 * Math.PI * 100;
@@ -148,7 +140,7 @@ function Home({
             session.look(app.id, app.opensOn);
           }}
         >
-          <AppTile tile={app} size="home" />
+          <SolidTile icon={app.icon} tint={app.tint} size={56} />
           <span className="phone-app-name">{app.name}</span>
         </button>
       ))}
@@ -255,26 +247,11 @@ function ThreadView({
   return (
     <div className="phone-thread">
       <header className="phone-thread-head">
-        <button
-          type="button"
-          className="ui-round ui-round-link phone-thread-back"
-          aria-label="Back"
+        <RoundBack
+          label="Back"
           onClick={session.goHome}
-        >
-          <svg
-            viewBox="0 0 10 18"
-            width="9"
-            height="16"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.4"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            aria-hidden="true"
-          >
-            <path d="M8 2L2 9l6 7" />
-          </svg>
-        </button>
+          className="phone-thread-back"
+        />
         {person === undefined ? null : (
           <>
             <span className="face phone-thread-face" aria-hidden="true">
@@ -440,7 +417,9 @@ function Row({
   // their grid sets New and the value on the title's line.
   return (
     <div className={`ui-row${looksOf(row, fresh, end)}`}>
-      {row.tile === undefined ? null : <AppTile tile={row.tile} size="row" />}
+      {row.tile === undefined ? null : (
+        <SolidTile icon={row.tile.icon} tint={row.tile.tint} size={40} />
+      )}
       <span className="phone-row-words">
         {row.caption === undefined ? null : (
           <span className="ui-detail phone-row-above">{row.caption}</span>
@@ -520,7 +499,7 @@ function AppHeader({
 }) {
   return (
     <div className="phone-app-header">
-      <AppTile tile={app.tile} size="header" />
+      <SolidTile icon={app.tile.icon} tint={app.tile.tint} size={68} />
       <div className="phone-app-header-words">
         <h3 className="phone-app-header-name">{app.name}</h3>
         <span className="ui-detail">{app.subtitle}</span>
@@ -616,26 +595,6 @@ function Field({field}: {readonly field: FieldItem}) {
       )}
       <span className="phone-field-text">{field.text}</span>
     </div>
-  );
-}
-
-/** An app's tile: its icon, white, on its tint, at the size her phone draws it there. */
-function AppTile({
-  tile,
-  size,
-}: {
-  readonly tile: ScreenTile;
-  readonly size: keyof typeof tileGlyphs;
-}) {
-  const glyph = tileGlyphs[size];
-
-  return (
-    <span
-      className={`tile tile-solid phone-tile-${size} tint-${tintOf(tile.tint)}`}
-      aria-hidden="true"
-    >
-      <Icon name={iconOf(tile.icon)} size={glyph.size} weight={glyph.weight} />
-    </span>
   );
 }
 

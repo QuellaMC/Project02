@@ -51,8 +51,7 @@
   --teal-glyph: #008198;
   --graphite-tile: rgba(28, 28, 30, 0.12);
   --graphite-glyph: #1c1c1e;
-  --messages-tile: rgba(52, 199, 89, 0.14);
-  --messages-glyph: #248a3d;
+  --green-tile: rgba(52, 199, 89, 0.14);
   --telegram-tile: rgba(47, 127, 196, 0.14);
   --telegram-glyph: #2f7fc4;
   --float-shadow:
@@ -60,6 +59,10 @@
   /* A bar floating over what scrolls under it, as tabs do. */
   --lift-shadow:
     0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 6px 20px rgba(0, 0, 0, 0.14);
+  /* A sheet risen over a panel, and the veil over what it covers. */
+  --sheet-shadow:
+    0 0 0 0.5px rgba(0, 0, 0, 0.06), 0 -6px 30px rgba(0, 0, 0, 0.16);
+  --veil: rgba(0, 0, 0, 0.2);
   --fill-strong: rgba(118, 118, 128, 0.2);
   /* The edge that keeps a dark tile's shape on a dark ground: none in light. */
   --tile-edge: none;
@@ -148,14 +151,16 @@
     --teal-glyph: #00d2e0;
     --graphite-tile: rgba(229, 229, 234, 0.18);
     --graphite-glyph: #e5e5ea;
-    --messages-tile: rgba(48, 209, 88, 0.22);
-    --messages-glyph: #30d158;
+    --green-tile: rgba(48, 209, 88, 0.22);
     --telegram-tile: rgba(77, 163, 255, 0.22);
     --telegram-glyph: #4da3ff;
     --float-shadow:
       0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 8px 24px rgba(0, 0, 0, 0.5);
     --lift-shadow:
       0 0 0 0.5px rgba(255, 255, 255, 0.14), 0 6px 20px rgba(0, 0, 0, 0.6);
+    --sheet-shadow:
+      0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 -6px 30px rgba(0, 0, 0, 0.6);
+    --veil: rgba(0, 0, 0, 0.5);
     --fill-strong: rgba(118, 118, 128, 0.36);
     --tile-edge: inset 0 0 0 0.5px rgba(255, 255, 255, 0.14);
     --device-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
@@ -777,14 +782,19 @@ code {
   font-weight: 600;
 }
 
-/* Her Phone, at the head's end: filled while her phone's window shows her phone, a dot while she is using it. */
-.thread-phone {
+/* Her World and Her Phone, at the head's end: each filled while its window shows hers; her phone's with a dot while she is using it. */
+.thread-windows {
   flex: none;
+  display: flex;
+  gap: 10px;
+  margin-left: auto;
+}
+
+.thread-window {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 32px;
-  margin-left: auto;
   padding: 0 12px;
   border: none;
   border-radius: 16px;
@@ -794,19 +804,19 @@ code {
   font-weight: 600;
 }
 
-.thread-phone[aria-pressed='true'] {
+.thread-window[aria-pressed='true'] {
   background: var(--link);
   color: #ffffff;
 }
 
-.thread-phone-dot {
+.thread-window-dot {
   width: 7px;
   height: 7px;
   border-radius: 50%;
   background: var(--green);
 }
 
-.thread-phone[aria-pressed='true'] .thread-phone-dot {
+.thread-window[aria-pressed='true'] .thread-window-dot {
   background: #ffffff;
 }
 
@@ -1597,121 +1607,97 @@ button.bubble {
   border-radius: 14px;
 }
 
+/*
+ * A tint: its tile and glyph colours in light and dark, and --tint, the
+ * one colour it is drawn solid in, the same in light and dark.
+ */
 .tint-indigo {
+  --tint: #564ade;
   background: var(--indigo-tile);
   color: var(--indigo-glyph);
 }
 
 .tint-blue {
+  --tint: #1e6ef4;
   background: var(--blue-tile);
   color: var(--blue-glyph);
 }
 
 .tint-brown {
+  --tint: #956d51;
   background: var(--brown-tile);
   color: var(--brown-glyph);
 }
 
 .tint-gray {
+  --tint: #6c6c70;
   background: var(--gray-tile);
   color: var(--gray-glyph);
 }
 
 .tint-orange {
+  --tint: #c55300;
   background: var(--orange-tile);
   color: var(--orange-glyph);
 }
 
 .tint-cyan {
+  --tint: #007eae;
   background: var(--cyan-tile);
   color: var(--cyan-glyph);
 }
 
 .tint-pink {
+  --tint: #e7124d;
   background: var(--pink-tile);
   color: var(--pink-glyph);
 }
 
 .tint-mint {
+  --tint: #008575;
   background: var(--mint-tile);
   color: var(--mint-glyph);
 }
 
 .tint-teal {
+  --tint: #008198;
   background: var(--teal-tile);
   color: var(--teal-glyph);
 }
 
 .tint-graphite {
+  --tint: #1c1c1e;
   background: var(--graphite-tile);
   color: var(--graphite-glyph);
 }
 
+.tint-green {
+  --tint: #248a3d;
+  background: var(--green-tile);
+  color: var(--green-ink);
+}
+
+/* The tints of the apps messages come in, as the approved design draws their tiles. */
 .tint-messages {
-  background: var(--messages-tile);
-  color: var(--messages-glyph);
+  --tint: #248a3d;
+  background: var(--green-tile);
+  color: var(--green-ink);
 }
 
 .tint-telegram {
+  --tint: #2f7fc4;
   background: var(--telegram-tile);
   color: var(--telegram-glyph);
 }
 
 /*
  * A tile drawn solid: its icon white on its tint, in light and dark alike,
- * as an app's on her phone and what the card that asks is about.
+ * as an app's on her phone, what the card that asks is about, and a place
+ * or a thing of her world.
  */
 .tile-solid {
+  background: var(--tint);
   color: #ffffff;
-}
-
-.tile-solid.tint-indigo {
-  background: #564ade;
-}
-
-.tile-solid.tint-blue {
-  background: #1e6ef4;
-}
-
-.tile-solid.tint-brown {
-  background: #956d51;
-}
-
-.tile-solid.tint-gray {
-  background: #6c6c70;
-}
-
-.tile-solid.tint-orange {
-  background: #c55300;
-}
-
-.tile-solid.tint-cyan {
-  background: #007eae;
-}
-
-.tile-solid.tint-pink {
-  background: #e7124d;
-}
-
-.tile-solid.tint-mint {
-  background: #008575;
-}
-
-.tile-solid.tint-teal {
-  background: #008198;
-}
-
-.tile-solid.tint-graphite {
-  background: #1c1c1e;
-}
-
-/* The tiles of the apps messages come in, as the approved design draws them. */
-.tile-solid.tint-messages {
-  background: #248a3d;
-}
-
-.tile-solid.tint-telegram {
-  background: #2f7fc4;
 }
 
 .face {
@@ -1731,6 +1717,22 @@ button.bubble {
   width: 24px;
   height: 24px;
   font-size: 10px;
+  font-weight: 700;
+}
+
+/* Who lives in her world, side by side in its window's bar. */
+.face-crowd {
+  width: 22px;
+  height: 22px;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+/* At the start of a line of her world's window, as a 28 tile stands. */
+.face-line {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
   font-weight: 700;
 }
 
@@ -2468,16 +2470,17 @@ a.button-pill {
 
 /*
  * The parts a window is drawn with, laid out as Apple lays out words in
- * round shapes; her phone is drawn with them. What is on a panel keeps a
- * margin from its edges, and a card's corner is the panel's less that
- * margin:
+ * round shapes; her phone and her world are drawn with them. What is on a
+ * panel keeps a margin from its edges, and a card's corner is the panel's
+ * less that margin:
  *   - words start at least six tenths of a corner's radius in from its
  *     edge, so a card's words start 16 in;
  *   - a header above a card lines up with the words in it, and the line
  *     between two rows runs from where their words start to as far before
  *     the edge;
  *   - a bar that would touch a round corner floats, inset from the panel's
- *     edges, and what scrolls under it keeps its room free at its end;
+ *     edges, and what scrolls under it keeps its room free at its end; a
+ *     sheet floats too, its corners the panel's less its inset;
  *   - what scrolls dissolves at the panel's edges instead of being cut;
  *   - a label in a capsule sits on its capitals: its line is trimmed to
  *     them where the browser can, and elsewhere keeps its leading.
@@ -2527,13 +2530,29 @@ a.button-pill {
   overflow-wrap: anywhere;
 }
 
+/* A view's top line: its large title, or a way back, at its start, and the one thing it does at its end. */
+.ui-top {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+}
+
+.ui-top > .ui-btn {
+  margin-left: auto;
+}
+
 /* A list: its header, then its card of rows. */
 .ui-section {
   display: flex;
   flex-direction: column;
 }
 
+/* A header, with what it does at its end where it does something. */
 .ui-head {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
   margin: 0;
   padding: 0 var(--text-inset) 8px;
   font-size: 15px;
@@ -2541,6 +2560,22 @@ a.button-pill {
   font-weight: 600;
   color: var(--secondary);
   overflow-wrap: anywhere;
+}
+
+.ui-head > h3 {
+  margin: 0;
+  font: inherit;
+}
+
+.ui-head-action {
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--link);
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 400;
 }
 
 /* A small quiet line under what it follows. */
@@ -2560,14 +2595,19 @@ a.button-pill {
   box-shadow: var(--card-shadow);
 }
 
-/* A row of a card: 46 tall at least, and 60 with a second line or a tile. */
+/* A row of a card: 46 tall at least, and 60 with a second line or a tile; a button when pressing it opens something. */
 .ui-row {
   position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
   min-height: 46px;
+  margin: 0;
   padding: 7px var(--text-inset);
+  border: none;
+  background: transparent;
+  text-align: left;
 }
 
 .ui-row-two {
@@ -2598,12 +2638,77 @@ a.button-pill {
   color: var(--secondary);
 }
 
-/* What a row says at the end of its title's line. */
+/* What a row says at the end of its title's line, as a time at a row's end. */
 .ui-value {
+  flex: none;
   font-size: 13px;
   line-height: 18px;
   color: var(--secondary);
   font-variant-numeric: tabular-nums;
+}
+
+/* A one-line label in a capsule: on its capitals, cut short where it must; its clip reaches past the trimmed line, so no letter loses a stroke. */
+.ui-label {
+  min-width: 0;
+  margin: -0.3em 0;
+  padding: 0.3em 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-box: trim-both cap alphabetic;
+}
+
+/* An icon's tile at each size a window draws one, its corner a quarter of its size; one of 22, among words, is round. In dark, a hairline keeps a dark tile's shape. */
+.ui-tile-22,
+.ui-tile-24,
+.ui-tile-28,
+.ui-tile-40,
+.ui-tile-44,
+.ui-tile-56,
+.ui-tile-68 {
+  box-shadow: var(--tile-edge);
+}
+
+.ui-tile-22 {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+}
+
+.ui-tile-24 {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+}
+
+.ui-tile-28 {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.ui-tile-40 {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+}
+
+.ui-tile-44 {
+  width: 44px;
+  height: 44px;
+  border-radius: 11px;
+}
+
+.ui-tile-56 {
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+}
+
+.ui-tile-68 {
+  width: 68px;
+  height: 68px;
+  border-radius: 17px;
 }
 
 /* A state said in a word: in the warning's tint and ink, quiet in the fill, or filled in the page's blue. */
@@ -2651,7 +2756,12 @@ a.button-pill {
   color: var(--link);
 }
 
-/* The tab bar: a capsule whose tabs share its width, the one shown in the fill and the link's colour. */
+/* The way back: its chevron a little left of the circle's middle, where it looks centred. */
+.ui-round-back > svg {
+  margin-right: 2px;
+}
+
+/* The tab bar: a capsule, the tab shown in the fill and the link's colour; where it floats, and how wide its tabs are, is the window's. */
 .ui-tabs {
   display: flex;
   padding: 4px;
@@ -2661,10 +2771,7 @@ a.button-pill {
 }
 
 .ui-tab {
-  flex: 1 1 0;
-  min-width: 0;
   height: 46px;
-  padding: 0 2px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -2709,29 +2816,26 @@ a.button-pill {
   cursor: grab;
 }
 
-/* Its title, cut short where it must; its clip reaches past the trimmed line, so no letter loses a stroke. */
+/* Its title, a label cut short where it must. */
 .ui-bar-title {
-  min-width: 0;
-  margin: -0.3em 0;
-  padding: 0.3em 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
   font-size: 14px;
   line-height: 18px;
   font-weight: 600;
-  text-box: trim-both cap alphabetic;
+}
+
+/* What stands at its end: who it is about, then its round buttons. */
+.ui-bar-end {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .ui-bar .ui-round {
   width: 32px;
   height: 32px;
-  margin-left: auto;
   background: transparent;
-}
-
-.ui-bar .ui-round + .ui-round {
-  margin-left: 0;
 }
 
 /* Pressed in, as the pin is while the window stays on top of other windows. */
@@ -2740,27 +2844,276 @@ a.button-pill {
   color: var(--link);
 }
 
+/*
+ * Buttons are capsules, their sides padded by four tenths of their height:
+ * 44 tall, or 32 for one beside a title. Filled in the page's blue, the
+ * one thing a sheet does; tinted, a lighter act; on a card of their own;
+ * and in red where what they do is not undone, its ink on a card or filled.
+ */
+.ui-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  height: 44px;
+  padding: 0 18px;
+  border: none;
+  border-radius: 22px;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+.ui-btn-wide {
+  display: flex;
+  width: 100%;
+}
+
+.ui-btn-m {
+  height: 32px;
+  padding: 0 13px;
+  border-radius: 16px;
+  font-size: 14px;
+  line-height: 18px;
+}
+
+.ui-btn-filled {
+  background: var(--link);
+  color: #ffffff;
+}
+
+.ui-btn-tinted {
+  background: var(--fill);
+  color: var(--link);
+}
+
+.ui-btn-card {
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  color: var(--label);
+}
+
+.ui-btn-danger {
+  color: var(--red-ink);
+}
+
+.ui-btn-filled.ui-btn-danger {
+  background: var(--red);
+  color: #ffffff;
+}
+
+/* A choice among a few: capsules, the chosen one filled; one led by a tile keeps a little room before it. */
+.ui-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ui-chip {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 32px;
+  padding: 0 13px;
+  border: none;
+  border-radius: 16px;
+  background: var(--fill);
+  font-size: 14px;
+  line-height: 18px;
+  font-weight: 500;
+}
+
+.ui-chip-led {
+  padding-left: 5px;
+}
+
+.ui-chip[aria-pressed='true'] {
+  background: var(--link);
+  color: #ffffff;
+}
+
+.ui-chip[aria-pressed='true'] > .tile {
+  box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.9);
+}
+
+/* A thing named among others, not to be pressed: its round tile, then its name. */
+.ui-token {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  height: 28px;
+  padding: 0 11px 0 3px;
+  border-radius: 14px;
+  background: var(--fill);
+  font-size: 13px;
+  line-height: 18px;
+}
+
+/*
+ * A sheet over a panel: a veil over all of it, and the sheet floating 6
+ * off its sides and foot, its corners the panel's less that; its head, its
+ * grabber, a title in the middle and round buttons of 32 16 into its
+ * corners, where they are concentric with them. What it holds scrolls
+ * under its head when it is taller than the panel lets it be.
+ */
+.ui-veil {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  padding: 0 6px 6px;
+  background: var(--veil);
+}
+
+.ui-sheet {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  max-height: calc(100% - 44px);
+  padding: 0 var(--margin) var(--margin);
+  overflow-y: auto;
+  scrollbar-width: none;
+  border-radius: calc(var(--panel-corner) - 6px);
+  background: var(--bg);
+  box-shadow: var(--sheet-shadow);
+}
+
+.ui-sheet > * {
+  flex: none;
+}
+
+.ui-grabber {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  width: 40px;
+  height: 4px;
+  margin-left: -20px;
+  border-radius: 2px;
+  background: var(--fill-strong);
+}
+
+/* Its head spans the sheet, so what scrolls under it is under it edge to edge. */
+.ui-sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr) 32px;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  margin: 0 calc(var(--margin) * -1);
+  padding: 16px var(--margin) 0;
+  background: var(--bg);
+}
+
+.ui-sheet-head > .ui-round {
+  width: 32px;
+  height: 32px;
+}
+
+.ui-sheet-title {
+  margin: 0;
+  text-align: center;
+  font-size: 15px;
+  line-height: 20px;
+  font-weight: 600;
+}
+
+/* Something typed: a box of one line on its own card, or a large one centred, and a box of several lines. */
+.ui-field,
+.ui-area {
+  width: 100%;
+  padding: 0 var(--text-inset);
+  border: none;
+  border-radius: var(--card-corner);
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+  outline: none;
+  color: var(--label);
+  font-size: 15px;
+  line-height: 20px;
+}
+
+.ui-field {
+  height: 46px;
+}
+
+.ui-field-big {
+  height: 52px;
+  text-align: center;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+/* It grows with what is typed where the browser can. */
+.ui-area {
+  padding-block: 12px;
+  resize: none;
+  field-sizing: content;
+}
+
+.ui-field:focus,
+.ui-area:focus {
+  box-shadow: 0 0 0 3px var(--ring);
+}
+
+.ui-field::placeholder,
+.ui-area::placeholder {
+  color: var(--secondary);
+  opacity: 0.8;
+}
+
 @supports (corner-shape: squircle) {
   .ui-panel {
     corner-shape: squircle;
     border-radius: calc(var(--panel-corner) * 1.6);
   }
 
-  .ui-card {
+  .ui-card,
+  .ui-field,
+  .ui-area {
     corner-shape: squircle;
     border-radius: calc(var(--card-corner) * 1.6);
+  }
+
+  .ui-sheet {
+    corner-shape: squircle;
+    border-radius: calc((var(--panel-corner) - 6px) * 1.6);
+  }
+
+  .ui-tile-24,
+  .ui-tile-28,
+  .ui-tile-40,
+  .ui-tile-44,
+  .ui-tile-56,
+  .ui-tile-68 {
+    corner-shape: squircle;
+    border-radius: 40%;
   }
 }
 
 /*
- * Her phone's window: a bar, her phone and a line under it, at the design's
- * size, with nothing around them; a window that can show what is behind it
- * does, and a browser's popup shows its own background. The bar floats 6
- * above her phone, and the line 8 under it.
+ * A window of hers has nothing painted around what it shows: a window that
+ * can show what is behind it does, and a browser's popup shows its own
+ * background.
  */
-body:has(> #root > .phone-window) {
+body:has(> #root > :is(.phone-window, .world-window)) {
   background: transparent;
 }
+
+/*
+ * Her phone's window: a bar, her phone and a line under it, at the design's
+ * size. The bar floats 6 above her phone, and the line 8 under it.
+ */
 
 .phone-window {
   width: 372px;
@@ -2921,32 +3274,6 @@ body:has(> #root > .phone-window) {
   font-size: 11.5px;
   line-height: 14px;
   font-weight: 500;
-}
-
-/* An app's tile, its corner a quarter of its size: on her home screen, at a row's start, and at the head of an app's page. */
-.phone-tile-home {
-  width: 56px;
-  height: 56px;
-  border-radius: 14px;
-}
-
-.phone-tile-row {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-}
-
-.phone-tile-header {
-  width: 68px;
-  height: 68px;
-  border-radius: 17px;
-}
-
-/* In dark, a hairline keeps a dark tile's shape on her wallpaper, a card or the screen. */
-.phone-tile-home,
-.phone-tile-row,
-.phone-tile-header {
-  box-shadow: var(--tile-edge);
 }
 
 /* A view of an app: its title, 16 under the status row, then its pieces. */
@@ -3419,11 +3746,6 @@ body:has(> #root > .phone-window) {
   left: var(--margin);
 }
 
-/* The chevron a little left of the circle's middle, where it looks centred. */
-.phone-thread-back svg {
-  margin-right: 2px;
-}
-
 .phone-thread-face {
   width: 40px;
   height: 40px;
@@ -3500,12 +3822,18 @@ body:has(> #root > .phone-window) {
   text-box: trim-both cap alphabetic;
 }
 
-/* Her app's views, as tabs floating 16 from the screen's sides and 22 from its foot. */
+/* Her app's views, as tabs floating 16 from the screen's sides and 22 from its foot, sharing its width. */
 .phone-tabs {
   position: absolute;
   left: var(--margin);
   right: var(--margin);
   bottom: 22px;
+}
+
+.phone-tabs > .ui-tab {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 2px;
 }
 
 /* What rings, over everything: its icon on the warning's tint, the word above the time, the time, its title, and Ringing. */
@@ -3584,19 +3912,374 @@ body:has(> #root > .phone-window) {
   opacity: 0.28;
 }
 
-/* Her phone's bezel and her apps' tiles take the continuous corner too: the bezel's 1.6 times as large, a tile's 40% of its size. */
+/* Her phone's bezel takes the continuous corner too, 1.6 times as large. */
 @supports (corner-shape: squircle) {
   .phone {
     corner-shape: squircle;
     border-radius: calc(46px * 1.6);
   }
+}
 
-  .phone-tile-home,
-  .phone-tile-row,
-  .phone-tile-header {
-    corner-shape: squircle;
-    border-radius: 40%;
-  }
+/*
+ * Her world's window: a bar, and under it a panel to the window's foot, at
+ * the design's size. The bar floats 6 above the panel; on the panel, what
+ * scrolls, the tabs floating 16 off its foot, and a sheet over both.
+ */
+.world-window {
+  width: 420px;
+  height: 792px;
+  margin: 0 auto;
+  padding: 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.world-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  box-shadow: var(--float-shadow);
+  line-height: 20px;
+}
+
+/* Said in the panel, in the middle, when her world cannot be shown. */
+.world-said {
+  margin: auto 0;
+  padding: 0 var(--margin);
+  text-align: center;
+  font-size: 15px;
+  line-height: 21px;
+  color: var(--secondary);
+  overflow-wrap: anywhere;
+}
+
+/*
+ * What scrolls keeps 22 above its top line and dissolves over them, so the
+ * line is whole at rest. It keeps the tabs' room, 94, at its end, and
+ * dissolves from 90 above the panel's foot to the tabs' middle, 43 above
+ * it, so nothing of it shows below the tabs.
+ */
+.world-scroll {
+  --fade-top: 22px;
+  --fade-foot: 47px;
+  --fade-gone: 43px;
+  padding-top: 22px;
+  padding-bottom: 94px;
+}
+
+/* Cards stand 18 under the top line and 12 apart; a list 22 under what is above it. */
+.world-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.world-scroll > .ui-section {
+  margin-top: 22px;
+}
+
+/* The tabs: a capsule as wide as its tabs, each 84 at least, in the panel's middle. */
+.world-tabs {
+  position: absolute;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+}
+
+.world-tabs > .ui-tab {
+  min-width: 84px;
+  padding: 0 12px;
+}
+
+/* A name on a row's one line, cut short where it must, with its words in semibold where it names what a line is about. */
+.world-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-name > b {
+  font-weight: 600;
+}
+
+/* A card whose rows begin with a tile or a face of 28: its lines start at their words. */
+.world-lead-28 {
+  --words-start: calc(var(--text-inset) + 28px + 10px);
+}
+
+/* The person, in a line of the journal: their icon on the page's blue. */
+.world-you {
+  background: var(--link);
+}
+
+/* Faces side by side, each ringed in the card's colour, a little over the one before. */
+.world-faces {
+  flex: none;
+  display: inline-flex;
+}
+
+.world-faces > .face {
+  box-shadow: 0 0 0 2px var(--card);
+}
+
+.world-faces > .face-line + .face-line {
+  margin-left: -6px;
+}
+
+.world-faces > .face-crowd + .face-crowd {
+  margin-left: -5px;
+}
+
+.world-faces-bar {
+  padding-right: 4px;
+}
+
+/* Now: a place's head on a wash of its tint, opening the place; who is there, under a line; and what is there, as tokens. */
+.world-here-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 14px var(--text-inset);
+  border: none;
+  background: color-mix(in srgb, var(--tint) 9%, var(--card));
+  color: var(--label);
+  text-align: left;
+}
+
+.world-here-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 20px;
+  line-height: 25px;
+  font-weight: 700;
+}
+
+.world-lined {
+  box-shadow: inset 0 1px 0 var(--divider);
+}
+
+/* Who is there: her face in the middle of a tile's room, so her name starts where the place's does. */
+.world-living {
+  --words-start: calc(var(--text-inset) + 44px + 12px);
+  gap: 12px;
+}
+
+.world-living > .face {
+  margin: 0 8px;
+}
+
+.world-living > .world-name {
+  font-weight: 600;
+}
+
+.world-tokens {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 12px var(--text-inset) 14px;
+}
+
+/* Places: a card a place, its tile, its name, who is there and a chevron, and under them its first things, how many more, and New. */
+.world-place {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 14px var(--text-inset);
+  border: none;
+  color: var(--label);
+  text-align: left;
+}
+
+.world-place-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  align-self: stretch;
+}
+
+.world-place-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 17px;
+  line-height: 22px;
+  font-weight: 600;
+}
+
+.world-place-things {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  align-self: stretch;
+}
+
+.world-new {
+  margin-left: auto;
+}
+
+/* A place: its tile and its name, large, 16 under the top line. */
+.world-place-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding-top: 16px;
+}
+
+.world-place-title {
+  min-width: 0;
+  margin: 0;
+  font-size: 26px;
+  line-height: 31px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+/* A thing's card: its tile and its name, its note on a card of its own, its facts, and its button. */
+.world-thing-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 var(--text-inset);
+}
+
+.world-thing-name {
+  min-width: 0;
+  margin: 0;
+  font-size: 22px;
+  line-height: 27px;
+  font-weight: 700;
+  overflow-wrap: anywhere;
+}
+
+.world-note {
+  margin-top: 18px;
+  padding: 13px var(--text-inset);
+}
+
+.world-note > p {
+  margin: 0;
+  font-size: 16px;
+  line-height: 21px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.world-facts {
+  margin-top: 16px;
+}
+
+/* A fact: its label, whole up to seven tenths of the line, and its value at the line's end, each cut short where it must. */
+.world-fact > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-fact > :first-child {
+  flex: none;
+  max-width: 70%;
+}
+
+.world-fact-value {
+  margin-left: auto;
+  color: var(--secondary);
+}
+
+/* What the sheet does, 16 under what is above it, or 10 under what the daemon said of it; Cancel and Remove side by side. */
+.world-sheet-end {
+  margin-top: 16px;
+}
+
+.world-problem {
+  margin: 12px 0 0;
+  padding: 0 var(--text-inset);
+  font-size: 13px;
+  line-height: 18px;
+  color: var(--red-ink);
+  overflow-wrap: anywhere;
+}
+
+.world-problem + .world-sheet-end {
+  margin-top: 10px;
+}
+
+.world-confirm {
+  display: flex;
+  gap: 10px;
+}
+
+.world-confirm > .ui-btn {
+  flex: 1 1 0;
+}
+
+/* Leaving something: the name's box, then Kind and Where 18 apart, the note 20 under them. */
+.world-what {
+  margin-top: 14px;
+}
+
+.world-what ~ .ui-section {
+  margin-top: 18px;
+}
+
+.world-kinds {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px 0;
+  padding: 14px 8px 12px;
+}
+
+/* A kind: its tile over its name; the one chosen ringed in its tint, its name in the label's colour. */
+.world-kind {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--secondary);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.world-kind[aria-pressed='true'] {
+  color: var(--label);
+  font-weight: 600;
+}
+
+.world-kind[aria-pressed='true'] > .tile {
+  box-shadow:
+    0 0 0 2px var(--card),
+    0 0 0 4px var(--tint);
+}
+
+.world-kind-name {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-wheres {
+  padding: 0 var(--text-inset);
+}
+
+.world-note-box {
+  min-height: 68px;
+  margin-top: 20px;
 }
 
 /* A person who asked for less motion gets none: the card that asks is simply there, and simply gone. */

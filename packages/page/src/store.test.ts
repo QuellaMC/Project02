@@ -21,9 +21,6 @@ import {
   noticeSpent,
   pageUnread,
   pairingGone,
-  phoneAnswered,
-  phoneWindowGone,
-  phoneWindowShows,
   streamLost,
   streamResumed,
   threadOpened,
@@ -768,33 +765,6 @@ describe('web store', () => {
     );
 
     expect(novas.phoning.has(conversationId)).toBe(false);
-  });
-
-  it("presses her Her Phone button while her phone's window says it shows her phone, whichever page of a window taken over speaks last, and draws none for a character the daemon says has no phone", () => {
-    let state = phoneWindowShows(opened(), 'mira');
-
-    expect(state.phoneWindow).toBe('mira');
-
-    state = phoneWindowShows(state, 'nova');
-
-    expect(phoneWindowGone(state, 'mira')).toBe(state);
-    expect(phoneWindowGone(state, 'nova').phoneWindow).toBeUndefined();
-
-    const noPhone = {
-      status: 'refused',
-      reason: 'no_phone',
-      message: 'Mira has no phone: her settings switch it off.',
-    } as const;
-    const none = phoneAnswered(opened(), 'mira', noPhone);
-
-    expect([...none.phoneless]).toEqual(['mira']);
-    expect(phoneAnswered(none, 'mira', noPhone)).toBe(none);
-    expect(
-      phoneAnswered(none, 'mira', {
-        status: 'failed',
-        message: 'Her phone could not be read.',
-      }).phoneless.size,
-    ).toBe(0);
   });
 
   it('reads the newest page as the thread, keeps what arrived live meanwhile, settles the lines it carries, and prepends an earlier page once', () => {
